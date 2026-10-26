@@ -34,6 +34,8 @@ pub(crate) struct DeploymentFeasibility {
     terminal_verifier_barrier: bool,
     /// Source identity for the public, inventory-free endpoint lifetime declaration.
     registry_digest: Option<String>,
+    /// Only an explicit versioned acquisition profile may use compound conditions.
+    compound_observation: BTreeSet<domain::NodeId>,
 }
 
 /// Check whether concurrent Roles of one Task can use distinct configured endpoints.
@@ -91,6 +93,7 @@ impl DeploymentFeasibility {
             live_operations: snapshot.live_operations,
             terminal_verifier_barrier: snapshot.terminal_verifier_barrier,
             registry_digest: snapshot.registry_digest,
+            compound_observation: snapshot.compound_observation,
         })
     }
 
@@ -339,7 +342,11 @@ impl DeploymentFeasibility {
                         intent.parameters().len(),
                         intent.parameters().get("expected"),
                     ) {
-                        (1, Some(domain::ExecutionValue::String(value))) => value,
+                        (1, Some(domain::ExecutionValue::String(value)))
+                            if value.chars().count() <= 512 =>
+                        {
+                            value
+                        }
                         _ => {
                             return Err(PlanIssue::new(
                                 "deployment.intent_invalid",
@@ -348,7 +355,12 @@ impl DeploymentFeasibility {
                             ));
                         }
                     };
-                    let entity = condition
+                    let (detection, arrival) = condition
+                        .split_once(" AND ")
+                        .map_or((condition.as_str(), None), |(left, right)| {
+                            (left, Some(right))
+                        });
+                    let entity = detection
                         .strip_prefix("detected(")
                         .and_then(|value| value.strip_suffix(')'))
                         .filter(|value| {
@@ -363,6 +375,17 @@ impl DeploymentFeasibility {
                                 "observation condition is outside the local read-only profile",
                             )
                         })?;
+                    if arrival.is_some_and(|arrival| {
+                        self.compound_observation.is_empty()
+                            || intent.operation().to_string() != "observation.acquire@v1"
+                            || arrival != format!("at({entity})")
+                    }) {
+                        return Err(PlanIssue::new(
+                            "deployment.intent_invalid",
+                            format!("{role_path}/execution_intent/parameters/expected"),
+                            "compound acquisition needs a published same-entity arrival condition profile",
+                        ));
+                    }
                     if !self
                         .entries
                         .keys()
@@ -378,6 +401,9 @@ impl DeploymentFeasibility {
                         .iter()
                         .filter(|(_, operations)| {
                             operations.contains(&intent.operation().to_string())
+                        })
+                        .filter(|(node, _)| {
+                            arrival.is_none() || self.compound_observation.contains(*node)
                         })
                         .map(|(node, _)| node.clone())
                         .collect::<BTreeSet<_>>();
@@ -651,6 +677,58 @@ mod tests {
         seal(&mut document);
         std::fs::write(path, document.to_string()).unwrap();
         DeploymentFeasibility::load(path).unwrap()
+    }
+
+    /// A compound observation is admitted only by the exact endpoint's published condition profile.
+    #[test]
+    fn compound_observation_requires_explicit_endpoint_support() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("deployment.json");
+        let old = composition_deployment(&path);
+        let mut body = composition_fixture()["plan"].clone();
+        let roles = body["tasks"][0]["roles"].as_array_mut().unwrap();
+        for role in roles {
+            role["execution_intent"]["operation"] =
+                serde_json::json!({"namespace":"observation","name":"acquire","version":"v1"});
+            role["execution_intent"]["parameters"] =
+                serde_json::json!({"expected":"detected(landmark-a) AND at(landmark-a)"});
+        }
+        let plan = decode_mission_plan(&body.to_string()).unwrap();
+        let group = domain::ExecutionGroupId::new("compound").unwrap();
+        assert!(old.restrictions_for_plan(&plan, &group).is_err());
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        document["execution_profile"]["mode"] = "independent-live/v0.2".into();
+        for endpoint in document["execution_profile"]["endpoints"]
+            .as_array_mut()
+            .unwrap()
+        {
+            endpoint["condition_format"] = "detected(entity-ref) [AND at(same-entity-ref)]".into();
+        }
+        seal(&mut document);
+        std::fs::write(&path, document.to_string()).unwrap();
+        let current = DeploymentFeasibility::load(&path).unwrap();
+        assert!(current.restrictions_for_plan(&plan, &group).is_ok());
+        body["tasks"][0]["roles"][0]["execution_intent"]["parameters"]["expected"] =
+            "detected(landmark-a) AND at(landmark-b)".into();
+        let wrong = decode_mission_plan(&body.to_string()).unwrap();
+        assert!(current.restrictions_for_plan(&wrong, &group).is_err());
+        document["execution_profile"]["endpoints"][0]["condition_format"] =
+            "detected(entity-ref)".into();
+        seal(&mut document);
+        std::fs::write(&path, document.to_string()).unwrap();
+        let mixed = DeploymentFeasibility::load(&path).unwrap();
+        let restricted = mixed.restrictions_for_plan(&plan, &group).unwrap();
+        assert_eq!(
+            restricted[0].1,
+            BTreeSet::from([domain::NodeId::new("node-b").unwrap()])
+        );
+        document["execution_profile"]["endpoints"][1]["condition_format"] =
+            "detected(entity-ref)".into();
+        seal(&mut document);
+        std::fs::write(&path, document.to_string()).unwrap();
+        let unsupported = DeploymentFeasibility::load(&path).unwrap();
+        assert!(unsupported.restrictions_for_plan(&plan, &group).is_err());
     }
 
     /// Publishes a synthetic complete-goal feed without generating any world verdict.

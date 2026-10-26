@@ -408,7 +408,7 @@ def test_acquisition_registration_cannot_claim_a_different_condition_format(tmp_
     path = scenario / "node-a.toml"
     path.write_text(
         path.read_text().replace(
-            'condition-format = "detected(entity-ref)"',
+            'condition-format = "detected(entity-ref) [AND at(same-entity-ref)]"',
             'condition-format = "arbitrary-conjunction"',
         )
     )

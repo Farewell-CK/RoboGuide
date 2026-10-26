@@ -9,21 +9,36 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from .model import CanonicalObservationAcquisitionInvocation, IntegrationError
+from .model import (
+    COMPOUND_OBSERVATION_FORMAT,
+    CanonicalObservationAcquisitionInvocation,
+    IntegrationError,
+)
 
 OBSERVATION_CONTROL_PROFILE = "bounded-visual-feedback/v0.1"
 MAX_OBSERVATION_PAUSE_STEPS = 16
 
 
-def observation_control_declaration() -> dict[str, Any]:
+def observation_control_declaration(*, compound: bool = False) -> dict[str, Any]:
     """Publish the actual local feedback and pause contract without promising visibility."""
     return {
-        "profile": OBSERVATION_CONTROL_PROFILE,
+        "profile": "bounded-visual-feedback/v0.2" if compound else OBSERVATION_CONTROL_PROFILE,
         "observation_source": "existing-gym-observation",
         "max_pause_simulator_steps": MAX_OBSERVATION_PAUSE_STEPS,
         "pause_bound": "minimum-of-profile-limit-and-original-remaining-budget",
         "condition_persistence_guaranteed": False,
         "official_success_authority": "habitat-pddl",
+        **(
+            {
+                "condition_format": COMPOUND_OBSERVATION_FORMAT,
+                "arrival_source": "loaded-original-base-transform-and-goal-position",
+                "arrival_completion": "same-sample-as-detection",
+                "navigation_skill_completion_is_arrival": False,
+                "intermediate_departure_allowed": True,
+            }
+            if compound
+            else {}
+        ),
     }
 
 
@@ -87,6 +102,20 @@ class ObservationAcquisitionControl:
             "sensor_scope": receipt["sensor_scope"],
             "unavailable_reason": str(receipt.get("unavailable_reason", ""))[:256] or None,
         }
+        if self.invocation.requires_arrival:
+            detected, arrived = (
+                receipt.get("detection_condition_holds"),
+                receipt.get("arrival_condition_holds"),
+            )
+            if status == "observed" and (
+                receipt.get("schema_version") != "roboguide.local-condition-observation/v0.2"
+                or type(detected) is not bool
+                or type(arrived) is not bool
+                or holds is not (detected and arrived)
+                or receipt.get("same_step_components") is not True
+            ):
+                raise IntegrationError("compound observation must join actual same-step components")
+            sample.update(detection_condition_holds=detected, arrival_condition_holds=arrived)
         if (
             self._sample is not None
             and step == self._sample["simulator_step"]
@@ -100,7 +129,7 @@ class ObservationAcquisitionControl:
         sample = self._sample
         elapsed = 0 if sample is None else sample["simulator_step"] - self.start_step
         return {
-            **observation_control_declaration(),
+            **observation_control_declaration(compound=self.invocation.requires_arrival),
             "invocation_digest": "sha256:" + self.invocation.request_key(),
             "mission_id": self.invocation.mission_id,
             "task_id": self.invocation.task_id,

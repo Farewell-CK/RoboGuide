@@ -36,6 +36,25 @@ _MISSING = object()
 _LOG = logging.getLogger(__name__)
 
 
+def permits_terminal_arrival(
+    reference: Point3, target: Point3, radius: float, margin: float
+) -> bool:
+    """Check only a requested terminal stance, retaining its existing stopping uncertainty.
+
+    This necessary geometric envelope is neither a route nor a visibility
+    certificate, and imposes no constraint on intermediate robot positions.
+    """
+    if (
+        any(not math.isfinite(value) for value in reference + target)
+        or not math.isfinite(radius)
+        or radius <= 0
+        or not math.isfinite(margin)
+        or margin < 0
+    ):
+        raise IntegrationError("compound acquisition arrival envelope is unavailable")
+    return math.dist(reference, target) + margin < radius
+
+
 def supports_viewpoint_recovery(scan: ViewScanSpec) -> bool:
     """Gate only on a loaded supported control; this does not prove any candidate is feasible."""
     from .view_scan import _original_base_types
@@ -83,6 +102,7 @@ class NativeViewpointGeometry:
         if len(matches) != 1:
             raise IntegrationError("observation viewpoint target does not resolve uniquely")
         self.navigation, self.scan = navigation, scan
+        self.require_arrival = False
         self.target_index = matches[0]
         self.entity = navigation._poss_entities[self.target_index]
         self.center = point3(navigation._task.pddl_problem.sim_info.get_entity_pos(self.entity))
@@ -258,6 +278,15 @@ class NativeViewpointGeometry:
         transform = mn.Matrix4.from_(
             rotation.to_matrix(), mn.Vector3(point) - rotation.transform_vector(offset)
         )
+        if self.require_arrival:
+            # The requested terminal stance must satisfy the explicit own-arrival
+            # condition. This does not restrict intermediate physical movement.
+            radius = float(self.navigation._task.pddl_problem.sim_info.robot_at_thresh)
+            margin = float(self.navigation._config.dist_thresh)
+            if not permits_terminal_arrival(
+                point3(transform.translation), self.center, radius, margin
+            ):
+                return False
         # Preserve any existing navigation controller's independently declared
         # any_at envelope; this is compatibility, never a new success verdict.
         record = getattr(self.navigation, "_roboguide_selections", {}).get(self.target_index, {})
@@ -371,6 +400,7 @@ class ObservationViewpointRecovery:
             geometry = NativeViewpointGeometry(
                 self.navigation, self.scan, self.control.invocation.object_ref
             )
+            geometry.require_arrival = self.control.invocation.requires_arrival
             selected = select_viewpoint(
                 geometry.start,
                 geometry.center,

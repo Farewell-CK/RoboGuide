@@ -1879,6 +1879,17 @@ choices nor guarantees persistent effects. Already-observed acquisition needs no
 or motion. A guarded fresh acquisition navigation call rearms only its endpoint's original
 completed-command latches; arrival is recomputed by the original action with its target cache,
 pathfinder and budgets intact. It never writes a true sensor value or establishes visibility.
+
+ADR-0223 adds explicit Local How v0.17 / feedback v0.2 compound acquisition syntax,
+frozen by `observation_conditions.py` from exact Node configurations. Controller live profile v0.2
+checks per-endpoint support; legacy syntax acquires no arrival requirement. Same-step cached
+detection and actual own 3D arrival are separate observations, never persistent/official truth.
+Viewpoint selection checks only an explicitly requested terminal envelope, permits intermediate
+departure, and does not generate return commands or renew budgets. ADR-0222 separately declares
+integrated relocation base-floor access under operation-admission v0.2; only known differing floors
+and an explicit false transition capability exclude candidates. Unknown remains unknown.
+Published-plan validation supplies logical draft feedback through the existing bounded MI recovery,
+without live inventory, fixed workflows, executor selection, or new Core/Plan/Node authority.
 Earlier Local How versions retain their own semantics. Default-off pre-dispatch
 Stage2 model reselection remains separately bounded (at most three per
 bound attempt; no Provider retry or action rewriting). Reset geometry v0.4 is neutral,

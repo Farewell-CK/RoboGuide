@@ -204,7 +204,10 @@ def freeze_deployment(
             )
             if profile.get("attributes", {}).get("viewpoint-positioning") != mode:
                 raise ValueError("observation positioning differs from registered mobility")
-            if profile.get("attributes", {}).get("condition-format") != "detected(entity-ref)":
+            if profile.get("attributes", {}).get("condition-format") not in {
+                "detected(entity-ref)",
+                "detected(entity-ref) [AND at(same-entity-ref)]",
+            }:
                 raise ValueError("observation condition format differs from the local profile")
             if (
                 not declaration.enable_observation_acquisition

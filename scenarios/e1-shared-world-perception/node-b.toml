@@ -117,7 +117,7 @@ base = {}
 contract = "observation.acquire@v1"
 kind = "observation"
 owner = "habitat-local-eaios"
-attributes = { acquisition-mode = "bounded-active", condition-format = "detected(entity-ref)", sensing-modality = "visual", moves-observer = true, max-observation-cycles = 256, viewpoint-positioning = "flight", camera-model = "fixed-primary-pinhole/v0.1", camera-height-above-base-m = 1.5, camera-forward-offset-m = 0.0, camera-forward-elevation-degrees = -45.0, camera-horizontal-fov-degrees = 90.0, camera-vertical-fov-degrees = 90.0, camera-pan-tilt-supported = false }
+attributes = { acquisition-mode = "bounded-active", condition-format = "detected(entity-ref) [AND at(same-entity-ref)]", sensing-modality = "visual", moves-observer = true, max-observation-cycles = 256, viewpoint-positioning = "flight", camera-model = "fixed-primary-pinhole/v0.1", camera-height-above-base-m = 1.5, camera-forward-offset-m = 0.0, camera-forward-elevation-degrees = -45.0, camera-horizontal-fov-degrees = 90.0, camera-vertical-fov-degrees = 90.0, camera-pan-tilt-supported = false }
 
 [capability_profiles.readiness]
 state_pointer = "/state"

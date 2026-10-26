@@ -170,6 +170,18 @@ in the accepted plan. Neither substitutes for the other. This reserves no future
 later Proposal, Commit and Bind still check current facts, and capability withdrawal never silently
 migrates an existing Actor binding.
 
+The optional relocation deployment explicitly declares its Local How floor-access precondition
+under [ADR-0222](../../decisions/0222-relocation-floor-access-feedback.md). Same-reset known floor
+facts may narrow candidates; unknown facts never exclude one. MI receives logical contract errors
+through existing read-only plan validation and bounded draft recovery, without live inventory or
+an authored allocation answer.
+
+[ADR-0223](../../decisions/0223-compound-observation-acquisition.md) permits an explicitly published
+observation acquisition with a terminal arrival condition. Local completion checks cached detection
+and the actual own position at the same step. It neither latches past success nor imposes continuous
+residence or replaces the independent official verifier. Models still choose organization and actions;
+Local How executes only the committed condition contract.
+
 This is an existing optional deployment, not a Habitat dependency for every RoboGuide Node. One separate
 Habitat process owns a shared world, with agent endpoints exposed through configured Node Services.
 

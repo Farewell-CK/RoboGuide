@@ -26,6 +26,8 @@ pub(super) struct FrozenFeasibilitySnapshot {
     pub(super) terminal_verifier_barrier: bool,
     /// Exact registry source identity, retained without exposing endpoint bindings to MI.
     pub(super) registry_digest: Option<String>,
+    /// Explicit live v0.2 declares compound acquisition rather than inferring support.
+    pub(super) compound_observation: BTreeSet<domain::NodeId>,
 }
 
 impl FrozenFeasibilitySnapshot {
@@ -386,6 +388,24 @@ impl FrozenFeasibilitySnapshot {
             operation_admission,
             live_operations,
             terminal_verifier_barrier,
+            compound_observation: body
+                .get("execution_profile")
+                .filter(|profile| profile["mode"] == "independent-live/v0.2")
+                .and_then(|profile| profile["endpoints"].as_array())
+                .into_iter()
+                .flatten()
+                .filter(|endpoint| {
+                    endpoint["condition_format"] == "detected(entity-ref) [AND at(same-entity-ref)]"
+                })
+                .map(|endpoint| {
+                    domain::NodeId::new(
+                        endpoint["node_id"]
+                            .as_str()
+                            .expect("validated live endpoint"),
+                    )
+                    .expect("validated Node identity")
+                })
+                .collect(),
             registry_digest: body
                 .get("execution_profile")
                 .and_then(|profile| profile["registry_digest"].as_str())
@@ -424,9 +444,11 @@ fn load_live_endpoints(
     let profile = value
         .as_object()
         .ok_or("live execution profile is not an object")?;
-    if profile.keys().map(String::as_str).collect::<BTreeSet<_>>()
-        != BTreeSet::from(["mode", "registry_digest", "endpoints"])
-        || profile["mode"] != "independent-live/v0.1"
+    let compound =
+        profile.get("mode").and_then(serde_json::Value::as_str) == Some("independent-live/v0.2");
+    let fields = BTreeSet::from(["mode", "registry_digest", "endpoints"]);
+    if profile.keys().map(String::as_str).collect::<BTreeSet<_>>() != fields
+        || (!compound && profile["mode"] != "independent-live/v0.1")
         || !valid_prefixed_sha256(profile["registry_digest"].as_str().unwrap_or_default())
     {
         return Err("live execution profile identity is invalid".into());
@@ -442,9 +464,11 @@ fn load_live_endpoints(
         let record = endpoint
             .as_object()
             .ok_or("live endpoint is not an object")?;
-        if record.keys().map(String::as_str).collect::<BTreeSet<_>>()
-            != BTreeSet::from(["node_id", "agent_id", "operations"])
-        {
+        let mut fields = BTreeSet::from(["node_id", "agent_id", "operations"]);
+        if compound {
+            fields.insert("condition_format");
+        }
+        if record.keys().map(String::as_str).collect::<BTreeSet<_>>() != fields {
             return Err("live endpoint fields are invalid".into());
         }
         let node = domain::NodeId::new(record["node_id"].as_str().unwrap_or_default())
@@ -472,6 +496,23 @@ fn load_live_endpoints(
         }
         if operations.is_empty() || result.insert(node, operations).is_some() {
             return Err("live endpoint repeats an identity or lacks operations".into());
+        }
+        if compound {
+            let acquired = declared
+                .iter()
+                .any(|operation| operation == "observation.acquire@v1");
+            let condition = &record["condition_format"];
+            if (acquired
+                && !matches!(
+                    condition.as_str(),
+                    Some("detected(entity-ref)" | "detected(entity-ref) [AND at(same-entity-ref)]")
+                ))
+                || (!acquired && !condition.is_null())
+            {
+                return Err(
+                    "live acquisition condition support differs from declared operations".into(),
+                );
+            }
         }
     }
     if result.keys().cloned().collect::<BTreeSet<_>>() != node_agents.keys().cloned().collect() {

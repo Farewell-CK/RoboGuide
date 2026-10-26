@@ -10,7 +10,7 @@ Proposal/Commit/Bind 与 Task satisfaction/release 权限保持原有边界。�
 | `observation.acquire@v1` | 本地有界接近指定实体与观察 | 当前原始缓存明确检测到该实体 |
 | Contract recovery | 执行前要求模型重新选择 | 新返回的 action 独立通过相同 Guard |
 
-acquire 的唯一参数是 `expected=detected(entity-ref)`。当前 profile 没有独立相机云台、
+acquire 的唯一参数为 `expected`；旧 profile 仅支持 `detected(entity-ref)`。当前 profile 没有独立相机云台、
 全场搜索或任意动作控制能力；预算也不证明超时目标不可能达到。新的 capability attributes
 只有来源明确的 acquisition mode、visual modality、允许移动与本地 cycle 上限。
 运动方式复用 Node 已有的 `base-type`（如 legged/flying），完整投影到 MI capability class；
@@ -19,10 +19,19 @@ typed capability constraints 做 Matching；逻辑 Actor 名称和文字描述�
 已有固定主相机声明的部署在注册和 MI capability class 中携带真实光学标量；其他相机、
 未提供的控制能力与可见性保持未知，MI 不得猜测。
 
-当前检测能力通过注册的 `condition-format=detected(entity-ref)` 声明精确参数格式，
+旧检测能力通过注册的 `condition-format=detected(entity-ref)` 声明精确参数格式，
 该字段完整进入 MI capability class。acquire 的完成条件仅为检测成立；接近实体是
 本地采集手段，并不证明已到达目的地。需要同时到达和检测的 Mission 仍须保留独立的
-移动意图和 satisfaction 要求，不能将任意联合目标填入这个部署的 `expected` 参数。
+移动意图和 satisfaction 要求，不能将任意联合目标填入旧部署的 `expected` 参数。
+
+[ADR-0223](../decisions/0223-compound-observation-acquisition.md) 增加显式 Local How v0.17 /
+feedback v0.2。声明 `condition-format=detected(entity-ref) [AND at(same-entity-ref)]` 的端点可接受
+精确同实体的可选终态 conjunction；verify 仍只读检测。`observation_conditions.py` 将每个端点
+的真实 Node 配置摘要与支持语法冻结，live profile v0.2、Controller、归档前检分别核对。
+缺少声明不会获得该能力，混合端点只允许实际声明支持者接收 conjunction。
+完成需同一步的真实检测缓存和自身 3D 到达事实，不能把两次读数锁存为联合成功；
+中途离开允许，最终独立官方 verifier 仍保留。视点候选只核对被请求的终态 envelope，
+不自动添加返航指令、不续预算、不修改原模型动作。该能力是可选语义合同，不是固定 Task 分解。
 
 deployment v0.4 增加 `enable_observation_acquisition`、
 `observation_acquisition_max_steps`（1–4096）与 `contract_recovery_attempts`（0–3）。
@@ -30,7 +39,7 @@ deployment v0.4 增加 `enable_observation_acquisition`、
 语义相机和导航技能可用。默认 Python adapter 开关关闭。新的感知/重排 deployment
 模板显式选择本轮开发配置，旧冻结运行继续使用自己的旧模板。
 
-开启 acquisition 的当前代码输出 Local How v0.16，保留 v0.11 的闭合
+旧 condition 声明的 acquisition 输出 Local How v0.16，保留 v0.11 的闭合
 `observation_control=bounded-visual-feedback/v0.1` 声明。每次真实模型动作请求包含最新的
 缓存 true/false/unavailable、原 Task/attempt/world/entity、sample step 和原始剩余预算；
 读取不到保持 unavailable，同 step 冲突、跨 attempt/world 或时间回退拒绝。初始已有真实

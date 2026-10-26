@@ -117,7 +117,10 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             execution_options["enable_observation_acquisition"]
             or execution_options["contract_recovery_attempts"] > 0
         )
-        optics_recovery = actual_schema == "roboguide.habitat-local-how-profile/v0.16"
+        compound_observation = actual_schema == "roboguide.habitat-local-how-profile/v0.17"
+        optics_recovery = (
+            compound_observation or actual_schema == "roboguide.habitat-local-how-profile/v0.16"
+        )
         viewpoint_recovery = (
             optics_recovery or actual_schema == "roboguide.habitat-local-how-profile/v0.15"
         )
@@ -125,12 +128,14 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             "roboguide.habitat-local-how-profile/v0.14",
             "roboguide.habitat-local-how-profile/v0.15",
             "roboguide.habitat-local-how-profile/v0.16",
+            "roboguide.habitat-local-how-profile/v0.17",
         }
         view_search = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.13",
             "roboguide.habitat-local-how-profile/v0.14",
             "roboguide.habitat-local-how-profile/v0.15",
             "roboguide.habitat-local-how-profile/v0.16",
+            "roboguide.habitat-local-how-profile/v0.17",
         }
         navigation_dispatch = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.12",
@@ -138,6 +143,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             "roboguide.habitat-local-how-profile/v0.14",
             "roboguide.habitat-local-how-profile/v0.15",
             "roboguide.habitat-local-how-profile/v0.16",
+            "roboguide.habitat-local-how-profile/v0.17",
         }
         observation_control = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.11",
@@ -146,6 +152,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             "roboguide.habitat-local-how-profile/v0.14",
             "roboguide.habitat-local-how-profile/v0.15",
             "roboguide.habitat-local-how-profile/v0.16",
+            "roboguide.habitat-local-how-profile/v0.17",
         }
         if viewpoint_recovery:
             from .view_recovery import view_recovery_declaration
@@ -192,7 +199,8 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
 
             if (
                 execution_options["enable_observation_acquisition"] is not True
-                or actual.get("observation_control") != observation_control_declaration()
+                or actual.get("observation_control")
+                != observation_control_declaration(compound=compound_observation)
                 or type(actual["observation_control"].get("max_pause_simulator_steps")) is not int
                 or type(actual["observation_control"].get("condition_persistence_guaranteed"))
                 is not bool
@@ -203,7 +211,9 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             not in {"roboguide.e1.b1-deployment-used/v0.3", "roboguide.e1.b1-deployment-used/v0.4"}
             or actual_schema
             != (
-                "roboguide.habitat-local-how-profile/v0.16"
+                "roboguide.habitat-local-how-profile/v0.17"
+                if compound_observation
+                else "roboguide.habitat-local-how-profile/v0.16"
                 if optics_recovery
                 else "roboguide.habitat-local-how-profile/v0.15"
                 if viewpoint_recovery

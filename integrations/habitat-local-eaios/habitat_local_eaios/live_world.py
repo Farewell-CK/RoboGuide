@@ -22,6 +22,7 @@ from .live_bindings import LivePolicyBindings as LivePolicyBindings
 from .live_coordinator import LiveWorldCoordinator as LiveWorldCoordinator
 from .live_session import LiveSlotLedger as LiveSlotLedger
 from .model import (
+    COMPOUND_OBSERVATION_FORMAT,
     OBSERVATION_ACQUIRE_OPERATION,
     OBSERVATION_OPERATION,
     CanonicalInvocation,
@@ -31,6 +32,7 @@ from .model import (
     IntegrationError,
 )
 from .navigation_dispatch import inspect_navigation_dispatch, navigation_dispatch_declaration
+from .observation_conditions import LEGACY_FORMAT, read_condition_declaration
 from .observation_control import (
     ObservationAcquisitionControl,
     observation_control_declaration,
@@ -129,6 +131,21 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 inspect_navigation_dispatch(environment, agent)
                 inspect_view_scan(environment, actor._active_policies[agent], agent)
         optics: dict[str, Any] = {}
+        condition_path = path.parent / "observation-condition-declaration.json"
+        formats = (
+            read_condition_declaration(condition_path, self.registry)
+            if condition_path.is_file()
+            else {
+                record["agent_id"]: LEGACY_FORMAT
+                if "observation.acquire@v1" in record["operations"]
+                else None
+                for record in self.registry["endpoints"]
+            }
+        )
+        self._compound_observers = {
+            agent for agent, value in formats.items() if value == COMPOUND_OBSERVATION_FORMAT
+        }
+        compound = bool(self._compound_observers)
         if acquisition:
             declared_optics = read_optics_declaration(
                 path.parent / "observation-optics-declaration.json", self.registry
@@ -199,13 +216,18 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 schema_version=LIVE_FEASIBILITY_SCHEMA,
                 finality_profile=FINALITY_PROFILE,
                 execution_profile={
-                    "mode": LIVE_PROFILE,
+                    "mode": "independent-live/v0.2" if compound else LIVE_PROFILE,
                     "registry_digest": self.registry["digest"],
                     "endpoints": [
                         {
                             "node_id": record["node_id"],
                             "agent_id": record["agent_id"],
                             "operations": record["operations"],
+                            **(
+                                {"condition_format": formats[record["agent_id"]]}
+                                if compound
+                                else {}
+                            ),
                         }
                         for record in self.registry["endpoints"]
                     ],
@@ -218,7 +240,9 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
         self._write_json(
             "local-how-profile.json",
             {
-                "schema_version": "roboguide.habitat-local-how-profile/v0.16"
+                "schema_version": "roboguide.habitat-local-how-profile/v0.17"
+                if compound
+                else "roboguide.habitat-local-how-profile/v0.16"
                 if acquisition
                 else "roboguide.habitat-local-how-profile/v0.10"
                 if recoveries
@@ -231,7 +255,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 "official_success_authority": "habitat-pddl",
                 **(
                     {
-                        "observation_control": observation_control_declaration(),
+                        "observation_control": observation_control_declaration(compound=compound),
                         "navigation_dispatch": navigation_dispatch_declaration(),
                         "observation_view_search": view_scan_declaration(),
                         "observation_motion_feedback": motion_feedback_declaration(),
@@ -463,6 +487,12 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                         )
                         continue
                     if isinstance(invocation, CanonicalObservationAcquisitionInvocation):
+                        if invocation.requires_arrival and agent not in getattr(
+                            self, "_compound_observers", set()
+                        ):
+                            raise IntegrationError(
+                                "endpoint has no declared compound acquisition support"
+                            )
                         if not getattr(self._config, "enable_observation_acquisition", False):
                             raise IntegrationError("active observation profile is disabled")
                         acquisition_starts[agent] = steps

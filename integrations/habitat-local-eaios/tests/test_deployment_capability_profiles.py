@@ -90,7 +90,7 @@ def test_perception_planning_preserves_registered_platform_and_observation_modes
             assert capability["attributes"] == registered[key]
         mobility = registered["mobility.move@v1"]
         acquired = registered["observation.acquire@v1"]
-        assert acquired["condition-format"] == "detected(entity-ref)"
+        assert acquired["condition-format"] == "detected(entity-ref) [AND at(same-entity-ref)]"
         assert registered["observation.verify@v1"]["condition-format"] == "detected(entity-ref)"
         assert acquired["viewpoint-positioning"] == (
             "flight" if mobility["base-type"] == "flying" else "ground"

@@ -17,6 +17,7 @@ SUPPORTED_OPERATIONS = ("mobility.navigate@v1", "mobility.move@v1")
 RELOCATION_OPERATION = "object.relocate@v1"
 OBSERVATION_OPERATION = "observation.verify@v1"
 OBSERVATION_ACQUIRE_OPERATION = "observation.acquire@v1"
+COMPOUND_OBSERVATION_FORMAT = "detected(entity-ref) [AND at(same-entity-ref)]"
 EXECUTION_SESSION_SCHEMA = "roboguide.execution-session/v0.1"
 
 
@@ -411,12 +412,25 @@ class CanonicalObservationInvocation(CanonicalMobilityInvocation):
         parameters = body["parameters"]
         assert isinstance(parameters, dict)
         expected = parameters["expected"]
+        detected = expected
+        if isinstance(expected, str) and " AND " in expected:
+            detected, separator, arrival = expected.partition(" AND ")
+            if (
+                not issubclass(cls, CanonicalObservationAcquisitionInvocation)
+                or not separator
+                or not detected.startswith("detected(")
+                or arrival != f"at({detected[9:-1]})"
+            ):
+                raise IntegrationError(
+                    "compound acquisition requires detected(entity) AND at(same-entity)"
+                )
         if (
-            not isinstance(expected, str)
-            or not expected.startswith("detected(")
-            or not expected.endswith(")")
-            or not expected[9:-1].strip()
-            or any(character in expected[9:-1] for character in "()\n\r")
+            not isinstance(detected, str)
+            or not detected.startswith("detected(")
+            or not detected.endswith(")")
+            or not detected[9:-1].strip()
+            or any(character in detected[9:-1] for character in "()\n\r")
+            or not isinstance(expected, str)
             or len(expected) > 512
         ):
             raise IntegrationError("observation profile requires detected(entity-ref)")
@@ -437,7 +451,7 @@ class CanonicalObservationInvocation(CanonicalMobilityInvocation):
     @property
     def object_ref(self) -> str:
         """Return the named entity whose existing visual observation is requested."""
-        return str(self.parameters["expected"])[9:-1]
+        return str(self.parameters["expected"]).partition(" AND ")[0][9:-1]
 
     @property
     def destination(self) -> str:
@@ -452,6 +466,11 @@ class CanonicalObservationAcquisitionInvocation(CanonicalObservationInvocation):
     local profile may navigate to the named entity and inspect the original
     returned visual cache; it cannot substitute an entity or manipulate it.
     """
+
+    @property
+    def requires_arrival(self) -> bool:
+        """Return the explicit terminal condition without inferring one from free text."""
+        return " AND " in str(self.parameters["expected"])
 
 
 # Evaluated at import, including inside the Python 3.9 Habitat worker.

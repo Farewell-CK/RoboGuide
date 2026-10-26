@@ -7,7 +7,11 @@ from collections.abc import Mapping
 from numbers import Integral
 from typing import Any
 
-from .model import CanonicalObservationInvocation, IntegrationError
+from .model import (
+    CanonicalObservationAcquisitionInvocation,
+    CanonicalObservationInvocation,
+    IntegrationError,
+)
 
 OBSERVATION_SCHEMA = "roboguide.local-condition-observation/v0.1"
 MAX_DETECTED_IDS = 4096
@@ -147,6 +151,44 @@ def observe_detection(
             condition_holds=int(object_id) in value,
             simulator_semantic_object_id=int(object_id),
         )
+        if (
+            isinstance(invocation, CanonicalObservationAcquisitionInvocation)
+            and invocation.requires_arrival
+        ):
+            document.update(
+                schema_version="roboguide.local-condition-observation/v0.2",
+                detection_condition_holds=document["condition_holds"],
+                arrival_condition_holds=None,
+                condition_holds=None,
+                status="unavailable",
+            )
+            agent = environment.sim.get_agent_data(agent_id).articulated_agent
+            reference = tuple(float(value) for value in agent.base_transformation.translation)
+            target = tuple(float(value) for value in sim_info.get_entity_pos(entities[0]))
+            threshold = sim_info.robot_at_thresh
+            if (
+                len(reference) != 3
+                or len(target) != 3
+                or any(not math.isfinite(value) for value in reference + target)
+                or isinstance(threshold, bool)
+                or not isinstance(threshold, (int, float))
+                or not math.isfinite(threshold)
+                or threshold <= 0
+            ):
+                raise ValueError("compound acquisition arrival geometry is unavailable")
+            distance = math.dist(reference, target)
+            arrived = distance <= threshold
+            document.update(
+                status="observed",
+                arrival_condition_holds=arrived,
+                condition_holds=document["detection_condition_holds"] and arrived,
+                arrival_source="loaded-original-base-transform-and-goal-position",
+                arrival_reference_position=list(reference),
+                arrival_target_position=list(target),
+                arrival_distance_m=distance,
+                arrival_tolerance_m=threshold,
+                same_step_components=True,
+            )
     except Exception as error:  # noqa: BLE001 - a failed read is not invented world truth
         document["unavailable_reason"] = str(error)[:256]
     return document

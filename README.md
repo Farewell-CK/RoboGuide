@@ -27,6 +27,11 @@
 
 ## 历史切片与演进记录
 
+E1 部署合同的 [搬运楼层访问](docs/decisions/0222-relocation-floor-access-feedback.md) 与
+[联合观测采集](docs/decisions/0223-compound-observation-acquisition.md) 将明确的本地执行前提、
+同一步局部条件和有界计划反馈接入已有边界。它们不提供官方成功或真实物理验证证明；
+历史实验仍保留原代码与配置，新的物理结果须单独归档。
+
 以下各切片的版本、状态和剩余项保留其原时点；当前是否完成以上述唯一队列和总矩阵为准。
 
 [跨域 HA 部署接线](docs/development/replicated-federation-deployment-v0.1.md)显式传递原

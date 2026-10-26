@@ -188,6 +188,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     ):
         raise ValueError("live deployment is not bound to the frozen workload")
     identities: dict[str, set[Any]] = {key: set() for key in ("node_id", "port", "resource_id")}
+    condition_records = []
     for agent, record in enumerate(records):
         path = (run / f"node-{chr(97 + agent)}.toml").resolve()
         config = tomllib.loads(path.read_text())
@@ -198,6 +199,23 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         owner = owners[0]
         resource = resources[0]
         operations = config["operations"]
+        acquired = [
+            profile
+            for profile in config.get("capability_profiles", [])
+            if profile.get("contract") == "observation.acquire@v1"
+        ]
+        if len(acquired) > 1:
+            raise ValueError("acquisition condition declaration is ambiguous")
+        condition_format = (
+            acquired[0].get("attributes", {}).get("condition-format") if acquired else None
+        )
+        condition_records.append(
+            {
+                "agent_id": agent,
+                "node_config_digest": record["node_config_digest"],
+                "condition_format": condition_format,
+            }
+        )
         connections = [
             item for item in config["connections"] if item["local_system"] == owner["id"]
         ]
@@ -250,6 +268,24 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
             for record in records
         ],
     }
+    compound_observation = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.17"
+    declared_compound = any(
+        record["condition_format"] == "detected(entity-ref) [AND at(same-entity-ref)]"
+        for record in condition_records
+    )
+    if compound_observation != declared_compound:
+        raise ValueError("compound observation support differs from actual Node declarations")
+    if compound_observation:
+        expected_profile["mode"] = "independent-live/v0.2"
+        for endpoint, condition in zip(
+            expected_profile["endpoints"], condition_records, strict=True
+        ):
+            endpoint["condition_format"] = condition["condition_format"]
+        if load_document(run / "observation-condition-declaration.json") != {
+            "schema_version": "roboguide.observation-condition-declaration/v0.1",
+            "agents": condition_records,
+        }:
+            raise ValueError("observation condition artifact differs from frozen Node sources")
     if matrix.get("execution_profile") != expected_profile:
         raise ValueError("live execution profile differs from frozen registry")
     execution_options = {
@@ -285,7 +321,10 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     }
     if bound_relocation:
         expected_base["relocation_completion_profile"] = "exact-object-released-place/v0.1"
-    optics_recovery = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.16"
+    optics_recovery = (
+        compound_observation
+        or how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.16"
+    )
     viewpoint_recovery = (
         optics_recovery or how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.15"
     )
@@ -293,12 +332,14 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         "roboguide.habitat-local-how-profile/v0.14",
         "roboguide.habitat-local-how-profile/v0.15",
         "roboguide.habitat-local-how-profile/v0.16",
+        "roboguide.habitat-local-how-profile/v0.17",
     }
     view_search = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.13",
         "roboguide.habitat-local-how-profile/v0.14",
         "roboguide.habitat-local-how-profile/v0.15",
         "roboguide.habitat-local-how-profile/v0.16",
+        "roboguide.habitat-local-how-profile/v0.17",
     }
     navigation_dispatch = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.12",
@@ -306,6 +347,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         "roboguide.habitat-local-how-profile/v0.14",
         "roboguide.habitat-local-how-profile/v0.15",
         "roboguide.habitat-local-how-profile/v0.16",
+        "roboguide.habitat-local-how-profile/v0.17",
     }
     observation_control = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.11",
@@ -314,6 +356,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         "roboguide.habitat-local-how-profile/v0.14",
         "roboguide.habitat-local-how-profile/v0.15",
         "roboguide.habitat-local-how-profile/v0.16",
+        "roboguide.habitat-local-how-profile/v0.17",
     }
     if viewpoint_recovery:
         expected_recovery = {
@@ -417,12 +460,25 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         execution_options["enable_observation_acquisition"] is not True
         or how.get("observation_control")
         != {
-            "profile": "bounded-visual-feedback/v0.1",
+            "profile": "bounded-visual-feedback/v0.2"
+            if compound_observation
+            else "bounded-visual-feedback/v0.1",
             "observation_source": "existing-gym-observation",
             "max_pause_simulator_steps": 16,
             "pause_bound": "minimum-of-profile-limit-and-original-remaining-budget",
             "condition_persistence_guaranteed": False,
             "official_success_authority": "habitat-pddl",
+            **(
+                {
+                    "condition_format": "detected(entity-ref) [AND at(same-entity-ref)]",
+                    "arrival_source": "loaded-original-base-transform-and-goal-position",
+                    "arrival_completion": "same-sample-as-detection",
+                    "navigation_skill_completion_is_arrival": False,
+                    "intermediate_departure_allowed": True,
+                }
+                if compound_observation
+                else {}
+            ),
         }
     ):
         raise ValueError("loaded observation feedback/pause contract is invalid")
@@ -452,7 +508,9 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         }
         or how["schema_version"]
         != (
-            "roboguide.habitat-local-how-profile/v0.16"
+            "roboguide.habitat-local-how-profile/v0.17"
+            if compound_observation
+            else "roboguide.habitat-local-how-profile/v0.16"
             if optics_recovery
             else "roboguide.habitat-local-how-profile/v0.15"
             if viewpoint_recovery

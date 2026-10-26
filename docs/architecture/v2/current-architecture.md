@@ -161,6 +161,14 @@ ADR-0185 的 producer 对账保留实际仍存活且没有 scope-close 证据的
 operation 声明；二者不能互相替代。该检查不预订未来可用性，后续 Proposal、Commit、Bind
 仍检查当前事实，能力撤销不会自动迁移已有 Actor 绑定。
 
+可选搬运部署按 [ADR-0222](../../decisions/0222-relocation-floor-access-feedback.md)显式声明
+本地 floor-access 前提，并用同次 reset 的已知楼层收窄候选；unknown 不构成排除理由。
+MI 通过既有只读计划校验和有界草案恢复获取逻辑合同错误，不读取实时节点清单、不接受固定分工答案。
+
+[ADR-0223](../../decisions/0223-compound-observation-acquisition.md)允许部署显式提供带终态到达条件的
+观测 acquisition。局部完成核对同一步的检测缓存与实际自身位置；不锁存先前成功、不要求全过程驻留，
+也不替代独立官方终态 verifier。模型仍选择任务组织与动作，Local How 只执行已提交的条件合同。
+
 这是已有的可选部署实例，不是所有 RoboGuide Node 都依赖 Habitat。共享 world 由一个独立
 Habitat 进程拥有，各 agent endpoint 通过正式 Node Service 接入。
 

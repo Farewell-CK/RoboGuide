@@ -1,6 +1,6 @@
 # ADR-0222: Declared relocation floor access and bounded planning feedback
 
-- Status: Implementation in progress; physical validation pending
+- Status: Implemented; physical validation pending
 - Date: 2026-10-26
 
 ## Decision
