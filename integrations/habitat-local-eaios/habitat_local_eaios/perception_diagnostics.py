@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .diagnostics import BufferedJsonlWriter
-from .model import CanonicalObservationInvocation
+from .model import CanonicalObservationAcquisitionInvocation, CanonicalObservationInvocation
 from .perception import observe_detection
 
 _LOG = logging.getLogger(__name__)
@@ -107,7 +107,7 @@ def cached_detection_snapshot(
         receipt = observe_detection(
             invocation, environment, observations, agent, key, step, semantic_digest
         )
-        observed = receipt["condition_holds"]
+        observed = receipt.get("detection_condition_holds", receipt["condition_holds"])
         values.append(observed)
         entry = {
             field: receipt.get(field)
@@ -121,6 +121,14 @@ def cached_detection_snapshot(
             )
         }
         records[str(agent)] = entry
+        if (
+            isinstance(invocation, CanonicalObservationAcquisitionInvocation)
+            and invocation.requires_arrival
+        ):
+            entry.update(
+                detection_condition_holds=observed,
+                arrival_condition_holds=receipt.get("arrival_condition_holds"),
+            )
         cameras: dict[str, Any] = {}
         try:
             detector = detectors[key]
@@ -162,7 +170,10 @@ def cached_detection_snapshot(
             entry["semantic_frames"] = cameras
             entry["frame_comparison"] = _unavailable(error)
     return {
-        "schema_version": PERCEPTION_DIAGNOSTICS_SCHEMA,
+        "schema_version": "roboguide.cached-perception-diagnostics/v0.2"
+        if isinstance(invocation, CanonicalObservationAcquisitionInvocation)
+        and invocation.requires_arrival
+        else PERCEPTION_DIAGNOSTICS_SCHEMA,
         "invocation_digest": "sha256:" + invocation.request_key(),
         "attempt_id": invocation.attempt_id,
         "authoritative_semantic_evidence_digest": semantic_digest,

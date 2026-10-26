@@ -24,7 +24,11 @@ from habitat_local_eaios.observation_conditions import (  # noqa: E402
 from habitat_local_eaios.observation_control import ObservationAcquisitionControl  # noqa: E402
 from habitat_local_eaios.perception import observe_detection  # noqa: E402
 from habitat_local_eaios.stage2_contract import Stage2ExecutionContract  # noqa: E402
-from habitat_local_eaios.view_recovery_binding import permits_terminal_arrival  # noqa: E402
+from habitat_local_eaios.view_recovery import select_viewpoint  # noqa: E402
+from habitat_local_eaios.view_recovery_binding import (
+    NativeViewpointGeometry,  # noqa: E402
+    permits_terminal_arrival,  # noqa: E402
+)
 from test_perception import environment  # noqa: E402
 
 
@@ -161,6 +165,42 @@ def test_viewpoint_terminal_envelope_retains_height_and_original_stop_margin() -
     assert not permits_terminal_arrival((0.9, 0.0, 0.0), (0.0, 0.0, 0.0), 1.0, 0.2)
     with pytest.raises(IntegrationError):
         permits_terminal_arrival((0.0, 0.0, 0.0), (0.0, 0.5, 0.0), float("nan"), 0.2)
+
+
+def test_terminal_geometry_does_not_spend_route_or_scan_budgets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Thirty-two cheaply impossible stances cannot hide a later supported candidate."""
+    geometry = NativeViewpointGeometry.__new__(NativeViewpointGeometry)
+    geometry.require_arrival = True
+    geometry.center = (1.0, 0.0, 0.0)
+    geometry.navigation = SimpleNamespace(
+        _task=SimpleNamespace(
+            pddl_problem=SimpleNamespace(sim_info=SimpleNamespace(robot_at_thresh=0.4))
+        ),
+        _config=SimpleNamespace(dist_thresh=0.05),
+    )
+    monkeypatch.setattr(
+        geometry, "_candidate_pose", lambda point, _heading: SimpleNamespace(translation=point)
+    )
+    monkeypatch.setattr(
+        geometry,
+        "_camera_projections",
+        lambda *_: {"camera": {"bounding_sphere_may_intersect_frustum": True}},
+    )
+    candidates = tuple((-0.5 + i * 0.001, 0.0, 0.0) for i in range(32)) + ((0.8, 0.0, 0.0),)
+    selected = select_viewpoint(
+        (0.0, 0.0, 0.0),
+        geometry.center,
+        lambda point: point,
+        lambda point: abs(point[0]),
+        lambda point, _heading: permits_terminal_arrival(point, geometry.center, 0.4, 0.05),
+        candidate_points=lambda _: candidates,
+        permits_viewpoint=geometry.permits_viewpoint,
+    )
+    assert selected.point == (0.8, 0.0, 0.0)
+    assert selected.candidates_examined == 33
+    assert selected.route_queries == selected.scan_candidates == 1
 
 
 def test_condition_capability_is_bound_to_exact_configured_endpoints(tmp_path: Path) -> None:

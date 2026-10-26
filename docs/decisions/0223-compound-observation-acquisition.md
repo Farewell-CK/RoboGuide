@@ -33,3 +33,14 @@ consistently. MI chooses whether a compound condition fits the actual goal; the
 deployment does not force one organization, one Actor count or robot assignment.
 The profile names no benchmark, episode, target label or robot class. Genuine
 multi-robot cooperation and independent final official authority are unchanged.
+
+## Follow-up from actual execution
+
+Cheap terminal-position rejection precedes bounded route and footprint queries;
+an already rejected stance consumes no route/scan budget. This preserves the
+original budgets and checks, without asserting a valid candidate exists.
+Compound cached-perception diagnostics use explicit schema v0.2: detection,
+arrival and complete condition are separate. Image/cache agreement and the
+current detection union compare the detection component, never the conjunction.
+Earlier v0.1 compound diagnostic rows remain unchanged historical evidence;
+their agreement/union fields cannot be read as detection-only conclusions.

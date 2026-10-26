@@ -16,6 +16,7 @@ from habitat_local_eaios.perception_diagnostics import (  # noqa: E402
     PerceptionDiagnostics,
     cached_detection_snapshot,
 )
+from test_compound_observation import compound  # noqa: E402
 from test_perception import environment, invocation  # noqa: E402
 
 
@@ -59,6 +60,31 @@ def snapshot(observations: Any, env: Any = None) -> dict[str, Any]:
         12,
         "sha256:world",
     )
+
+
+def test_compound_condition_does_not_mislabel_a_true_detection_cache() -> None:
+    """Lost arrival is a separate component, not a sensor/image disagreement."""
+    env = world()
+    env.task.pddl_problem.sim_info.robot_at_thresh = 1.0
+    env.sim.get_agent_data = lambda _: SimpleNamespace(
+        articulated_agent=SimpleNamespace(
+            base_transformation=SimpleNamespace(translation=(1.0, 8.0, 3.0)),
+        )
+    )
+    observations = {
+        "agent_0_detected_objects": [107],
+        "agent_0_head_semantic": Frame([107, 107, 107]),
+    }
+    row = cached_detection_snapshot(
+        compound(), env, observations, {0: "agent_0_detected_objects"}, 12, "sha256:world"
+    )
+    own = row["detectors"]["0"]
+    assert own["condition_holds"] is False
+    assert own["detection_condition_holds"] is True
+    assert own["arrival_condition_holds"] is False
+    assert own["cache_matches_current_frames"] is True
+    assert row["cached_world_union"] is True
+    assert row["official_goal_truth"] == "unavailable"
 
 
 @pytest.mark.parametrize("pixels,detected", [(2, False), (3, True)])

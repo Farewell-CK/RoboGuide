@@ -219,10 +219,24 @@ class NativeViewpointGeometry:
         return projections
 
     def permits_viewpoint(self, point: Point3, heading: float) -> bool:
-        """Require one own camera's conservative frustum intersection."""
+        """Reject cheap terminal conflicts before spending route or footprint-query budgets."""
+        if not self._permits_terminal_arrival(point, heading):
+            return False
         return any(
             value["bounding_sphere_may_intersect_frustum"]
             for value in self._camera_projections(point, heading).values()
+        )
+
+    def _permits_terminal_arrival(self, point: Point3, heading: float) -> bool:
+        """Check only an explicitly requested stance using the same detached body transform."""
+        if not self.require_arrival:
+            return True
+        reference = point3(self._candidate_pose(point, heading).translation)
+        return permits_terminal_arrival(
+            reference,
+            self.center,
+            float(self.navigation._task.pddl_problem.sim_info.robot_at_thresh),
+            float(self.navigation._config.dist_thresh),
         )
 
     def viewpoint_evidence(self, point: Point3, heading: float) -> dict[str, Any]:
@@ -278,15 +292,8 @@ class NativeViewpointGeometry:
         transform = mn.Matrix4.from_(
             rotation.to_matrix(), mn.Vector3(point) - rotation.transform_vector(offset)
         )
-        if self.require_arrival:
-            # The requested terminal stance must satisfy the explicit own-arrival
-            # condition. This does not restrict intermediate physical movement.
-            radius = float(self.navigation._task.pddl_problem.sim_info.robot_at_thresh)
-            margin = float(self.navigation._config.dist_thresh)
-            if not permits_terminal_arrival(
-                point3(transform.translation), self.center, radius, margin
-            ):
-                return False
+        if not self._permits_terminal_arrival(point, heading):
+            return False
         # Preserve any existing navigation controller's independently declared
         # any_at envelope; this is compatibility, never a new success verdict.
         record = getattr(self.navigation, "_roboguide_selections", {}).get(self.target_index, {})
