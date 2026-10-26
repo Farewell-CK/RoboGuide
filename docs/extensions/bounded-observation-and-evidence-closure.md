@@ -226,3 +226,16 @@ Node inventory，也不选择 Actor 或 Physical Entity。MI 检查同一 Task �
 Control assignments、实际动作和反馈、initial/reset/terminal diagnostics、官方结果和
 closure/provenance/admission。应分别汇报 true、false、unavailable，不能将本地 acquisition
 完成当作联合官方成功，也不能把小规模诊断当成 E1 成绩。
+
+### 归档观察的封口条件
+
+producer 可以先公布 `phase=closed`，再完成 summary、verifier 和 closure 文件的发布。
+因此消费者必须在原有时间与次数预算内等到同一 Mission、同一 execution-session digest
+的 `evidence_flushed=true`，不能把第一次 closed 当作文件已封口。显式 writer 错误立即
+保留不完整归档；未封口、网络不可用或超时均属于归档状态，不覆盖实际 SUT 失败。
+
+Controller 事件采集默认使用 API 支持的 `limit=1000`，减少长事件流的 HTTP 往返；
+原有 30 秒、1024 页、单页 8 MiB、总计 64 MiB 上限继续独立生效。完整性仍由同一
+terminal Mission 前后夹定和同一游标上的两次空页确认，事件数量不构成完整性证据。
+该 API 只能证明当时观察到的 terminal durable prefix，不能宣称全局一致快照或未来事件
+已经封闭。失败时保留原始页面和明确原因，不发布不完整的 `events.json`，也不补造注册事件。

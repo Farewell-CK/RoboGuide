@@ -48,6 +48,7 @@ def collect_evidence_closure(
     snapshots: list[Any] = []
     reason = "producer_closure_observation_budget_exhausted"
     complete = False
+    session_digest: str | None = None
     for _ in range(64):
         remaining = deadline - monotonic()
         if remaining <= 0:
@@ -58,18 +59,34 @@ def collect_evidence_closure(
             if value.get("mission_id") not in (None, mission_id):
                 reason = "producer_closure_identity_mismatch"
                 break
+            digest = value.get("execution_session_digest")
+            valid_digest = isinstance(digest, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+            if valid_digest:
+                if session_digest is not None and digest != session_digest:
+                    reason = "producer_closure_identity_mismatch"
+                    break
+                session_digest = digest
             if value.get("phase") in {"closed", "failed", "unavailable"}:
-                complete = (
+                valid_closed = (
                     value.get("phase") == "closed"
                     and value.get("finished") is True
                     and value.get("mission_id") == mission_id
-                    and isinstance(value.get("execution_session_digest"), str)
-                    and re.fullmatch(r"sha256:[0-9a-f]{64}", value["execution_session_digest"])
-                    is not None
-                    and value.get("summary_published") is True
-                    and value.get("evidence_flushed") is True
+                    and bool(valid_digest)
                     and value.get("error") is None
                 )
+                complete = (
+                    valid_closed
+                    and value.get("summary_published") is True
+                    and value.get("evidence_flushed") is True
+                )
+                # The producer closes execution before publishing its final files.
+                # Only the actual seal, or an explicit terminal publication error,
+                # ends observation; the original deadline is never renewed.
+                if valid_closed and not complete:
+                    remaining = deadline - monotonic()
+                    if remaining > 0:
+                        sleep(min(0.5, remaining))
+                    continue
                 reason = "producer_evidence_sealed" if complete else "producer_evidence_incomplete"
                 break
         remaining = deadline - monotonic()

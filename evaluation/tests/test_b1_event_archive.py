@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -24,7 +25,8 @@ from roboguide_eval.b1_event_archive import (
 from roboguide_eval.b1_provenance import observed_request
 from roboguide_eval.b1_run import assess_b1_directory
 
-LIMITS = EventArchiveLimits(tail_confirmation_seconds=0)
+# Keep the small-page fault regressions explicit; production uses the API maximum.
+LIMITS = EventArchiveLimits(page_size=100, tail_confirmation_seconds=0)
 Reply = tuple[int, Any]
 
 
@@ -163,7 +165,47 @@ def test_default_budget_covers_large_production_sized_event_prefix(tmp_path: Pat
     status = archive(stub, EventArchiveLimits(tail_confirmation_seconds=0))
     assert status["state"] == "complete"
     assert status["event_count"] == 40_433
-    assert status["pages"] == 407
+    assert status["pages"] == 43
+
+
+def test_default_pages_cover_long_trace_with_bounded_http_latency(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real HTTP paging fits a long prefix without extending the original deadline."""
+    clock = [0.0]
+
+    def advance(seconds: float) -> None:
+        """Account for request latency without slowing the deterministic regression."""
+        clock[0] += seconds
+
+    monkeypatch.setattr(
+        "roboguide_eval.b1_event_archive.time",
+        SimpleNamespace(
+            monotonic=lambda: clock[0],
+            sleep=advance,
+        ),
+    )
+    for page_size, expected in [(100, "incomplete"), (1000, "complete")]:
+        clock[0] = 0
+        run = make_run(tmp_path / str(page_size))
+        stub = ControllerStub(run, [event(i) for i in range(1, 66_193)])
+
+        def latency(_page: int, _after: int, _limit: int) -> None:
+            """Charge every actual event HTTP request to the same original budget."""
+            advance(0.05)
+
+        stub.page_hook = latency
+        result = archive(stub, EventArchiveLimits(page_size=page_size, tail_confirmation_seconds=0))
+        assert result["state"] == expected
+        if expected == "complete":
+            assert result["event_count"] == 66_192
+            assert result["pages"] == 69
+            assert stub.pages[-2:] == [(66_192, 1000), (66_192, 1000)]
+            assert clock[0] < 30
+        else:
+            assert result["reason"] == "time_budget_exhausted"
+            assert result["event_count"] < 66_192
+            assert (run / result["attempt_directory"] / "response-0002.body").exists()
 
 
 def test_sequence_gaps_use_actual_last_sequence(tmp_path: Path) -> None:

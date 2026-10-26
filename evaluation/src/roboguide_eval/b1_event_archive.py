@@ -24,11 +24,10 @@ TERMINAL = {"Completed", "Failed", "Cancelled"}
 class EventArchiveLimits:
     """Bound calls, memory, response bytes and elapsed acquisition time."""
 
-    page_size: int = 100
-    # The Controller event endpoint has no total-count query. 1024 pages
-    # bounds the prefix at 102,400 events while covering the 40,433-event
-    # production trace observed in one bounded B1 run; byte and wall-clock
-    # limits remain independent fail-closed ceilings.
+    # Use the Controller's supported maximum to avoid spending the bounded
+    # acquisition deadline on hundreds of small HTTP round trips. Event count
+    # never establishes completeness; tail, byte and wall-clock checks still apply.
+    page_size: int = 1000
     max_pages: int = 1024
     max_page_bytes: int = 8 * 1024 * 1024
     max_total_bytes: int = 64 * 1024 * 1024
@@ -133,7 +132,11 @@ class EventCollector:
             finally:
                 failure.close()
         except (OSError, HTTPException):
-            error = "transport_failure"
+            error = (
+                "time_budget_exhausted"
+                if time.monotonic() >= self.deadline
+                else "transport_failure"
+            )
         except ArchiveIncomplete as failure:
             error = str(failure)
         finally:
