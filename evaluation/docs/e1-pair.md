@@ -74,6 +74,13 @@ endpoint registry、Node 字节、Local How v0.9 和 sensor/relocation readiness
 模型仍来自 population，生产 MI 的 reasoning/Prompt/预算来自冻结 mission config。
 原生 Leader/Stage2 参数和 SDK retry 保持原代码；Responses 与 Chat API 独立留证。
 
+Mission HTTP transport 的连接时限与 MI 处理预算独立。同步 POST 的连接关闭并不
+撤销已经接受的工作。B1 观察器在本轮独占的 SQLite store 中只读恢复唯一且指令
+精确一致的 request_id，再经现有 GET 观察原请求；不会重新 POST。存储 envelope
+显式支持 Mission 当前 v0.3、兼容 v0.2/v0.1 和原 flat record；未知 envelope、
+多行、损坏或身份/指令不符继续拒绝恢复。该读取只定位观察对象，不能代替 HTTP
+授权、MI 终态、Controller 提交证据或 Formal admission。
+
 ## 原生 workload 与观测
 
 独立 Conda 进程调用 `habitat_local_eaios.native_workload`。可序列化 factory 在原生

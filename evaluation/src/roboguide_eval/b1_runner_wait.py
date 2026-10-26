@@ -39,6 +39,12 @@ from http.client import HTTPException
 from pathlib import Path
 from typing import Any
 
+from mission.request_store import (
+    LEGACY_STORAGE_SCHEMA,
+    PRE_PROVENANCE_STORAGE_SCHEMA,
+    STORAGE_SCHEMA,
+)
+
 WAIT_OUTCOME_SCHEMA = "roboguide.e1.mi-wait-outcome/v0.1"
 BUDGET_SCHEMA = "roboguide.e1.mi-wait-budget/v0.1"
 
@@ -477,8 +483,17 @@ def recover_request_id_from_store(store_path: Path, instruction: str) -> str | N
         return None
     if not isinstance(document, dict):
         return None
-    if document.get("schema_version") == "roboguide.mission-request-storage/v0.1":
+    storage_schema = document.get("schema_version")
+    if isinstance(storage_schema, str) and storage_schema in {
+        LEGACY_STORAGE_SCHEMA,
+        PRE_PROVENANCE_STORAGE_SCHEMA,
+        STORAGE_SCHEMA,
+    }:
         request = document.get("request")
+    elif isinstance(storage_schema, str) and storage_schema.startswith(
+        "roboguide.mission-request-storage/"
+    ):
+        return None  # Unknown envelope layouts cannot borrow legacy flat-row recovery.
     else:
         request = document  # Legacy request rows predate the envelope.
     if not isinstance(request, dict) or request.get("request_id") != request_id:

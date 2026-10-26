@@ -531,7 +531,8 @@ def test_ambiguous_post_failure_recovers_single_persisted_identity(post_error: s
     assert polls == ["request-durable"]
 
 
-def test_store_recovery_binds_exact_instruction(tmp_path: Path) -> None:
+@pytest.mark.parametrize("version", ["v0.1", "v0.2", "v0.3"])
+def test_store_recovery_binds_exact_instruction(tmp_path: Path, version: str) -> None:
     """Recovery reads the real MissionRequestStore envelope, not a flat fake row."""
     import sqlite3
 
@@ -549,7 +550,7 @@ def test_store_recovery_binds_exact_instruction(tmp_path: Path) -> None:
         "dialogue": [{"content": "do the task"}],
     }
     envelope = {
-        "schema_version": "roboguide.mission-request-storage/v0.1",
+        "schema_version": f"roboguide.mission-request-storage/{version}",
         "request": request,
         "observations": {"request_id": "request-ours"},
     }
@@ -562,6 +563,122 @@ def test_store_recovery_binds_exact_instruction(tmp_path: Path) -> None:
     assert recover_request_id_from_store(store, "do the task") == "request-ours"
     assert recover_request_id_from_store(store, "unsubmitted text") is None
     assert recover_request_id_from_store(store, "  do the task  ") == "request-ours"
+
+
+def test_recovery_reads_current_production_store_without_writing_or_resubmitting(
+    tmp_path: Path,
+) -> None:
+    """The actual current writer remains observable after a lost synchronous POST response."""
+    import socket
+    import sqlite3
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from mission.requests import (
+        DialogueSpeaker,
+        DialogueTurn,
+        DialogueTurnKind,
+        MissionRequestLifecycle,
+        MissionRequestRecord,
+        MissionRequestStore,
+    )
+    from roboguide_eval.b1_runner_wait import recover_request_id_from_store, submit_and_wait
+
+    path = tmp_path / "current.sqlite3"
+    store = MissionRequestStore(path)
+    record = MissionRequestRecord(
+        request_id="request-original",
+        mission_id="mission-original",
+        dialogue=(
+            DialogueTurn(
+                "turn-1", DialogueSpeaker.USER, DialogueTurnKind.INSTRUCTION, "do the task", 1
+            ),
+        ),
+        lifecycle=MissionRequestLifecycle.RECEIVED,
+        assessment=None,
+        plan=None,
+        draft_revision=0,
+        draft_digest=None,
+        approval_required=False,
+        issues=(),
+        created_at_ms=1,
+        updated_at_ms=1,
+    )
+    store.save(record)
+    with sqlite3.connect(path) as connection:
+        before = connection.iterdump()
+        original_rows = list(before)
+    posts: list[str] = []
+    polls: list[str] = []
+
+    class LostResponseServer(BaseHTTPRequestHandler):
+        """Expose only the HTTP disconnect/observation boundary, without a model or Controller."""
+
+        def do_POST(self) -> None:
+            """Lose the sole original connection after its request identity is durable."""
+            content = self.rfile.read(int(self.headers["Content-Length"]))
+            posts.append(json.loads(content)["instruction"])
+            self.connection.shutdown(socket.SHUT_RDWR)
+            self.close_connection = True
+
+        def do_GET(self) -> None:
+            """Return the already accepted original identity without creating another request."""
+            polls.append(self.path.rsplit("/", 1)[-1])
+            payload = json.dumps({"request_id": record.request_id, "lifecycle": "Accepted"})
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(payload.encode())))
+            self.end_headers()
+            self.wfile.write(payload.encode())
+
+        def log_message(self, format: str, *args: object) -> None:
+            """Keep transport fixtures silent and independent of model evidence."""
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), LostResponseServer)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        result = submit_and_wait(
+            endpoint=f"http://127.0.0.1:{server.server_port}",
+            instruction="do the task",
+            budget_seconds=10,
+            store_path=path,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+    assert result.outcome == "accepted" and result.request_id == record.request_id
+    assert posts == ["do the task"] and polls == [record.request_id]
+    assert recover_request_id_from_store(path, "another instruction") is None
+    with sqlite3.connect(path) as connection:
+        assert list(connection.iterdump()) == original_rows
+
+
+def test_unknown_storage_generation_cannot_be_recovered_as_a_flat_legacy_row(
+    tmp_path: Path,
+) -> None:
+    """A future wrapper cannot lend its top-level identity to an unrecognized request layout."""
+    import sqlite3
+
+    from roboguide_eval.b1_runner_wait import recover_request_id_from_store
+
+    path = tmp_path / "unknown.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE mission_requests(request_id TEXT, document_json TEXT)")
+        connection.execute(
+            "INSERT INTO mission_requests VALUES (?, ?)",
+            (
+                "r-future",
+                json.dumps(
+                    {
+                        "schema_version": "roboguide.mission-request-storage/v0.99",
+                        "request_id": "r-future",
+                        "dialogue": [{"content": "do the task"}],
+                    }
+                ),
+            ),
+        )
+    assert recover_request_id_from_store(path, "do the task") is None
 
 
 def test_store_recovery_rejects_ambiguous_requests(tmp_path: Path) -> None:
