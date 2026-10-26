@@ -181,10 +181,21 @@ def configure(
     transaction_budget_ms: int = 120000,
     max_clock_uncertainty_ms: int = 1500,
     peer_schema: str = "roboguide.federation-peers/v0.1",
+    stop_observation_budget_ms: int | None = None,
 ) -> tuple[dict[str, Any], ReplyLoss | None]:
     """Bind declared domains to actual independent endpoints and TLS credentials."""
-    assert peer_schema in {"roboguide.federation-peers/v0.1", "roboguide.federation-peers/v0.2"}
-    assert 100 <= request_budget_ms <= (30000 if peer_schema.endswith("/v0.2") else 10000)
+    assert peer_schema in {
+        "roboguide.federation-peers/v0.1",
+        "roboguide.federation-peers/v0.2",
+        "roboguide.federation-peers/v0.3",
+    }
+    assert 100 <= request_budget_ms <= (10000 if peer_schema.endswith("/v0.1") else 30000)
+    if peer_schema.endswith("/v0.3"):
+        assert (
+            stop_observation_budget_ms is not None and 1000 <= stop_observation_budget_ms <= 300000
+        )
+    else:
+        assert stop_observation_budget_ms is None
     assert 1000 <= transaction_budget_ms <= 300000
     assert 1 <= max_clock_uncertainty_ms <= 10000
     assert max_clock_uncertainty_ms < transaction_budget_ms
@@ -256,8 +267,10 @@ def configure(
             for index, (domain, case) in enumerate(zip(domains, cases, strict=True))
         },
     }
-    if peer_schema.endswith("/v0.2"):
+    if not peer_schema.endswith("/v0.1"):
         profile["budget_scope"] = "intent-publication-and-peer-io"
+    if stop_observation_budget_ms is not None:
+        profile["stop_observation_budget_ms"] = stop_observation_budget_ms
     path = coordinator.root / "federation-peers.json"
     save(path, profile)
     coordinator.environment["ROBOGUIDE_FEDERATION_PEERS"] = str(path)

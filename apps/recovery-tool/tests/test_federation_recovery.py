@@ -48,6 +48,7 @@ def test_complete_empty_authority_is_readonly(tmp_path: Path) -> None:
         "hidden-probe",
         "hidden-profile",
         "hidden-grant",
+        "hidden-origin",
     ],
 )
 def test_hidden_or_missing_original_tables_refuse(tmp_path: Path, damage: str) -> None:
@@ -62,6 +63,8 @@ def test_hidden_or_missing_original_tables_refuse(tmp_path: Path, damage: str) -
             federation["executions"]["probes"]["unit"] = {}
         elif damage == "hidden-profile":
             federation["coordinations"]["profiles"]["1"] = {}
+        elif damage == "hidden-origin":
+            federation["coordinations"]["origins"] = {}
         else:
             federation["policies"]["1"] = {
                 "schema_version": "roboguide.federation-authorization/v0.2"
@@ -214,6 +217,85 @@ def test_request_budget_contract_refuses_shape_changes_and_downgrade(damage: str
     else:
         value["profiles"]["3"] = copy.deepcopy(value["profiles"]["1"])
         value["profiles"]["3"]["revision"] = 3
+    before = copy.deepcopy(value)
+    with pytest.raises(ValueError):
+        _coordinator(value)
+    assert value == before
+
+
+def stop_observation() -> dict[str, Any]:
+    """Build only labelled original GET history whose effect deadline has not been renewed."""
+    value = original_intent()
+    value["origins"] = {"unit-original": 1}
+    profile = value["profiles"]["1"]
+    profile.update(
+        schema_version="roboguide.federation-peers/v0.3",
+        budget_scope="intent-publication-and-peer-io",
+        stop_observation_budget_ms=300000,
+        request_budget_ms=30000,
+    )
+    record = value["transactions"]["unit-original"]
+    record["stopping"] = "original-root-lost"
+    record["cleanup_budget"] = copy.deepcopy(record["budget"]) | {"duration_ms": 30000}
+    scope = copy.deepcopy(record["budget"]) | {"duration_ms": 300000}
+    record["stop_observation"] = {"profile_revision": 1, "duration_ms": 300000, "budget": scope}
+    query = copy.deepcopy(record["intents"]["unit-a"]["probe"])
+    query["request_digest"] = _digest(None)
+    query["budget"]["issued"]["elapsed_ms"] = 41000
+    query["budget"]["duration_ms"] = 30000
+    query["sent_at_ms"] = 41000
+    query["error"] = "original readonly query unknown"
+    record["intents"]["unit-a"]["observe-stop"] = query
+    return value
+
+
+def test_stop_get_history_outlives_effects_without_renewing_original_unknown() -> None:
+    """Recovery retains separate original scopes and accepts actual v0.2/v0.3 transport bounds."""
+    value = stop_observation()
+    before = copy.deepcopy(value)
+    _coordinator(value)
+    assert value == before
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "scope-clock",
+        "scope-duration",
+        "missing-clock",
+        "old-profile",
+        "query-namespace",
+        "query-deadline",
+        "not-stopping",
+        "missing-origin",
+        "missing-scope",
+    ],
+)
+def test_stop_get_recovery_refuses_borrowed_or_renewed_authority(damage: str) -> None:
+    """Independent GET cannot borrow a current clock, old profile or new deadline."""
+    value = stop_observation()
+    record = value["transactions"]["unit-original"]
+    scope = record["stop_observation"]
+    query = record["intents"]["unit-a"]["observe-stop"]
+    if damage == "scope-clock":
+        scope["budget"]["issued"]["elapsed_ms"] += 1
+    elif damage == "scope-duration":
+        scope["duration_ms"] -= 1
+    elif damage == "missing-clock":
+        scope["budget"] = None
+    elif damage == "old-profile":
+        value["profiles"]["1"]["schema_version"] = "roboguide.federation-peers/v0.2"
+        del value["profiles"]["1"]["stop_observation_budget_ms"]
+    elif damage == "query-namespace":
+        query["budget"]["issued"]["namespace"][1] += 1
+    elif damage == "query-deadline":
+        query["budget"]["issued"]["elapsed_ms"] = 300000
+    elif damage == "not-stopping":
+        record["stopping"] = None
+    elif damage == "missing-origin":
+        del value["origins"]
+    else:
+        del record["stop_observation"]
     before = copy.deepcopy(value)
     with pytest.raises(ValueError):
         _coordinator(value)

@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Explicit Federation peer profile v0.3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "revision",
+    "local_domain",
+    "max_drift_ppm",
+    "request_budget_ms",
+    "budget_scope",
+    "peers",
+    "stop_observation_budget_ms"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "roboguide.federation-peers/v0.3"
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "local_domain": {
+      "type": "string",
+      "minLength": 1
+    },
+    "max_drift_ppm": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "request_budget_ms": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 30000
+    },
+    "budget_scope": {
+      "const": "intent-publication-and-peer-io"
+    },
+    "peers": {
+      "type": "object",
+      "minProperties": 2,
+      "maxProperties": 16,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "address",
+          "server_name",
+          "server_leaf",
+          "ca_file",
+          "ca_digest",
+          "client_cert",
+          "client_leaf",
+          "client_key",
+          "principal_id"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "minLength": 1
+          },
+          "server_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "server_leaf": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "ca_file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ca_digest": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "client_cert": {
+            "type": "string",
+            "minLength": 1
+          },
+          "client_leaf": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "client_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "principal_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "stop_observation_budget_ms": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 300000
+    }
+  }
+}

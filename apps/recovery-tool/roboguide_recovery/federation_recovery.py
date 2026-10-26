@@ -346,7 +346,11 @@ def _profiles(profiles: dict[str, Any]) -> None:
     ):
         if not isinstance(profile, dict):
             raise ValueError("original peer profile is not an object")
-        modern = profile.get("schema_version") == "roboguide.federation-peers/v0.2"
+        modern = profile.get("schema_version") in {
+            "roboguide.federation-peers/v0.2",
+            "roboguide.federation-peers/v0.3",
+        }
+        observer = profile.get("schema_version") == "roboguide.federation-peers/v0.3"
         _closed(
             profile,
             {
@@ -358,14 +362,26 @@ def _profiles(profiles: dict[str, Any]) -> None:
                 "request_budget_ms",
                 "peers",
             }
-            | ({"budget_scope"} if modern else set()),
+            | ({"budget_scope"} if modern else set())
+            | ({"stop_observation_budget_ms"} if observer else set()),
         )
         if (
             str(index) != key
             or profile["revision"] != index
             or profile["schema_version"]
-            not in {"roboguide.federation-peers/v0.1", "roboguide.federation-peers/v0.2"}
+            not in {
+                "roboguide.federation-peers/v0.1",
+                "roboguide.federation-peers/v0.2",
+                "roboguide.federation-peers/v0.3",
+            }
             or (modern and profile["budget_scope"] != "intent-publication-and-peer-io")
+            or (
+                observer
+                and (
+                    not _integer(profile["stop_observation_budget_ms"], 300_000)
+                    or profile["stop_observation_budget_ms"] < 1000
+                )
+            )
             or not profile["profile_id"]
             or not _integer(profile["max_drift_ppm"], 1000)
             or not _integer(profile["request_budget_ms"], 30_000 if modern else 10_000)
@@ -375,7 +391,7 @@ def _profiles(profiles: dict[str, Any]) -> None:
         ):
             raise ValueError("original peer profile identity, budget or revision differs")
         if previous is not None and (
-            (previous["schema_version"] == "roboguide.federation-peers/v0.2" and not modern)
+            (previous["schema_version"] > profile["schema_version"])
             or profile["profile_id"] != previous["profile_id"]
             or profile["local_domain"] != previous["local_domain"]
             or not set(previous["peers"]) <= set(profile["peers"])
@@ -456,12 +472,71 @@ def _clocks(record: dict[str, Any], profiles: dict[str, Any]) -> None:
             raise ValueError("original peer clock proof changed its actual request/reply identity")
 
 
+def _within(child: dict[str, Any], parent: dict[str, Any]) -> bool:
+    """Check original same-kernel request containment without reading a current clock."""
+    first, original = child["issued"], parent["issued"]
+    return bool(
+        first["boot_id"] == original["boot_id"]
+        and first["namespace"] == original["namespace"]
+        and first["elapsed_ms"] >= original["elapsed_ms"]
+        and first["elapsed_ms"] + child["duration_ms"] <= (1 << 64) - 1
+        and original["elapsed_ms"] + parent["duration_ms"] <= (1 << 64) - 1
+        and first["elapsed_ms"] + child["duration_ms"]
+        <= original["elapsed_ms"] + parent["duration_ms"]
+    )
+
+
+def _stop_observation(record: dict[str, Any], profiles: dict[str, Any]) -> dict[str, Any] | None:
+    """Retain the exact first stop-only GET scope; legacy absence grants no new permission."""
+    if "stop_observation" not in record:
+        return None
+    original = _closed(record["stop_observation"], {"profile_revision", "duration_ms", "budget"})
+    profile = profiles.get(str(original["profile_revision"]), {})
+    if (
+        profile.get("schema_version") != "roboguide.federation-peers/v0.3"
+        or profile.get("stop_observation_budget_ms") != original["duration_ms"]
+        or (original["budget"] is None) != (record["cleanup_budget"] is None)
+    ):
+        raise ValueError("original stop observation declaration or clock is missing")
+    if original["budget"] is None:
+        return None
+    budget: dict[str, Any] = original["budget"]
+    _budget(budget, original["duration_ms"])
+    if (
+        budget["duration_ms"] != original["duration_ms"]
+        or record["stopping"] is None
+        or budget["issued"] != record["cleanup_budget"]["issued"]
+    ):
+        raise ValueError("original stop-only GET clock was renewed or changed")
+    return budget
+
+
 def _coordinator(state: dict[str, Any]) -> None:
     """Reconstruct original outgoing command identities and irreversible root decisions."""
-    _closed(state, {"profiles", "transactions"})
+    profiles = state.get("profiles")
+    if not isinstance(profiles, dict):
+        raise ValueError("original peer profiles are not an object")
+    modern = any(
+        profile.get("schema_version") == "roboguide.federation-peers/v0.3"
+        for profile in profiles.values()
+        if isinstance(profile, dict)
+    )
+    _closed(state, {"profiles", "transactions"} | ({"origins"} if modern else set()))
     if len(state["profiles"]) > 1024 or len(state["transactions"]) > 128:
         raise ValueError("original Federation coordinator history bound exceeded")
     _profiles(state["profiles"])
+    legacy_origins = any(
+        profile["schema_version"] != "roboguide.federation-peers/v0.3"
+        for profile in profiles.values()
+    )
+    maximum_request = max(
+        (profile["request_budget_ms"] for profile in profiles.values()), default=0
+    )
+    if modern and (
+        not isinstance(state["origins"], dict)
+        or set(state["origins"]) != set(state["transactions"])
+    ):
+        raise ValueError("original v0.3 admission coverage is missing")
     for identity, record in state["transactions"].items():
         _closed(
             record,
@@ -484,13 +559,25 @@ def _coordinator(state: dict[str, Any]) -> None:
                 "stopping",
                 "cleanup_budget",
                 "stopped",
-            },
+            }
+            | ({"stop_observation"} if "stop_observation" in record else set()),
         )
         manifest = _manifest(record["manifest"])
         _budget(record["budget"])
         _clocks(record, state["profiles"])
         if record["cleanup_budget"] is not None:
             _budget(record["cleanup_budget"], 30_000)
+        stop_scope = _stop_observation(record, state["profiles"])
+        origin = state["origins"].get(identity) if modern else None
+        original = record.get("stop_observation")
+        if modern and origin is None and not legacy_origins:
+            raise ValueError("new-only profile cannot invent a legacy admission")
+        if (
+            (origin is None) != (original is None)
+            or original is not None
+            and original["profile_revision"] != origin
+        ):
+            raise ValueError("original admission lost or borrowed stop observation declaration")
         if (
             identity != manifest["transaction_id"]
             or set(record["nonces"]) != set(manifest["participants"])
@@ -506,7 +593,7 @@ def _coordinator(state: dict[str, Any]) -> None:
         ) <= set(record["released"]):
             raise ValueError("original root phase coverage differs")
         for domain, phases in record["intents"].items():
-            if domain not in manifest["participants"] or len(phases) > 7:
+            if domain not in manifest["participants"] or len(phases) > 8:
                 raise ValueError("original root peer domain or phase differs")
             for phase, intent in phases.items():
                 _closed(
@@ -523,15 +610,33 @@ def _coordinator(state: dict[str, Any]) -> None:
                         "observations",
                     },
                 )
-                _budget(intent["budget"], 10_000)
                 if (
                     str(intent["profile_revision"]) not in state["profiles"]
                     or len(intent["observations"]) > 16
                 ):
                     raise ValueError("original root peer profile or observation bound differs")
+                profile = state["profiles"][str(intent["profile_revision"])]
+                _budget(intent["budget"], profile["request_budget_ms"])
+                if phase not in {
+                    "probe",
+                    "prepare",
+                    "commit",
+                    "release",
+                    "abort",
+                    "stop",
+                    "observe",
+                    "observe-stop",
+                }:
+                    raise ValueError("original root peer phase is unknown")
+                if phase == "observe-stop" and (
+                    stop_scope is None
+                    or record["stopping"] is None
+                    or not _within(intent["budget"], stop_scope)
+                ):
+                    raise ValueError("readonly original stop intent lacks its bounded declaration")
                 wire = (
                     None
-                    if phase == "observe"
+                    if phase in {"observe", "observe-stop"}
                     else {
                         "schema_version": SCHEMA,
                         "manifest": manifest,
@@ -545,7 +650,11 @@ def _coordinator(state: dict[str, Any]) -> None:
                     raise ValueError("original outgoing Federation command bytes changed")
                 for observation in intent["observations"]:
                     _closed(observation, {"budget", "sent_at_ms", "reply", "error"})
-                    _budget(observation["budget"], 10_000)
+                    _budget(observation["budget"], maximum_request)
+                    if phase == "observe-stop" and (
+                        stop_scope is None or not _within(observation["budget"], stop_scope)
+                    ):
+                        raise ValueError("readonly stop query exceeds original scope")
         for domain, proof in record["clocks"].items():
             _closed(
                 proof,
@@ -584,6 +693,7 @@ def validate(connection: sqlite3.Connection) -> None:
         if (
             any(federation.get("executions", {}).values())
             or any(federation.get("coordinations", {}).values())
+            or "origins" in federation.get("coordinations", {})
             or any(
                 policy.get("schema_version") == "roboguide.federation-authorization/v0.2"
                 for policy in federation.get("policies", {}).values()

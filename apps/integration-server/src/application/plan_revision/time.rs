@@ -92,6 +92,22 @@ impl OriginalBudget {
     pub(crate) fn duration_ms(&self) -> u64 {
         self.duration_ms
     }
+    /// Checks a retained sibling's exact original start without renewing either budget.
+    pub(crate) fn has_same_start(&self, other: &Self) -> bool {
+        self.issued == other.issued
+    }
+    /// Bounds a child request inside an original same-kernel scope, refusing arithmetic overflow.
+    pub(crate) fn is_within(&self, parent: &Self) -> bool {
+        self.issued.boot_id == parent.issued.boot_id
+            && self.issued.namespace == parent.issued.namespace
+            && self.issued.elapsed_ms >= parent.issued.elapsed_ms
+            && self
+                .issued
+                .elapsed_ms
+                .checked_add(self.duration_ms)
+                .zip(parent.issued.elapsed_ms.checked_add(parent.duration_ms))
+                .is_some_and(|(end, bound)| end <= bound)
+    }
     /// Validates retained original OS evidence without treating another current domain as a renewal.
     pub(crate) fn validate(&self) -> Result<(), String> {
         if self.duration_ms == 0

@@ -125,3 +125,11 @@ CPU 结果出现也不替代原 Runtime 报告。验收使用明确冻结的优�
 原 coordinator 的 barrier/backoff 无变化 turn 不再反复竞争 writer 并做空 SQL 事务。
 调度 hint 只观察当前已提交原记录；真实归约、首次到期、权限/epoch 变化与实际工作仍
 走原 writer/最终检查。到期 cleanup 保留 Unknown，不能用空轮询重建新预算。
+
+[ADR-0219](../decisions/0219-original-stop-only-federation-observation.md)与
+[peer profile v0.3](../../contracts/control/federation-peers-v0.3/README.md)增加原 admission
+即冻结的停止只读 scope。首次停止与原 30 秒 cleanup 共用实际 kernel start；cleanup 到期
+仅发 GET，不重发原 abort 或任何 mutation。原真实分区一直保持到 abort 与首个独立 GET
+均失败，再恢复通信，等待对端按原期限停止/释放并核对。正常输入仍为 300 秒，另一份
+故障输入在首次 admission 前明确为 120 秒；旧事务、Unknown 与 clock 不修改。
+独立 GET 最多原 300 秒/十六次观察，确认不会覆写原 abort 的未知回包。

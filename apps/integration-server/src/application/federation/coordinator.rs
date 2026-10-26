@@ -23,6 +23,9 @@ pub(crate) struct Profile {
     /// Explicit v0.2 SQL-publication/I/O interpretation; old closed decoders refuse this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     budget_scope: Option<String>,
+    /// Explicit v0.3 independent stop-only GET scope; it grants no additional effect request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stop_observation_budget_ms: Option<u64>,
     /// Exact independently declared participant endpoints and actual TLS inputs.
     peers: BTreeMap<String, Peer>,
 }
@@ -33,6 +36,7 @@ impl Profile {
         let maximum = match (self.schema_version.as_str(), self.budget_scope.as_deref()) {
             ("roboguide.federation-peers/v0.1", None) => 10_000,
             ("roboguide.federation-peers/v0.2", Some("intent-publication-and-peer-io")) => 30_000,
+            ("roboguide.federation-peers/v0.3", Some("intent-publication-and-peer-io")) => 30_000,
             _ => return Err("unsupported explicit Federation request-budget contract".into()),
         };
         if self.profile_id.is_empty()
@@ -41,6 +45,12 @@ impl Profile {
             || !self.peers.contains_key(&self.local_domain)
             || self.max_drift_ppm > 1000
             || !(100..=maximum).contains(&self.request_budget_ms)
+            || if self.schema_version.ends_with("/v0.3") {
+                self.stop_observation_budget_ms
+                    .is_none_or(|budget| !(1000..=300_000).contains(&budget))
+            } else {
+                self.stop_observation_budget_ms.is_some()
+            }
         {
             return Err("invalid explicit Federation peer profile".into());
         }
@@ -186,6 +196,18 @@ struct Intent {
     observations: Vec<Observation>,
 }
 
+/// Original v0.3 read-only declaration, admitted before any effect and anchored once at first cleanup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StopObservation {
+    /// Exact original explicit peer profile, never borrowed from a later upgrade.
+    profile_revision: u64,
+    /// Original immutable deployment bound for independent GET reconciliation only.
+    duration_ms: u64,
+    /// First stop clock, shared with cleanup but granting no renewed effect authority.
+    budget: Option<OriginalBudget>,
+}
+
 /// Original global transaction retained with its real command owner and complete local contributions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -224,6 +246,9 @@ struct Transaction {
     stopping: Option<String>,
     /// One original bounded stop-only cleanup budget; it never grants new execution.
     cleanup_budget: Option<OriginalBudget>,
+    /// Explicit v0.3 readonly authority; legacy history retains original absence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stop_observation: Option<StopObservation>,
     /// Actual acknowledged stopped or unprepared peers.
     stopped: BTreeSet<String>,
 }
@@ -236,12 +261,15 @@ pub(crate) struct State {
     profiles: BTreeMap<u64, Profile>,
     /// Every original transaction, including partial/Unknown outcomes.
     transactions: BTreeMap<String, Transaction>,
+    /// Mandatory v0.3 original admission coverage; None preserves explicitly older transaction origin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origins: Option<BTreeMap<String, Option<u64>>>,
 }
 
 impl State {
     /// Exposes original retained root authority to explicit wrapper migration fences.
     pub(crate) fn has_authority(&self) -> bool {
-        !self.profiles.is_empty() || !self.transactions.is_empty()
+        !self.profiles.is_empty() || !self.transactions.is_empty() || self.origins.is_some()
     }
 }
 
@@ -272,7 +300,9 @@ impl Work {
         if remaining == 0 {
             return Err("original Federation request budget expired before peer I/O".into());
         }
-        let path = if self.observation.is_some() || self.phase == "observe" {
+        let path = if self.observation.is_some()
+            || matches!(self.phase.as_str(), "observe" | "observe-stop")
+        {
             format!("/v1/federation/executions/{}", self.id)
         } else {
             format!("/v1/federation/executions/{}", self.phase)
@@ -294,7 +324,7 @@ fn install_profile(state: &mut State, profile: Profile) -> Result<(), String> {
         if previous == &profile {
             return Ok(());
         }
-        if previous.schema_version.ends_with("/v0.2") && !profile.schema_version.ends_with("/v0.2")
+        if previous.schema_version > profile.schema_version
             || revision.checked_add(1) != Some(profile.revision)
             || previous.profile_id != profile.profile_id
             || previous.local_domain != profile.local_domain
@@ -315,6 +345,23 @@ fn install_profile(state: &mut State, profile: Profile) -> Result<(), String> {
     }
     if state.profiles.len() >= 1024 {
         return Err("original peer profile history capacity exhausted".into());
+    }
+    if profile.schema_version == "roboguide.federation-peers/v0.3"
+        && !state
+            .profiles
+            .values()
+            .any(|original| original.schema_version == "roboguide.federation-peers/v0.3")
+    {
+        if state.origins.is_some() {
+            return Err("legacy original admission table conflicts".into());
+        }
+        state.origins = Some(
+            state
+                .transactions
+                .keys()
+                .map(|id| (id.clone(), None))
+                .collect(),
+        );
     }
     state.profiles.insert(profile.revision, profile);
     Ok(())
@@ -395,9 +442,23 @@ pub(crate) fn submit(
                 completed: BTreeMap::new(),
                 stopping: None,
                 cleanup_budget: None,
+                stop_observation: profile.stop_observation_budget_ms.map(|duration_ms| {
+                    StopObservation {
+                        profile_revision: profile.revision,
+                        duration_ms,
+                        budget: None,
+                    }
+                }),
                 stopped: BTreeSet::new(),
             };
             let receipt = view_record(&original);
+            if profile.schema_version == "roboguide.federation-peers/v0.3" {
+                state
+                    .origins
+                    .as_mut()
+                    .expect("original v0.3 admission table installed")
+                    .insert(manifest.transaction_id.clone(), Some(profile.revision));
+            }
             state
                 .transactions
                 .insert(manifest.transaction_id.clone(), original);
@@ -419,7 +480,7 @@ fn view_record(record: &Transaction) -> serde_json::Value {
         "original_manifest":record.manifest,"probes":record.probes,"clock_translations":record.clocks,"prepared":record.prepared,"decision":record.decision,
         "commits":record.commits,"released":record.released,"completed":record.completed,"stopping":record.stopping,"stopped":record.stopped,
         "global_completed":record.stopping.is_none() && record.completed.len()==record.manifest.participants.len(),
-        "original_intents":record.intents,"all_original_commits_received":record.commits.len()==record.manifest.participants.len(),
+        "original_intents":record.intents,"stop_observation":record.stop_observation,"all_original_commits_received":record.commits.len()==record.manifest.participants.len(),
         "global_dispatch_ready":false})
 }
 
@@ -476,7 +537,13 @@ fn body(record: &Transaction, domain: &str, phase: &str) -> Result<serde_json::V
 fn effect(intent: &Intent, phase: &str) -> Option<serde_json::Value> {
     if let Some(reply) = &intent.reply
         && (200..300).contains(&reply.status)
-        && (!matches!(phase, "stop" | "abort") || reply.body["resources_released"] == true)
+        && (!matches!(phase, "stop" | "abort" | "observe-stop")
+            || reply.body["resources_released"] == true)
+        && (phase != "observe-stop"
+            || reply
+                .body
+                .get("stopped")
+                .is_some_and(|value| !value.is_null()))
         && (phase != "observe"
             || reply.body["mission_lifecycle"] == "Completed"
                 && reply.body["goal_contract"].is_object()
@@ -493,7 +560,10 @@ fn effect(intent: &Intent, phase: &str) -> Option<serde_json::Value> {
         if reply.status != 200 {
             continue;
         }
-        if matches!(phase, "release" | "stop" | "abort" | "observe") {
+        if matches!(
+            phase,
+            "release" | "stop" | "abort" | "observe" | "observe-stop"
+        ) {
             let passed = match phase {
                 "release" => reply.body["released"] == true,
                 "observe" => {
@@ -637,6 +707,20 @@ fn reduce(record: &mut Transaction, profile: &Profile) -> Result<(), String> {
                 "stop" | "abort" => {
                     record.stopped.insert(domain.clone());
                 }
+                "observe-stop" => {
+                    let probe = &value["probe"];
+                    if record.stopping.is_none()
+                        || probe["manifest_digest"] != digest(&record.manifest)?
+                        || probe["transaction_id"] != record.manifest.transaction_id
+                        || probe["domain"] != domain
+                        || probe["nonce"] != record.nonces[&domain]
+                    {
+                        return Err(
+                            "readonly stop observation differs from original peer authority".into(),
+                        );
+                    }
+                    record.stopped.insert(domain.clone());
+                }
                 "observe" => {
                     record.completed.entry(domain.clone()).or_insert(value);
                 }
@@ -691,6 +775,42 @@ fn phase(record: &Transaction, domain: &str) -> Option<&'static str> {
     None
 }
 
+/// After effect cleanup expires, only an originally declared live GET scope can advance stop evidence.
+fn bounded_phase(record: &Transaction, domain: &str, kernel: &KernelTime) -> Option<&'static str> {
+    if record.stopping.is_some()
+        && !record.stopped.contains(domain)
+        && record
+            .cleanup_budget
+            .as_ref()
+            .is_some_and(|budget| budget.remaining(kernel) == 0)
+    {
+        return record
+            .stop_observation
+            .as_ref()
+            .and_then(|original| original.budget.as_ref())
+            .filter(|budget| budget.remaining(kernel) > 0)
+            .map(|_| "observe-stop");
+    }
+    phase(record, domain)
+}
+
+/// Reads the exact original phase scope; a GET declaration never lends time to an effect command.
+fn phase_remaining(record: &Transaction, phase: &str, kernel: &KernelTime) -> u64 {
+    if phase == "observe-stop" {
+        return record
+            .stop_observation
+            .as_ref()
+            .and_then(|original| original.budget.as_ref())
+            .map_or(0, |budget| budget.remaining(kernel));
+    }
+    record
+        .cleanup_budget
+        .as_ref()
+        .filter(|_| record.stopping.is_some())
+        .unwrap_or(&record.budget)
+        .remaining(kernel)
+}
+
 /// Readonly scheduling hint avoids empty writer transactions; every actual turn rechecks authority.
 fn turn_ready(
     record: &Transaction,
@@ -711,15 +831,10 @@ fn turn_ready(
     {
         return true;
     }
-    let Some(phase) = phase(record, domain) else {
+    let Some(phase) = bounded_phase(record, domain, kernel) else {
         return false;
     };
-    let remaining = record
-        .cleanup_budget
-        .as_ref()
-        .filter(|_| record.stopping.is_some())
-        .unwrap_or(&record.budget)
-        .remaining(kernel);
+    let remaining = phase_remaining(record, phase, kernel);
     if remaining == 0 {
         return false;
     }
@@ -817,6 +932,9 @@ fn admit_work(
             }
             if record.stopping.is_some() && record.cleanup_budget.is_none() {
                 record.cleanup_budget = Some(OriginalBudget::new(&kernel, 30_000)?);
+                if let Some(original) = &mut record.stop_observation {
+                    original.budget = Some(OriginalBudget::new(&kernel, original.duration_ms)?);
+                }
             }
             if record.stopping.is_some()
                 && !record
@@ -828,19 +946,14 @@ fn admit_work(
                 record.stopped.insert(domain.into());
                 return Ok(serde_json::json!({"original_intent_never_admitted":true}));
             }
-            let Some(phase) = phase(record, domain) else {
+            let Some(phase) = bounded_phase(record, domain, &kernel) else {
                 return Ok(serde_json::json!({"idle":true}));
             };
-            let timeout = record
-                .cleanup_budget
-                .as_ref()
-                .filter(|_| record.stopping.is_some())
-                .map_or(remaining, |budget| budget.remaining(&kernel))
-                .min(profile.request_budget_ms);
+            let timeout = phase_remaining(record, phase, &kernel).min(profile.request_budget_ms);
             if timeout == 0 {
                 return Ok(serde_json::json!({"budget_expired":true}));
             }
-            let encoded = if phase == "observe" {
+            let encoded = if matches!(phase, "observe" | "observe-stop") {
                 None
             } else {
                 Some(body(record, domain, phase)?)
@@ -1034,12 +1147,13 @@ pub(crate) fn step(
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|error| error.to_string())?
         .as_millis();
-    if authorized
-        && events
-            .current_writer_epoch()
-            .map_err(|error| error.to_string())?
-            == record.root_epoch
-        && wall < u128::from(record.certificate_expires_at_ms)
+    if (record.stopping.is_some()
+        || authorized
+            && events
+                .current_writer_epoch()
+                .map_err(|error| error.to_string())?
+                == record.root_epoch
+            && wall < u128::from(record.certificate_expires_at_ms))
         && !turn_ready(
             &record,
             domain,
@@ -1070,9 +1184,77 @@ pub(crate) fn validate(controller: &ControllerState) -> Result<(), String> {
         let actual = configured()?.ok_or("original Federation peer profile missing")?;
         install_profile(&mut revisions, actual)?;
     }
+    let modern = state
+        .profiles
+        .values()
+        .any(|profile| profile.schema_version == "roboguide.federation-peers/v0.3");
+    let legacy_origins = state
+        .profiles
+        .values()
+        .any(|profile| profile.schema_version != "roboguide.federation-peers/v0.3");
+    let maximum_request = state
+        .profiles
+        .values()
+        .map(|profile| profile.request_budget_ms)
+        .max()
+        .unwrap_or(0);
+    if if modern {
+        state
+            .origins
+            .as_ref()
+            .is_none_or(|origins| origins.keys().ne(state.transactions.keys()))
+    } else {
+        state.origins.is_some()
+    } {
+        return Err("original v0.3 admission coverage is missing or hidden".into());
+    }
     for (id, record) in &state.transactions {
         record.manifest.validate()?;
         record.budget.validate()?;
+        match state
+            .origins
+            .as_ref()
+            .and_then(|origins| origins.get(id))
+            .copied()
+            .flatten()
+        {
+            Some(revision)
+                if record
+                    .stop_observation
+                    .as_ref()
+                    .is_some_and(|original| original.profile_revision == revision) => {}
+            Some(_) => return Err("original admission lost stop observation declaration".into()),
+            None if record.stop_observation.is_none() && (!modern || legacy_origins) => {}
+            None => {
+                return Err("legacy transaction cannot borrow a new stop observation scope".into());
+            }
+        }
+        if let Some(original) = &record.stop_observation {
+            let profile = state
+                .profiles
+                .get(&original.profile_revision)
+                .ok_or("original stop observation profile missing")?;
+            if profile.schema_version != "roboguide.federation-peers/v0.3"
+                || profile.stop_observation_budget_ms != Some(original.duration_ms)
+                || original.budget.is_some() != record.cleanup_budget.is_some()
+            {
+                return Err("original stop observation declaration or clock missing".into());
+            }
+            if let Some(budget) = &original.budget {
+                budget.validate()?;
+                if budget.duration_ms() != original.duration_ms
+                    || record.stopping.is_none()
+                    || !budget.has_same_start(
+                        record
+                            .cleanup_budget
+                            .as_ref()
+                            .expect("checked original cleanup"),
+                    )
+                {
+                    return Err("original stop GET clock was renewed or changed".into());
+                }
+            }
+        }
         if record.root_epoch.is_empty()
             || id != &record.manifest.transaction_id
             || record.budget.duration_ms() != record.manifest.budget_ms
@@ -1125,15 +1307,28 @@ pub(crate) fn validate(controller: &ControllerState) -> Result<(), String> {
             }
         }
         for (domain, intents) in &record.intents {
-            if !record.manifest.participants.contains_key(domain) || intents.len() > 7 {
+            if !record.manifest.participants.contains_key(domain) || intents.len() > 8 {
                 return Err("original peer intent domains or phases invalid".into());
             }
             for (phase, intent) in intents {
                 intent.budget.validate()?;
                 if intent.observations.len() > 16
                     || !state.profiles.contains_key(&intent.profile_revision)
+                    || !matches!(
+                        phase.as_str(),
+                        "probe"
+                            | "prepare"
+                            | "commit"
+                            | "release"
+                            | "stop"
+                            | "abort"
+                            | "observe"
+                            | "observe-stop"
+                    )
+                    || intent.budget.duration_ms()
+                        > state.profiles[&intent.profile_revision].request_budget_ms
                     || intent.request_digest
-                        != digest(&if phase == "observe" {
+                        != digest(&if matches!(phase.as_str(), "observe" | "observe-stop") {
                             None
                         } else {
                             Some(body(record, domain, phase)?)
@@ -1141,8 +1336,27 @@ pub(crate) fn validate(controller: &ControllerState) -> Result<(), String> {
                 {
                     return Err("original peer intent wire/profile identity changed".into());
                 }
+                let stop_scope = if phase == "observe-stop" {
+                    let scope = record
+                        .stop_observation
+                        .as_ref()
+                        .and_then(|original| original.budget.as_ref())
+                        .filter(|_| record.stopping.is_some())
+                        .ok_or("readonly stop query lacks its original declaration")?;
+                    if !intent.budget.is_within(scope) {
+                        return Err("original readonly stop intent exceeds declared scope".into());
+                    }
+                    Some(scope)
+                } else {
+                    None
+                };
                 for observation in &intent.observations {
                     observation.budget.validate()?;
+                    if observation.budget.duration_ms() > maximum_request
+                        || stop_scope.is_some_and(|scope| !observation.budget.is_within(scope))
+                    {
+                        return Err("original peer observation budget differs".into());
+                    }
                 }
             }
         }
@@ -1213,6 +1427,39 @@ mod tests {
         assert_eq!(serde_json::to_value(&state).unwrap(), before);
     }
 
+    /// Upgrade records legacy admission as unavailable; empty modern authority still retains its table.
+    #[test]
+    fn stop_observation_origin_table_never_lends_scope_to_legacy_transactions() {
+        let mut legacy = State::default();
+        install_profile(&mut legacy, profile()).unwrap();
+        let transaction = sample_transaction(intent(serde_json::Value::Null));
+        legacy.transactions.insert("synthetic".into(), transaction);
+        let mut modern = profile();
+        modern.revision = 2;
+        modern.schema_version = "roboguide.federation-peers/v0.3".into();
+        modern.budget_scope = Some("intent-publication-and-peer-io".into());
+        modern.stop_observation_budget_ms = Some(300_000);
+        install_profile(&mut legacy, modern.clone()).unwrap();
+        assert_eq!(legacy.origins.as_ref().unwrap()["synthetic"], None);
+        assert!(legacy.transactions["synthetic"].stop_observation.is_none());
+        let retained = serde_json::to_value(&legacy).unwrap();
+        modern.revision = 3;
+        modern.schema_version = "roboguide.federation-peers/v0.2".into();
+        modern.stop_observation_budget_ms = None;
+        assert!(install_profile(&mut legacy, modern).is_err());
+        assert_eq!(serde_json::to_value(&legacy).unwrap(), retained);
+        let mut modern = profile();
+        modern.schema_version = "roboguide.federation-peers/v0.3".into();
+        modern.budget_scope = Some("intent-publication-and-peer-io".into());
+        modern.stop_observation_budget_ms = Some(300_000);
+        let mut empty = State::default();
+        install_profile(&mut empty, modern).unwrap();
+        assert_eq!(
+            serde_json::to_value(empty).unwrap()["origins"],
+            serde_json::json!({})
+        );
+    }
+
     /// Builds synthetic retained history only; this fixture establishes no peer, Node or resource.
     fn sample_transaction(original: Intent) -> Transaction {
         let manifest: Manifest = serde_json::from_value(serde_json::json!({
@@ -1245,6 +1492,7 @@ mod tests {
             completed: BTreeMap::new(),
             stopping: None,
             cleanup_budget: None,
+            stop_observation: None,
             stopped: BTreeSet::new(),
         }
     }
@@ -1315,6 +1563,78 @@ mod tests {
             domain::TimestampMs::new(1600)
         ));
         assert_eq!(serde_json::to_value(&record).unwrap(), stopped);
+    }
+
+    /// Expired effect cleanup permits only the predeclared GET phase, never a renewed abort or Execute.
+    #[test]
+    fn original_stop_observation_outlives_effect_cleanup_without_renewal() {
+        let kernel = KernelTime::observe().unwrap();
+        let mut pending = intent(serde_json::Value::Null);
+        pending.reply = None;
+        pending.error = Some("original abort outcome unknown".into());
+        let mut record = sample_transaction(pending);
+        record.stopping = Some("original-root-lost".into());
+        record.cleanup_budget = Some(OriginalBudget::new(&kernel, 30_000).unwrap());
+        record.stop_observation = Some(StopObservation {
+            profile_revision: 1,
+            duration_ms: 300_000,
+            budget: Some(OriginalBudget::new(&kernel, 300_000).unwrap()),
+        });
+        let original = serde_json::to_value(&record).unwrap();
+        let mut later = serde_json::to_value(&kernel).unwrap();
+        later["elapsed_ms"] = (later["elapsed_ms"].as_u64().unwrap() + 31_000).into();
+        let later: KernelTime = serde_json::from_value(later).unwrap();
+        assert_eq!(
+            bounded_phase(&record, "synthetic-a", &later),
+            Some("observe-stop")
+        );
+        assert_eq!(phase_remaining(&record, "abort", &later), 0);
+        assert!(phase_remaining(&record, "observe-stop", &later) > 0);
+        assert_eq!(serde_json::to_value(&record).unwrap(), original);
+        record.stop_observation = None;
+        assert_eq!(bounded_phase(&record, "synthetic-a", &later), None);
+    }
+
+    /// Independent exact peer stop proof can close progress while the original lost abort remains Unknown.
+    #[test]
+    fn readonly_peer_stop_confirmation_never_replaces_original_abort() {
+        let mut missing = intent(serde_json::Value::Null);
+        missing.reply = None;
+        missing.error = Some("original abort response unknown".into());
+        let mut record = sample_transaction(missing.clone());
+        record.stopping = Some("original-root-lost".into());
+        record
+            .nonces
+            .insert("synthetic-a".into(), "original-nonce".into());
+        record.intents = BTreeMap::from([(
+            "synthetic-a".into(),
+            BTreeMap::from([("abort".into(), missing)]),
+        )]);
+        let original = serde_json::to_value(&record.intents["synthetic-a"]["abort"]).unwrap();
+        let reply = serde_json::json!({"resources_released":true,"stopped":"original-peer-budget-expired",
+            "probe":{"manifest_digest":digest(&record.manifest).unwrap(),"domain":"synthetic-a",
+                "transaction_id":record.manifest.transaction_id,"nonce":"original-nonce"}});
+        let mut wrong = record.clone();
+        let mut bad = reply.clone();
+        bad["probe"]["nonce"] = "borrowed".into();
+        wrong
+            .intents
+            .get_mut("synthetic-a")
+            .unwrap()
+            .insert("observe-stop".into(), intent(bad));
+        assert!(reduce(&mut wrong, &profile()).is_err());
+        assert!(wrong.stopped.is_empty());
+        record
+            .intents
+            .get_mut("synthetic-a")
+            .unwrap()
+            .insert("observe-stop".into(), intent(reply));
+        reduce(&mut record, &profile()).unwrap();
+        assert!(record.stopped.contains("synthetic-a") && record.decision.is_none());
+        assert_eq!(
+            serde_json::to_value(&record.intents["synthetic-a"]["abort"]).unwrap(),
+            original
+        );
     }
 
     /// An actual owned TCP listener receives no connection after the original SQL intent expires.

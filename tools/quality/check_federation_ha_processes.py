@@ -8,6 +8,7 @@ import json
 import sqlite3
 import ssl
 import subprocess
+import time
 import uuid
 from contextlib import closing
 from pathlib import Path
@@ -290,7 +291,8 @@ def run(
         request_budget_ms=30000,
         transaction_budget_ms=300000,
         max_clock_uncertainty_ms=10000,
-        peer_schema="roboguide.federation-peers/v0.2",
+        peer_schema="roboguide.federation-peers/v0.3",
+        stop_observation_budget_ms=300000,
     )
     assert relay is not None
     result: dict[str, Any] = {
@@ -351,6 +353,10 @@ def run(
         ]
         # A real transport partition after remote Prepare cannot authorize either CPU worker.
         interrupted = next_manifest(manifest)
+        # This distinct fault input declares its original bound before admission; no prior
+        # transaction, Unknown or kernel clock is shortened, extended or replaced.
+        interrupted["budget_ms"] = 120000
+        save(output / "original-partition-manifest.json", interrupted)
         interrupted_path = "/v1/federation/transactions/" + interrupted["transaction_id"]
         relay.interrupt = True
         relay.prepare_held.clear()
@@ -370,14 +376,60 @@ def run(
         ]
         assert before["budget"] == after["budget"] and before["nonces"] == after["nonces"]
         assert [len(case.backend.jobs) for case in cases] == counts
+        peer_domain = list(interrupted["participants"])[1]
+
+        def original_abort_lost() -> dict[str, Any] | None:
+            """Observe the real first abort failure while the partition remains."""
+            view = root.exchange(interrupted_path)
+            intent: dict[str, Any] = view["original_intents"].get(peer_domain, {}).get("abort", {})
+            if intent.get("error") is not None:
+                return intent
+            time.sleep(0.5)
+            return None
+
+        lost_abort = wait_for(original_abort_lost, "actual original abort lost in partition", 45)
+        save(output / "original-abort-unknown.json", lost_abort)
+
+        def original_get_lost() -> dict[str, Any] | None:
+            """Keep the real partition through the first independent stop-only GET failure."""
+            view = root.exchange(interrupted_path)
+            intent: dict[str, Any] = (
+                view["original_intents"].get(peer_domain, {}).get("observe-stop", {})
+            )
+            if intent.get("error") is not None:
+                return intent
+            time.sleep(0.5)
+            return None
+
+        save(
+            output / "original-stop-get-unknown.json",
+            wait_for(
+                original_get_lost,
+                "actual stop-only GET after cleanup expiry in partition",
+                90,
+            ),
+        )
         relay.partition.clear()
+
+        def actual_stopped() -> bool:
+            """Read retained stop progress without amplifying the owned writer with busy polling."""
+            done = len(root.exchange(interrupted_path)["stopped"]) == len(cases)
+            if not done:
+                time.sleep(1)
+            return done
+
         wait_for(
-            lambda: len(root.exchange(interrupted_path)["stopped"]) == len(cases),
+            actual_stopped,
             "actual HA original stop after partition repair",
-            60,
+            interrupted["budget_ms"] / 1000 + 90,
         )
         progress = root.exchange(interrupted_path)
         assert progress["decision"] is None and not progress["global_completed"]
+        retained = progress["original_intents"][peer_domain]["abort"]
+        assert {key: value for key, value in lost_abort.items() if key != "observations"} == {
+            key: value for key, value in retained.items() if key != "observations"
+        }
+        assert "observe-stop" in progress["original_intents"][peer_domain]
         assert [len(case.backend.jobs) for case in cases] == counts
         assert (
             sum(
@@ -429,6 +481,11 @@ def run(
         relay.partition.clear()
         for case in cases:
             try:
+                save(case.root / "final-original-application.json", original_state(case))
+            except (OSError, ValueError, KeyError, sqlite3.Error) as error:
+                result.setdefault("final_observation_errors", []).append(str(error))
+        for case in cases:
+            try:
                 case.close()
             except Exception as error:
                 cleanup_errors.append(str(error))
@@ -439,6 +496,8 @@ def run(
         save(output / "result.json", result)
     if cleanup_errors:
         raise ValueError("actual owned process cleanup failed: " + str(cleanup_errors))
+    if result.get("final_observation_errors"):
+        raise ValueError("actual final authority observation unavailable")
     from federation_ha_recovery_processes import recover
 
     result["complete_recovery"] = recover(cases, output / "complete-recovery")

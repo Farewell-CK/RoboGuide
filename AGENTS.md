@@ -1,3 +1,12 @@
+ADR-0219 adds explicit peer profile v0.3 and original stop-only GET observation. Root admission
+freezes the profile/declaration and mandatory complete origins; older transactions retain unavailable
+origin and acquire no new scope. First stopping anchors independent GET and unchanged 30-second
+cleanup to the same actual kernel start. After cleanup expiry only observe-stop GET runs, bounded
+by its original scope and sixteen observations, never POST replay or renewed effect authority.
+Exact original peer stop/resource proofs may close progress while original abort Unknown remains.
+Recovery validates origins, profile, clocks and child bounds; genuine v0.2 must refuse v0.3 before
+any Node. Current Node/wrapper/physical authority is unchanged. See ADR-0219 and its actual gate.
+
 ADR-0218 keeps original Federation receive clocks/budgets immutable and samples Control decision
 time only after acquiring the original writer and current candidate. A queued request cannot authorize
 using a stale receive-time sample after current evidence or leases expire. Prepare, current Commit/release bindings

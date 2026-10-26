@@ -84,12 +84,22 @@ impl FederationInputs {
         if peers.as_ref().is_some_and(|(_, profile)| {
             let limit = match profile["schema_version"].as_str() {
                 Some("roboguide.federation-peers/v0.1")
-                    if profile.get("budget_scope").is_none() =>
+                    if profile.get("budget_scope").is_none()
+                        && profile.get("stop_observation_budget_ms").is_none() =>
                 {
                     10_000
                 }
                 Some("roboguide.federation-peers/v0.2")
-                    if profile["budget_scope"] == "intent-publication-and-peer-io" =>
+                    if profile["budget_scope"] == "intent-publication-and-peer-io"
+                        && profile.get("stop_observation_budget_ms").is_none() =>
+                {
+                    30_000
+                }
+                Some("roboguide.federation-peers/v0.3")
+                    if profile["budget_scope"] == "intent-publication-and-peer-io"
+                        && profile["stop_observation_budget_ms"]
+                            .as_u64()
+                            .is_some_and(|budget| (1000..=300_000).contains(&budget)) =>
                 {
                     30_000
                 }

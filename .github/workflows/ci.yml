@@ -197,7 +197,7 @@ jobs:
 
       - name: Build genuine previous Federation supervisor for explicit budget refusal
         env:
-          FEDERATION_PREVIOUS_COMMIT: a993121a23f166ba74316fd0f777820e3affcc6a
+          FEDERATION_PREVIOUS_COMMIT: f961a69e409e9aeaa386f2a6209d750485747312
         run: |
           set -o pipefail
           git fetch --no-tags origin "${FEDERATION_PREVIOUS_COMMIT}"
@@ -607,6 +607,10 @@ jobs:
             ${{ runner.temp }}/roboguide-*/**/*.log
             ${{ runner.temp }}/roboguide-*/**/request-*.json
             ${{ runner.temp }}/roboguide-*/**/source-identity.json
+            ${{ runner.temp }}/roboguide-federation-ha/**/*.json
+            ${{ runner.temp }}/roboguide-federation-ha/**/*.sqlite3
+            ${{ runner.temp }}/roboguide-federation-ha/**/*.sqlite3-wal
+            ${{ runner.temp }}/roboguide-federation-ha/**/*.sqlite3-shm
 
   python:
     name: Python
