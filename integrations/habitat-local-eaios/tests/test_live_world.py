@@ -1310,16 +1310,24 @@ def test_perception_negative_read_completes_only_observation(tmp_path: Path) -> 
 
 @pytest.mark.parametrize("undispatched_successor", [False, True])
 @pytest.mark.parametrize(
-    "detected_at,expected_state,expected_steps", [(3, "COMPLETED", 3), (None, "FAILED", 4)]
+    "detected_at,budget,world_limit,expected_state,expected_steps",
+    [
+        (3, 4, 8, "COMPLETED", 3),
+        (None, 4, 8, "FAILED", 4),
+        (560, 256, 4000, "FAILED", 256),
+        (560, 4000, 4000, "COMPLETED", 560),
+    ],
 )
 def test_active_acquisition_requires_actual_detection_not_navigation_completion(
     tmp_path: Path,
     detected_at: int | None,
+    budget: int,
+    world_limit: int,
     expected_state: str,
     expected_steps: int,
     undispatched_successor: bool,
 ) -> None:
-    """Use original steps/cache; finished-navigation alone is insufficient."""
+    """Use the exact declared lifetime; long approaches never renew the original budget."""
 
     class DetectionGym(Gym):
         """Update only the returned original sensor cache at a prescribed physical step."""
@@ -1332,8 +1340,9 @@ def test_active_acquisition_requires_actual_detection_not_navigation_completion(
 
     actor, gym = Actor(2), DetectionGym({0: 1})
     runtime = Runtime(tmp_path, 2, gym, actor)
+    runtime._config.max_steps = world_limit
     runtime._config.enable_observation_acquisition = True
-    runtime._config.observation_acquisition_max_steps = 4
+    runtime._config.observation_acquisition_max_steps = budget
     runtime.registry["endpoints"][0]["operations"].append("observation.acquire@v1")
     assert runtime._habitat_env is not None
     simulator = SimpleNamespace(
@@ -1367,8 +1376,9 @@ def test_active_acquisition_requires_actual_detection_not_navigation_completion(
         assert summary["session_progress"]["undispatched_slots"] == [["task-1", "role"]]
     assert summary["identity"]["episode_reset_count"] == 1
     receipt = json.loads(next(tmp_path.glob("observation-*.json")).read_bytes())
-    assert receipt["condition_holds"] is (detected_at is not None)
+    assert receipt["condition_holds"] is (detected_at is not None and detected_at <= expected_steps)
     assert receipt["acquisition_steps"] == expected_steps
+    assert receipt["acquisition_max_steps"] == budget
     assert actor.originals[1].initializations == 0
 
 

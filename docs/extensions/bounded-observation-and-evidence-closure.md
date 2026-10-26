@@ -35,6 +35,12 @@ feedback v0.2。声明 `condition-format=detected(entity-ref) [AND at(same-entit
 
 deployment v0.4 增加 `enable_observation_acquisition`、
 `observation_acquisition_max_steps`（1–4096）与 `contract_recovery_attempts`（0–3）。
+该 acquisition 上限计入整次 invocation 的接近导航、暂停和视角搜索，并非只统计传感器读取。
+当前感知部署将它统一设为已经声明的 world step horizon，并同步 Node 最大 cycle 声明与
+无库存 planning classes；不再另加短于普通长距离接近过程的默认截断。部署仍可显式选择
+更短的操作上限，该上限耗尽属于真实局部失败。选择变化必须冻结为新配置，不重算历史结果。
+world 总步数、原生导航技能预算、单次扫描及 recovery 上限各自独立，均不因 acquisition
+配置更换而增加；一次 invocation 的原始计数也不因模型重新规划而续期。
 它们由声明冻结，子进程实际使用值须与 Local How v0.10 一致；acquire 还要求原始传感器、
 语义相机和导航技能可用。默认 Python adapter 开关关闭。新的感知/重排 deployment
 模板显式选择本轮开发配置，旧冻结运行继续使用自己的旧模板。

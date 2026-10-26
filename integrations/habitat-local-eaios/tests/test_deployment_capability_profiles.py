@@ -80,6 +80,8 @@ def test_perception_planning_preserves_registered_platform_and_observation_modes
     """MI receives typed platform facts from Node declarations, not only descriptive prose."""
     scenario = _ROOT / "scenarios/e1-shared-world-perception"
     profile = json.loads((scenario / "planning-profile.json").read_bytes())
+    declaration = json.loads((scenario / "b1-deployment.json").read_bytes())
+    assert declaration["observation_acquisition_max_steps"] == declaration["max_steps"]
     for name, capability_class in zip(
         ("node-a.toml", "node-b.toml"), profile["capability_classes"], strict=True
     ):
@@ -90,6 +92,9 @@ def test_perception_planning_preserves_registered_platform_and_observation_modes
             assert capability["attributes"] == registered[key]
         mobility = registered["mobility.move@v1"]
         acquired = registered["observation.acquire@v1"]
+        assert (
+            acquired["max-observation-cycles"] == declaration["observation_acquisition_max_steps"]
+        )
         assert acquired["condition-format"] == "detected(entity-ref) [AND at(same-entity-ref)]"
         assert registered["observation.verify@v1"]["condition-format"] == "detected(entity-ref)"
         assert acquired["viewpoint-positioning"] == (

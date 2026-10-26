@@ -76,6 +76,33 @@ def prepare(
     return result, run
 
 
+def test_active_observation_budget_cannot_borrow_another_endpoints_capability(
+    tmp_path: Path,
+) -> None:
+    """Reject a shorter exact Node limit before publishing a larger deployment lifetime."""
+    scenario = tmp_path / "scenario"
+    scenario.mkdir()
+    original = ROOT / "scenarios/e1-shared-world-perception"
+    for name in ("b1-deployment.json", "node-a.toml", "node-b.toml"):
+        (scenario / name).write_bytes((original / name).read_bytes())
+    node = scenario / "node-b.toml"
+    node.write_text(
+        node.read_text().replace("max-observation-cycles = 4000", "max-observation-cycles = 256")
+    )
+    declaration = load_deployment(scenario)
+    assert declaration.observation_acquisition_max_steps == declaration.max_steps
+    emos = tmp_path / "emos"
+    native = emos / declaration.habitat_config
+    native.parent.mkdir(parents=True)
+    native.write_text("# Offline path fixture; no Habitat startup.\n")
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "b1-input-used.json").write_bytes((NAVIGATION / "b1-input.json").read_bytes())
+    with pytest.raises(ValueError, match="budget differs from Node declaration"):
+        freeze_deployment(run, scenario, emos)
+    assert not (run / "b1-deployment-used.json").exists()
+
+
 @pytest.mark.parametrize("scenario", [NAVIGATION, RELOCATION])
 def test_real_runner_prepares_the_selected_deployment(tmp_path: Path, scenario: Path) -> None:
     """Actual preparation freezes config, ports, resources and MI sources without SUT calls."""

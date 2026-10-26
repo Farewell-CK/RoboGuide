@@ -10,6 +10,6 @@
     "node-b.toml"
   ],
   "enable_observation_acquisition": true,
-  "observation_acquisition_max_steps": 256,
+  "observation_acquisition_max_steps": 4000,
   "contract_recovery_attempts": 2
 }
