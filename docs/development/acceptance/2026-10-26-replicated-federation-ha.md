@@ -81,6 +81,16 @@ TLS 握手分别核对原、替换和恢复 leaf 的 DER digest；不改变产�
 另有 299 通过。全 Clippy、433 个源文件 strict mypy、Ruff 与函数文档检查通过。当前完整
 CI、完整 native 结果和总签署仍分别核对，不从局部测试推断完成。
 
+后续完整 CI 40267061646 已通过本 HA gate、升级后完整恢复及先前所有检查，在
+initialized Controller 跨 owner 读取检查发现工具观察竞态：HTTP Content-Length 已收齐，
+原 Root worker 尚未持久 EOF/close，`receipt=null` 不能直接下标为完成。维护工具现仅只读
+观察同一原 reader/immutable intent 的真实 SQL close，固定 30 秒外层观察，不重发 HTTP、
+重开 reader 或续原权限。原内容/digest/字节数及 complete 必须由实际持久 receipt 证明。
+`/tmp/rg-current-initialized-1/result.json` 已通过完整初始化/TLS/原 child 故障重启、
+跨 owner 原 reader close、Prepared 恢复/release/Completed retirement；五个实际
+supervisor wait 均为 0。`/tmp/rg-current-initialized-cold-1/result.json` 完整恢复及三个
+leader 实际读取通过。原 CI 失败保留，修复不改变产品合同。
+
 ## 证据限制
 
 同一主机真实独立进程、文件、SQLite、CAS、mTLS、kernel clocks 与 wait 仅证明对应软件

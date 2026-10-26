@@ -713,22 +713,35 @@ def run(
                 assert next_owner != source_writer["owner"]
                 assert request_http(next_origin, "/v1/artifacts/" + checksum[7:]) == (200, payload)
                 assert not next_blob.exists()
-                with closing(
-                    sqlite3.connect(
-                        (Path(configs[next_member]["content"]["root"]) / "content.sqlite3").as_uri()
-                        + "?mode=ro",
-                        uri=True,
-                    )
-                ) as sql:
-                    rows = sql.execute("SELECT record FROM content_readers LIMIT 4097").fetchall()
-                assert len(rows) <= 4096
-                original_reads = [
-                    json.loads(row[0])
-                    for row in rows
-                    if json.loads(row[0])["intent"]["reader_id"].startswith("child-read:")
-                ]
-                assert len(original_reads) == 1
-                original_read = original_reads[0]
+                reader_path = Path(configs[next_member]["content"]["root"]) / "content.sqlite3"
+                original_intent: dict[str, Any] | None = None
+                reader_deadline = time.monotonic() + 30
+                while True:
+                    with closing(
+                        sqlite3.connect(reader_path.as_uri() + "?mode=ro", uri=True)
+                    ) as sql:
+                        rows = sql.execute(
+                            "SELECT record FROM content_readers LIMIT 4097"
+                        ).fetchall()
+                    assert len(rows) <= 4096
+                    original_reads = [
+                        json.loads(row[0])
+                        for row in rows
+                        if json.loads(row[0])["intent"]["reader_id"].startswith("child-read:")
+                    ]
+                    assert len(original_reads) == 1
+                    original_read = original_reads[0]
+                    if original_intent is None:
+                        original_intent = original_read["intent"]
+                    assert original_read["intent"] == original_intent
+                    if original_read["receipt"] is not None:
+                        break
+                    # Content-Length completion may reach HTTP before the independent Root
+                    # worker commits its own EOF/close. Only SQL GET observation may wait here.
+                    assert original_read["process_end"] is None
+                    if time.monotonic() >= reader_deadline:
+                        raise TimeoutError("actual original Root reader durable close unavailable")
+                    time.sleep(0.05)
                 assert original_read["intent"]["content"]["source_owner"] == source_writer["owner"]
                 assert original_read["receipt"]["complete"]
                 assert original_read["receipt"]["observed_digest"] == checksum

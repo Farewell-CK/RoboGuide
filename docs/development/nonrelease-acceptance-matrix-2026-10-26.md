@@ -66,6 +66,7 @@ Unavailable、Unknown、样本数与未实测部署条件均独立列出。
 | producer GC/Snapshot/learner/joint/最终三 leader 冷恢复/原 GC 独立核对 | `/tmp/rg-current-final-archive-followup-1/result.json`；保留上一行原数据，原失败不改写 |
 | 私有 Archive 退休/故障/GC/完整冷恢复与实际旧 profile 拒绝 | `/tmp/rg-archive-recipient-local-7/result.json`，使用当前选定 recovery profile 验证全部原 leases/存量 |
 | genuine v55 → 当前 v60 与完整冷恢复 | `/tmp/rg-upgrade-v60-current-1/result.json`、`/tmp/rg-upgrade-v60-current-cold-1/result.json`；从完整原 activation receipts 选择 v0.29，三个恢复后 leader 读取通过 |
+| 初始化/TLS/跨 owner 原 close/Prepared 恢复/退休及完整恢复 | `/tmp/rg-current-initialized-1/result.json`、`/tmp/rg-current-initialized-cold-1/result.json`；HTTP 内容接收与 Root 持久 EOF 回执分开，只读观察不重读或续预算 |
 
 设备停止、物理交接、硬实时、硬件身份、跨主机连续性、长期 SLO 和人工响应保留独立证据
 要求；软件合同完整后可标为 HardwareEvidencePending，不能用它掩盖软件 TEST GAP。
