@@ -45,7 +45,7 @@ from .perception_diagnostics import PerceptionDiagnostics
 from .preassignment_feasibility import preassignment_digest
 from .shared_world import SharedEmosStage2Runtime
 from .view_motion import motion_feedback_declaration
-from .view_recovery import view_recovery_declaration
+from .view_recovery import preparation_reselection_declaration, view_recovery_declaration
 from .view_recovery_binding import supports_viewpoint_recovery
 from .view_scan import inspect_view_scan, view_scan_declaration
 
@@ -241,10 +241,11 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 )
             self._write_json("preassignment-feasibility.json", published)
         how = json.loads((self._evidence_dir() / "local-how-profile.json").read_bytes())
+        preparation_feedback = preparation_reselection_declaration() if compound else None
         self._write_json(
             "local-how-profile.json",
             {
-                "schema_version": "roboguide.habitat-local-how-profile/v0.18"
+                "schema_version": "roboguide.habitat-local-how-profile/v0.19"
                 if compound
                 else "roboguide.habitat-local-how-profile/v0.16"
                 if acquisition
@@ -261,7 +262,10 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                     {
                         "observation_control": observation_control_declaration(compound=compound),
                         **(
-                            {"initial_observation_preferences": preference_declaration()}
+                            {
+                                "initial_observation_preferences": preference_declaration(),
+                                "action_preparation_feedback": preparation_feedback,
+                            }
                             if compound
                             else {}
                         ),

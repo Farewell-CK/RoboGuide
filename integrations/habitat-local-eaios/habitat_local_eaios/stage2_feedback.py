@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .model import IntegrationError
+from .view_recovery import ObservationRecoveryUnavailable, ViewpointSearchMiss
 
 if TYPE_CHECKING:
     from .navigation_dispatch import NavigationDispatchLifecycle
@@ -30,6 +31,28 @@ FEEDBACK_PROFILE = "observed-local-skill-feedback/v0.1"
 BOUND_FEEDBACK_PROFILE = "observed-local-skill-feedback/v0.5"
 _SCHEMA = "roboguide.stage2-execution-feedback/v0.1"
 _COMPLETED_PREFIX = "You have completed your previous action. "
+
+
+class Stage2PreparationRejected(IntegrationError):
+    """Retain one proven pre-physics rejection without attributing it to the model."""
+
+    def __init__(
+        self,
+        agent_name: str,
+        action: dict[str, Any],
+        reason: str,
+        invocation_digest: str,
+        tool_call_id: str,
+        progress: dict[str, int],
+    ) -> None:
+        """Freeze the original selected action, exact owner and bounded search evidence."""
+        self.agent_name = agent_name
+        self.action = deepcopy(action)
+        self.reason = reason
+        self.invocation_digest = invocation_digest
+        self.tool_call_id = tool_call_id
+        self.progress = dict(progress)
+        super().__init__(f"Stage2 local preparation rejected for {agent_name}: {reason}")
 
 
 def _field(value: Any, name: str) -> Any:
@@ -154,6 +177,7 @@ class Stage2ExecutionFeedback:
         observation_control: ObservationAcquisitionControl | None = None,
         navigation_dispatch: NavigationDispatchLifecycle | None = None,
         view_scan: ViewScanBinding | None = None,
+        preparation_reselection: bool = False,
     ) -> None:
         """Freeze own contracts, optionally reading a deployment-owned active-peer projection."""
         self._contracts = dict(contracts)
@@ -164,6 +188,12 @@ class Stage2ExecutionFeedback:
         self._observation_control = observation_control
         self._navigation_dispatch = navigation_dispatch
         self._view_scan = view_scan
+        if type(preparation_reselection) is not bool:
+            raise IntegrationError("preparation reselection requires an explicit Boolean")
+        if preparation_reselection and (navigation_dispatch is None or observation_control is None):
+            raise IntegrationError("preparation reselection requires bound acquisition navigation")
+        self._preparation_reselection = preparation_reselection
+        self._preparation_rejections: dict[str, Stage2PreparationRejected] = {}
         if view_scan is not None and (
             observation_control is None
             or view_scan.control is not observation_control
@@ -207,6 +237,7 @@ class Stage2ExecutionFeedback:
 
     def admit(self, agent_name: str, model: Any, action: Mapping[str, Any]) -> None:
         """Replace an optimistic receipt only after the independent guard admits the call."""
+        self._preparation_rejections.pop(agent_name, None)
         receipt = _receipt(model, action)
         previous = self._pending.get(agent_name)
         if previous is not None and previous.document["tool_name"] == "scan_for_object":
@@ -365,13 +396,47 @@ class Stage2ExecutionFeedback:
             )
             return action
         if pending.action["name"] == "nav_to_obj" and self._navigation_dispatch is not None:
-            self._navigation_dispatch.dispatch(
-                action,
-                pending.action,
-                pending.document["tool_call_id"],
-                pending.document["action_sequence"],
-                stationary_scan=self._stationary_scan,
-            )
+            try:
+                self._navigation_dispatch.dispatch(
+                    action,
+                    pending.action,
+                    pending.document["tool_call_id"],
+                    pending.document["action_sequence"],
+                    stationary_scan=self._stationary_scan,
+                )
+            except ObservationRecoveryUnavailable as error:
+                miss = error.__cause__
+                contract = self._contracts[agent_name]
+                if (
+                    not self._preparation_reselection
+                    or not isinstance(miss, ViewpointSearchMiss)
+                    or pending.physical_steps != 0
+                    or contract.invocation_digest is None
+                ):
+                    raise
+                rejection = Stage2PreparationRejected(
+                    agent_name,
+                    pending.action,
+                    str(error),
+                    contract.invocation_digest,
+                    pending.document["tool_call_id"],
+                    miss.progress,
+                )
+                self._preparation_rejections[agent_name] = rejection
+                pending.document = dict(
+                    pending.document,
+                    status="preparation-rejected",
+                    source="guarded-navigation-mapping-before-skill-entry",
+                    failure_domain="local-capability-preparation",
+                    failure_code="bounded-viewpoint-search-miss",
+                    reason=rejection.reason,
+                    search_progress=dict(miss.progress),
+                    action_executed=False,
+                    physical_steps_since_call=0,
+                )
+                self._write_observed_receipt(pending)
+                self._emit("preparation-rejected", pending.document)
+                raise rejection from error
             self._stationary_scan = None
         if pending.action["name"] not in {"wait", "send_request"}:
             return action
@@ -391,6 +456,22 @@ class Stage2ExecutionFeedback:
             },
         )
         return result
+
+    def owns_preparation_rejection(self, rejection: Stage2PreparationRejected) -> bool:
+        """Accept only the exact rejection still owned by this bound zero-step action."""
+        pending = self._pending.get(rejection.agent_name)
+        contract = self._contracts.get(rejection.agent_name)
+        return bool(
+            self._preparation_reselection
+            and self._preparation_rejections.get(rejection.agent_name) is rejection
+            and pending is not None
+            and contract is not None
+            and contract.invocation_digest == rejection.invocation_digest
+            and pending.document["tool_call_id"] == rejection.tool_call_id
+            and pending.document["status"] == "preparation-rejected"
+            and pending.action == rejection.action
+            and pending.physical_steps == 0
+        )
 
     def _observe_manipulation(self, agent_name: str, timing: str) -> dict[str, Any]:
         """Keep sparse observation faults and oversized data out of model/physical decisions."""
@@ -942,3 +1023,4 @@ class Stage2ExecutionFeedback:
             self._write_observed_receipt(pending)
             self._emit("segment-ended", pending.document)
         self._pending.clear()
+        self._preparation_rejections.clear()

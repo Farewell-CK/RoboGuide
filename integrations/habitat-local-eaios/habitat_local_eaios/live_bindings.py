@@ -170,6 +170,10 @@ class LivePolicyBindings:
                     else None
                 ),
                 view_scan=scan,
+                preparation_reselection=(
+                    observation_control is not None
+                    and agent in getattr(self.runtime, "_compound_observers", set())
+                ),
             )
         except BaseException:
             if scan is not None:

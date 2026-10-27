@@ -1914,6 +1914,16 @@ Restore cannot acquire or renew the hint. Independent archive/preflight readers
 cross-check exact coverage and derived counts. No route, visibility, physical outcome,
 MI inventory access or official goal is inferred. See ADR-0224 and its shared synthetic fixture.
 
+ADR-0225 adds explicit Local How v0.19 preparation feedback. Only the exact bound,
+zero-physical-step viewpoint search miss after guarded original tool mapping can
+request a fresh model selection. It shares the original attempt's contract recovery
+budget; search quota, invocation/world clocks and goals do not renew. Original
+rejection, owner/call identity and unavailable evidence remain. Provider, unknown
+errors and executed actions retain refusal. Runtime and independent archive readers
+require the complete declaration; old profiles keep their original scope. No
+fallback command, Prompt, native EMOS, Core/Plan or official truth changes apply.
+See `docs/decisions/0225-bounded-preparation-feedback.md`; physical validation remains separate.
+
 The v0.13 acquisition tool `scan_for_object` is backed by an independently scoped local HRL
 skill and verified original base-yaw interfaces. Only a real guarded model selection invokes it;
 32-step/90-degree/1.5rad/s bounds clip to the original remaining acquisition budget. Zero

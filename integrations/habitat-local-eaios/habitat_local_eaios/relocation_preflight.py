@@ -117,7 +117,10 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             execution_options["enable_observation_acquisition"]
             or execution_options["contract_recovery_attempts"] > 0
         )
-        geometry_preferences = actual_schema == "roboguide.habitat-local-how-profile/v0.18"
+        preparation_feedback = actual_schema == "roboguide.habitat-local-how-profile/v0.19"
+        geometry_preferences = preparation_feedback or (
+            actual_schema == "roboguide.habitat-local-how-profile/v0.18"
+        )
         compound_observation = (
             geometry_preferences or actual_schema == "roboguide.habitat-local-how-profile/v0.17"
         )
@@ -133,6 +136,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             "roboguide.habitat-local-how-profile/v0.16",
             "roboguide.habitat-local-how-profile/v0.17",
             "roboguide.habitat-local-how-profile/v0.18",
+            "roboguide.habitat-local-how-profile/v0.19",
         }
         view_search = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.13",
@@ -141,6 +145,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             "roboguide.habitat-local-how-profile/v0.16",
             "roboguide.habitat-local-how-profile/v0.17",
             "roboguide.habitat-local-how-profile/v0.18",
+            "roboguide.habitat-local-how-profile/v0.19",
         }
         navigation_dispatch = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.12",
@@ -150,6 +155,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             "roboguide.habitat-local-how-profile/v0.16",
             "roboguide.habitat-local-how-profile/v0.17",
             "roboguide.habitat-local-how-profile/v0.18",
+            "roboguide.habitat-local-how-profile/v0.19",
         }
         observation_control = actual_schema in {
             "roboguide.habitat-local-how-profile/v0.11",
@@ -160,6 +166,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             "roboguide.habitat-local-how-profile/v0.16",
             "roboguide.habitat-local-how-profile/v0.17",
             "roboguide.habitat-local-how-profile/v0.18",
+            "roboguide.habitat-local-how-profile/v0.19",
         }
         if viewpoint_recovery:
             from .view_recovery import view_recovery_declaration
@@ -218,7 +225,9 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             not in {"roboguide.e1.b1-deployment-used/v0.3", "roboguide.e1.b1-deployment-used/v0.4"}
             or actual_schema
             != (
-                "roboguide.habitat-local-how-profile/v0.18"
+                "roboguide.habitat-local-how-profile/v0.19"
+                if preparation_feedback
+                else "roboguide.habitat-local-how-profile/v0.18"
                 if geometry_preferences
                 else "roboguide.habitat-local-how-profile/v0.17"
                 if compound_observation
@@ -255,6 +264,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
                 *({"observation_motion_feedback"} if motion_feedback else set()),
                 *({"observation_viewpoint_recovery"} if viewpoint_recovery else set()),
                 *({"initial_observation_preferences"} if geometry_preferences else set()),
+                *({"action_preparation_feedback"} if preparation_feedback else set()),
             }
             or actual.get("execution_profile") != LIVE_PROFILE
             or actual.get("endpoint_registry_digest") != registry["digest"]
@@ -262,6 +272,10 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             or _read_object(run / "evidence/endpoint-registry-used.json") != registry
         ):
             raise IntegrationError("actual live Local How differs from frozen endpoint sources")
+        if preparation_feedback:
+            from .view_recovery import validate_preparation_reselection
+
+            validate_preparation_reselection(actual.get("action_preparation_feedback"))
         if geometry_preferences:
             from .observation_preferences import preference_declaration, validate_preference_source
 

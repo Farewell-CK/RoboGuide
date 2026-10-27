@@ -28,6 +28,10 @@
 ## 历史切片与演进记录
 
 E1 部署合同的 [搬运楼层访问](docs/decisions/0222-relocation-floor-access-feedback.md) 与
+[执行前准备反馈](docs/decisions/0225-bounded-preparation-feedback.md) 在明确版本的 Local How
+中将尚未执行的有界视点搜索失败交还模型，并复用原重选预算。原始目标、拒绝记录、搜索和世界
+预算保持不变；它不替模型选动作，也不把团队观测伪造成本机观测。物理效果仍需独立验证。
+
 [联合观测采集](docs/decisions/0223-compound-observation-acquisition.md) 将明确的本地执行前提、
 同一步局部条件和有界计划反馈接入已有边界。它们不提供官方成功或真实物理验证证明；
 历史实验仍保留原代码与配置，新的物理结果须单独归档。

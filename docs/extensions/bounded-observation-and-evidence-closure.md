@@ -36,6 +36,13 @@ feedback v0.2。声明 `condition-format=detected(entity-ref) [AND at(same-entit
 deployment v0.4 增加 `enable_observation_acquisition`、
 `observation_acquisition_max_steps`（1–4096）与 `contract_recovery_attempts`（0–3）。
 该 acquisition 上限计入整次 invocation 的接近导航、暂停和视角搜索，并非只统计传感器读取。
+Local How v0.19 在 v0.18 的基础上声明
+`action_preparation_feedback=bounded-pre-dispatch-preparation-feedback/v0.1`。
+只有经过 Guard 和原始工具映射、但在技能执行前因有界视点搜索未找到候选而拒绝的动作，
+可以将真实失败事实交还同一个模型。它与工具合同错误共用原 `contract_recovery_attempts`，
+不更新搜索次数、操作或世界步数预算；Provider、未知错误和已执行动作不进入该路径。
+模型自行重新选择工具，适配器不会自动导航或暂停。完整声明由运行期和独立归档读者核对，
+旧 Local How 行为保留；见 [ADR-0225](../decisions/0225-bounded-preparation-feedback.md)。
 当前感知部署将它统一设为已经声明的 world step horizon，并同步 Node 最大 cycle 声明与
 无库存 planning classes；不再另加短于普通长距离接近过程的默认截断。部署仍可显式选择
 更短的操作上限，该上限耗尽属于真实局部失败。选择变化必须冻结为新配置，不重算历史结果。

@@ -127,6 +127,35 @@ class ViewpointSearchMiss(IntegrationError):
         self.progress = progress
 
 
+def preparation_reselection_declaration() -> dict[str, Any]:
+    """Declare model feedback for one proven pre-physics miss within existing budgets."""
+    return {
+        "profile": "bounded-pre-dispatch-preparation-feedback/v0.1",
+        "eligible_failure": "bounded-viewpoint-search-miss",
+        "failure_owner": "local-capability-preparation",
+        "boundary": "after-guarded-navigation-mapping-before-skill-entry",
+        "reselection_budget": "shared-original-canonical-attempt-contract-recovery-budget",
+        "search_budget": "original-nonrenewable-viewpoint-search-budget",
+        "requires_exact_invocation_and_call": True,
+        "requires_zero_physical_steps": True,
+        "provider_errors_retried": False,
+        "unknown_errors_retried": False,
+        "model_actions_rewritten": False,
+        "official_success_authority": "habitat-pddl",
+    }
+
+
+def validate_preparation_reselection(value: object) -> None:
+    """Refuse absent, widened or Boolean-coerced preparation authority declarations."""
+    expected = preparation_reselection_declaration()
+    if (
+        not isinstance(value, dict)
+        or value != expected
+        or any(type(value[key]) is not type(item) for key, item in expected.items())
+    ):
+        raise IntegrationError("actual action preparation feedback contract is invalid")
+
+
 def view_recovery_declaration(*, optics: bool = True) -> dict[str, Any]:
     """Publish a finite local search with unchanged semantic and execution budgets."""
     declaration = {

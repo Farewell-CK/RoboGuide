@@ -24,7 +24,7 @@ from .model import (
     CanonicalRelocationInvocation,
     IntegrationError,
 )
-from .stage2_feedback import Stage2ExecutionFeedback
+from .stage2_feedback import Stage2ExecutionFeedback, Stage2PreparationRejected
 
 _LOG = logging.getLogger(__name__)
 _MAX_RECORD_BYTES = 65_536
@@ -642,6 +642,46 @@ def _guard_agent(
     agent_name = agent.name
     remaining_recoveries = recovery_attempts
 
+    def request_reselection(
+        error: Stage2ContractViolation | Stage2PreparationRejected, content: str
+    ) -> str:
+        """Spend the same original attempt budget for one evidenced, unexecuted rejection."""
+        nonlocal remaining_recoveries
+        if remaining_recoveries == 0:
+            raise error
+        remaining_recoveries -= 1
+        preparation = isinstance(error, Stage2PreparationRejected)
+        correction = {
+            "schema_version": "roboguide.stage2-contract-recovery/v0.2"
+            if preparation
+            else "roboguide.stage2-contract-recovery/v0.1",
+            "contract": contract.as_dict(),
+            "rejected_action": error.action,
+            "reason": error.reason,
+            "relocation_phase": relocation_state.phase if relocation_state is not None else None,
+            "remaining_recoveries": remaining_recoveries,
+            "action_executed": False,
+        }
+        if isinstance(error, Stage2PreparationRejected):
+            correction.update(
+                failure_domain="local-capability-preparation",
+                failure_code="bounded-viewpoint-search-miss",
+                invocation_digest=error.invocation_digest,
+                tool_call_id=error.tool_call_id,
+                search_progress=error.progress,
+            )
+        try:
+            record(dict(correction, decision="reselection_requested", agent_name=agent_name))
+        except Exception:
+            _LOG.exception("Stage2 recovery evidence unavailable")
+        try:
+            encoded = json.dumps(correction, sort_keys=True, allow_nan=False)
+        except (TypeError, ValueError):
+            raise error from None
+        if len(encoded.encode()) > 16_384:
+            raise error
+        return f"{content}\n\nLocal execution contract feedback:\n{encoded}"
+
     def guarded_chat(observation: str) -> Any:
         """Validate raw model output before CrabAgent transforms or dispatches it."""
         model = getattr(agent, "llm_model", None)
@@ -824,49 +864,34 @@ def _guard_agent(
             No rejected action reaches CrabAgent or establishes skill completion;
             current exact grasp may refresh the separate admission phase.
             """
-            nonlocal remaining_recoveries
             while True:
                 try:
                     return one_model_call(content, crab_planning)
                 except Stage2ContractViolation as error:
-                    if crab_planning or remaining_recoveries == 0:
+                    if crab_planning:
                         raise
-                    remaining_recoveries -= 1
-                    correction = {
-                        "schema_version": "roboguide.stage2-contract-recovery/v0.1",
-                        "contract": contract.as_dict(),
-                        "rejected_action": error.action,
-                        "reason": error.reason,
-                        "relocation_phase": relocation_state.phase
-                        if relocation_state is not None
-                        else None,
-                        "remaining_recoveries": remaining_recoveries,
-                        "action_executed": False,
-                    }
-                    try:
-                        record(
-                            dict(
-                                correction, decision="reselection_requested", agent_name=agent_name
-                            )
-                        )
-                    except Exception:
-                        _LOG.exception("Stage2 recovery evidence unavailable")
-                    try:
-                        encoded = json.dumps(correction, sort_keys=True, allow_nan=False)
-                    except (TypeError, ValueError):
-                        raise error from None
-                    if len(encoded.encode()) > 16_384:
-                        raise error
-                    content = content + "\n\nLocal execution contract feedback:\n" + encoded
+                    content = request_reselection(error, content)
 
         model.chat = guarded_model_chat
         try:
-            result = original_chat(observation)
-            return (
-                feedback.bind_observation_dispatch(agent_name, result)
-                if feedback is not None
-                else result
-            )
+            current_observation = observation
+            while True:
+                try:
+                    result = original_chat(current_observation)
+                    return (
+                        feedback.bind_observation_dispatch(agent_name, result)
+                        if feedback is not None
+                        else result
+                    )
+                except Stage2PreparationRejected as error:
+                    if (
+                        feedback is None
+                        or error.agent_name != agent_name
+                        or error.invocation_digest != contract.invocation_digest
+                        or not feedback.owns_preparation_rejection(error)
+                    ):
+                        raise
+                    current_observation = request_reselection(error, current_observation)
         finally:
             _restore_attribute(model, "chat", previous_model_chat)
 

@@ -144,6 +144,30 @@ def _validate_operation_sources(run: Path, document: dict[str, Any]) -> None:
         raise ValueError("deployment operation admission differs from its actual reset sources")
 
 
+def _validate_preparation_feedback(value: object) -> None:
+    """Independently reject broadened or mistyped pre-physics reselection declarations."""
+    expected = {
+        "profile": "bounded-pre-dispatch-preparation-feedback/v0.1",
+        "eligible_failure": "bounded-viewpoint-search-miss",
+        "failure_owner": "local-capability-preparation",
+        "boundary": "after-guarded-navigation-mapping-before-skill-entry",
+        "reselection_budget": "shared-original-canonical-attempt-contract-recovery-budget",
+        "search_budget": "original-nonrenewable-viewpoint-search-budget",
+        "requires_exact_invocation_and_call": True,
+        "requires_zero_physical_steps": True,
+        "provider_errors_retried": False,
+        "unknown_errors_retried": False,
+        "model_actions_rewritten": False,
+        "official_success_authority": "habitat-pddl",
+    }
+    if (
+        not isinstance(value, dict)
+        or value != expected
+        or any(type(value[key]) is not type(item) for key, item in expected.items())
+    ):
+        raise ValueError("loaded action preparation feedback contract is invalid")
+
+
 def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     """Cross-bind opt-in topology and operations to actual run-local Node configuration.
 
@@ -269,7 +293,10 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
             for record in records
         ],
     }
-    geometry_preferences = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.18"
+    preparation_feedback = how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.19"
+    geometry_preferences = preparation_feedback or (
+        how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.18"
+    )
     compound_observation = (
         geometry_preferences
         or how.get("schema_version") == "roboguide.habitat-local-how-profile/v0.17"
@@ -317,6 +344,8 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     )
     if extended and how.get("execution_options") != execution_options:
         raise ValueError("loaded execution options differ from declaration")
+    if preparation_feedback:
+        _validate_preparation_feedback(how.get("action_preparation_feedback"))
     bound_relocation = declared["relocation_completion_binding"]
     base_profile = how.get("base_profile", {})
     bound_feedback = (
@@ -352,6 +381,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         "roboguide.habitat-local-how-profile/v0.16",
         "roboguide.habitat-local-how-profile/v0.17",
         "roboguide.habitat-local-how-profile/v0.18",
+        "roboguide.habitat-local-how-profile/v0.19",
     }
     view_search = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.13",
@@ -360,6 +390,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         "roboguide.habitat-local-how-profile/v0.16",
         "roboguide.habitat-local-how-profile/v0.17",
         "roboguide.habitat-local-how-profile/v0.18",
+        "roboguide.habitat-local-how-profile/v0.19",
     }
     navigation_dispatch = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.12",
@@ -369,6 +400,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         "roboguide.habitat-local-how-profile/v0.16",
         "roboguide.habitat-local-how-profile/v0.17",
         "roboguide.habitat-local-how-profile/v0.18",
+        "roboguide.habitat-local-how-profile/v0.19",
     }
     observation_control = how.get("schema_version") in {
         "roboguide.habitat-local-how-profile/v0.11",
@@ -379,6 +411,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
         "roboguide.habitat-local-how-profile/v0.16",
         "roboguide.habitat-local-how-profile/v0.17",
         "roboguide.habitat-local-how-profile/v0.18",
+        "roboguide.habitat-local-how-profile/v0.19",
     }
     if viewpoint_recovery:
         expected_recovery = {
@@ -528,10 +561,13 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
             *({"observation_motion_feedback"} if motion_feedback else set()),
             *({"observation_viewpoint_recovery"} if viewpoint_recovery else set()),
             *({"initial_observation_preferences"} if geometry_preferences else set()),
+            *({"action_preparation_feedback"} if preparation_feedback else set()),
         }
         or how["schema_version"]
         != (
-            "roboguide.habitat-local-how-profile/v0.18"
+            "roboguide.habitat-local-how-profile/v0.19"
+            if preparation_feedback
+            else "roboguide.habitat-local-how-profile/v0.18"
             if geometry_preferences
             else "roboguide.habitat-local-how-profile/v0.17"
             if compound_observation
