@@ -89,6 +89,14 @@ object RobotConnectionManager : KoinComponent {
         MMKVUtils.putAny(KEY_HOST, "")
         MMKVUtils.putAny(KEY_PORT, 0)
         connectionState.value = ConnectionState.Idle
+        resetLocalTurnState()
+    }
+
+    private fun resetLocalTurnState() {
+        activeJob?.cancel()
+        activeJob = null
+        isBusy = false
+        activeTurnId = ""
     }
 
     /** 下发一条室内指令。若上一轮任务还没到终态（isBusy），带上它的 turn id 走 steer（替换当前轮），
@@ -127,10 +135,7 @@ object RobotConnectionManager : KoinComponent {
         val ep = endpoint() ?: return
         if (!isBusy) return
         val turnId = activeTurnId
-        activeJob?.cancel()
-        activeJob = null
-        isBusy = false
-        activeTurnId = ""
+        resetLocalTurnState()
         scope.launch {
             try {
                 chatRepository.submitAbortTask(ep, sessionId, userId = "guide-assistant", expectedTurnId = turnId)

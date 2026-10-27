@@ -2,8 +2,14 @@ package com.seaway.guideassistant.fragment
 
 import android.Manifest
 import android.location.Location
+import android.net.Uri
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
+import android.util.Log
 import android.view.View
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -24,6 +30,7 @@ import com.elabrador.mobilenavigation.VisionHintSettings
 import com.seaway.guideassistant.R
 import com.seaway.guideassistant.base.BaseBindFragment
 import com.seaway.guideassistant.base.Constant
+import com.seaway.guideassistant.ble.GlassesManager
 import com.seaway.guideassistant.databinding.FragmentNavigateBinding
 import com.seaway.guideassistant.navigation.NavigationPlanManager
 import com.seaway.guideassistant.robot.RobotConnectionManager
@@ -35,12 +42,22 @@ import com.seaway.guideassistant.ws.DeviceType
 import com.seaway.guideassistant.ws.DeviceWatchClient
 import com.seaway.smallutils.ToastUtil
 import com.seaway.smallutils.TtsUtils
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.koin.android.ext.android.get
 import org.koin.core.qualifier.named
+import org.videolan.libvlc.LibVLC
+import org.videolan.libvlc.Media
+import org.videolan.libvlc.MediaPlayer as VlcMediaPlayer
 
 class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
+
+    companion object {
+        private const val TAG_GLASSES_FEED = "NavGlassesFeed"
+    }
 
     private var outdoorController: OutdoorNavController? = null
     private var voiceController: VoiceInputController? = null
@@ -48,6 +65,25 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
     private var lastDispatchedPlanId = -1
     private var lastAnnouncedCompleted = false
     private var lastSpokenGuidance: String? = null
+
+    /** true：已点击"开始导航"进入室外导航中（对应 groupOutdoorActive 可见），眼镜画面只在此时渲染。 */
+    private val outdoorNavigationActive = MutableStateFlow(false)
+
+    /** true：当前展示室内阶段 UI（groupIndoorMode 可见）。室外导航不依赖 NavigationPlanManager 的计划
+     * 状态——用户可以不经过 Agent 下发计划、直接在本页手动"开始导航"，这种场景下 PlanState 一直是
+     * Idle，若拿它做直播开关的前置条件，眼镜直播永远不会被打开。室内阶段本身就是计划驱动的，这里仍然
+     * 用 renderPlanState 已经算出来的 showIndoor 同步即可。 */
+    private val indoorPhaseActive = MutableStateFlow(false)
+    private var libVLC: LibVLC? = null
+    private var glassesPlayer: VlcMediaPlayer? = null
+    private var glassesStreamOn = false
+    private var wantGlassesRender = false
+    private var glassesPlaying = false
+    private val glassesRetryHandler = Handler(Looper.getMainLooper())
+    private var glassesRetryCount = 0
+    private val maxGlassesRetries = 5
+
+    private data class GlassesFeedDecision(val streamOn: Boolean, val render: Boolean)
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -58,6 +94,9 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
                 grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
             ) {
                 outdoorController?.onLocationPermissionGranted()
+            }
+            if (grants[Manifest.permission.NEARBY_WIFI_DEVICES] == true && glassesStreamOn) {
+                GlassesManager.startLiveStream()
             }
         }
 
@@ -86,15 +125,20 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         observePlan()
         observeRobotStatus()
         observeRobotLog()
+        observeGlassesFeed()
     }
 
     override fun onResume() {
         super.onResume()
         outdoorController?.onResume()
+        if (wantGlassesRender && !glassesPlaying) {
+            readyGlassesUrl()?.let(::startGlassesPlayback)
+        }
     }
 
     override fun onPause() {
         outdoorController?.onPause()
+        pauseGlassesPlayback()
         super.onPause()
     }
 
@@ -103,6 +147,21 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         outdoorController = null
         voiceController?.release()
         voiceController = null
+        glassesRetryHandler.removeCallbacksAndMessages(null)
+        glassesPlayer?.stop()
+        glassesPlayer?.detachViews()
+        glassesPlayer?.release()
+        glassesPlayer = null
+        libVLC?.release()
+        libVLC = null
+        // 新视图里的 VLCVideoLayout 默认是 GONE，必须让下次决策重新走一遍 showGlassesPreview
+        wantGlassesRender = false
+        glassesPlaying = false
+        glassesRetryCount = 0
+        if (glassesStreamOn) {
+            glassesStreamOn = false
+            GlassesManager.stopLiveStream()
+        }
         super.onDestroyView()
     }
 
@@ -135,6 +194,150 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 RobotConversationLog.entries.collect { entries -> renderRobotLog(entries) }
             }
+        }
+    }
+
+    /** 持续判断眼镜画面要不要开/要不要渲染：室内外任一阶段进行中 + 眼镜已连接 + 电量 > 30% 就开直播
+     * （[GlassesManager.startLiveStream]），画面渲染只在室外且已点击"开始导航"时才启用。 */
+    private fun observeGlassesFeed() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    combine(
+                        GlassesManager.connectionState,
+                        GlassesManager.batteryState,
+                        outdoorNavigationActive,
+                        indoorPhaseActive
+                    ) { conn, battery, outdoorActive, indoorActive ->
+                        val eligible = conn is GlassesManager.ConnectionState.Connected && (battery?.level ?: 0) > 30
+                        val navInProgress = outdoorActive || indoorActive
+                        Log.d(TAG_GLASSES_FEED, "状态: conn=$conn battery=$battery outdoorActive=$outdoorActive indoorActive=$indoorActive eligible=$eligible")
+                        GlassesFeedDecision(streamOn = eligible && navInProgress, render = eligible && outdoorActive)
+                    }.distinctUntilChanged().collect(::applyGlassesFeedDecision)
+                }
+                launch {
+                    combine(GlassesManager.liveUrl, GlassesManager.liveWifiConnected) { url, wifi ->
+                        Log.d(TAG_GLASSES_FEED, "liveUrl=$url wifiConnected=$wifi wantGlassesRender=$wantGlassesRender glassesPlaying=$glassesPlaying")
+                        url.takeIf { wifi }
+                    }.collect { url ->
+                        if (url != null && wantGlassesRender && !glassesPlaying) startGlassesPlayback(url)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun applyGlassesFeedDecision(decision: GlassesFeedDecision) {
+        Log.d(TAG_GLASSES_FEED, "决策: streamOn=${decision.streamOn} render=${decision.render} currentStreamOn=$glassesStreamOn currentRender=$wantGlassesRender liveUrl=${GlassesManager.liveUrl.value}")
+        if (decision.streamOn != glassesStreamOn) {
+            glassesStreamOn = decision.streamOn
+            if (decision.streamOn) startGlassesLiveStreamWithPermission() else GlassesManager.stopLiveStream()
+        }
+        if (decision.render != wantGlassesRender) {
+            wantGlassesRender = decision.render
+            // 可见性切换放在接流之前：VLCVideoLayout 在 View.GONE 时不会创建原生渲染 Surface，
+            // attachViews/play 必须在它已经可见、能正常走 measure/layout 之后才有画面，不能等
+            // 播放成功了才切可见——那时 Surface 可能一直没建好，画面就一直黑/卡在旧画面上。
+            showGlassesPreview(decision.render)
+        }
+        if (!decision.render) {
+            // 室内阶段也会走到这支分支：只保持 streamOn、不建播放器。后续目标检测模块会自行订阅
+            // GlassesManager.liveUrl 起一条解码管线消费帧数据，这里不重复实现。
+            stopGlassesPlayback()
+        } else if (!glassesPlaying) {
+            readyGlassesUrl()?.let(::startGlassesPlayback)
+        }
+    }
+
+    /** Android 13+ 上眼镜 SDK 连直播 Wi-Fi（Wi-Fi Direct / WifiNetworkSpecifier）需要运行时授予
+     * NEARBY_WIFI_DEVICES，仅在清单里声明不够，未授权时连接会直接失败、拿不到直播地址。 */
+    private fun startGlassesLiveStreamWithPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.NEARBY_WIFI_DEVICES)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionLauncher.launch(arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES))
+            return
+        }
+        GlassesManager.startLiveStream()
+    }
+
+    private fun showGlassesPreview(showGlasses: Boolean) {
+        bind.containerGlassesPreview.visibility = if (showGlasses) View.VISIBLE else View.GONE
+        bind.ivColorPreview.visibility = if (showGlasses) View.GONE else View.VISIBLE
+        bind.tvColorPreviewLabel.text = getString(
+            if (showGlasses) R.string.nav_color_preview_label_glasses else R.string.nav_color_preview_label_camera
+        )
+    }
+
+    private fun readyGlassesUrl(): String? =
+        GlassesManager.liveUrl.value.takeIf { GlassesManager.liveWifiConnected.value }
+
+    private fun startGlassesPlayback(url: String) {
+        val ctx = context ?: return
+        val vlc = libVLC ?: LibVLC(ctx, arrayListOf("--rtsp-tcp")).also { libVLC = it }
+        val player = glassesPlayer ?: VlcMediaPlayer(vlc).also { created ->
+            glassesPlayer = created
+            created.setEventListener { event ->
+                when (event.type) {
+                    VlcMediaPlayer.Event.EncounteredError -> {
+                        Log.e(TAG_GLASSES_FEED, "眼镜直播播放失败: $url")
+                        glassesPlaying = false
+                        val retryUrl = GlassesManager.liveUrl.value
+                        if (wantGlassesRender && retryUrl != null && glassesRetryCount < maxGlassesRetries) {
+                            glassesRetryCount++
+                            glassesRetryHandler.postDelayed({ startGlassesPlayback(retryUrl) }, 1000L * glassesRetryCount)
+                        }
+                    }
+                    VlcMediaPlayer.Event.Playing -> {
+                        Log.d(TAG_GLASSES_FEED, "眼镜直播开始播放: $url")
+                        glassesRetryCount = 0
+                    }
+                }
+            }
+        }
+        try {
+            if (player.vlcVout.areViewsAttached()) {
+                player.detachViews()
+            }
+            player.attachViews(bind.vlcGlassesPreview, null, false, false)
+            // SDK 回调的地址带结尾斜杠，眼镜端 RTSP 服务对挂载点路径是精确匹配，带斜杠请求会 404
+            val media = Media(vlc, Uri.parse(url.trimEnd('/')))
+            player.media = media
+            media.release()
+            player.play()
+            glassesPlaying = true
+            Log.d(TAG_GLASSES_FEED, "眼镜直播已发起播放: $url")
+        } catch (error: Exception) {
+            Log.e(TAG_GLASSES_FEED, "眼镜直播播放异常: $url", error)
+            glassesPlaying = false
+        }
+    }
+
+    private fun stopGlassesPlayback() {
+        glassesRetryHandler.removeCallbacksAndMessages(null)
+        glassesRetryCount = 0
+        glassesPlayer?.let { p ->
+            try {
+                p.stop()
+            } catch (e: Exception) {
+                Log.e(TAG_GLASSES_FEED, "stop 异常", e)
+            }
+            if (p.vlcVout.areViewsAttached()) {
+                p.detachViews()
+            }
+        }
+        glassesPlaying = false
+    }
+
+    /** 屏幕短暂熄灭/切后台时只停播放器、不关直播流（Wi-Fi 直播留着，同
+     * OutdoorNavController.onPause 对相机流的处理方式），避免来回开关直播。 */
+    private fun pauseGlassesPlayback() {
+        glassesRetryHandler.removeCallbacksAndMessages(null)
+        if (glassesPlaying) {
+            glassesPlayer?.stop()
+            glassesPlayer?.detachViews()
+            glassesPlaying = false
         }
     }
 
@@ -177,6 +380,7 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         val showIndoor = phase?.mode == "indoor"
         bind.groupIndoorMode.visibility = if (showIndoor) View.VISIBLE else View.GONE
         bind.groupOutdoorMode.visibility = if (showIndoor) View.GONE else View.VISIBLE
+        indoorPhaseActive.value = showIndoor
 
         if (inProgress != null &&
             (inProgress.planId != lastDispatchedPlanId || inProgress.phaseIndex != lastDispatchedPhaseIndex)
@@ -191,6 +395,7 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         }
 
         if (state is NavigationPlanManager.PlanState.Completed) {
+            outdoorNavigationActive.value = false
             if (!lastAnnouncedCompleted) {
                 lastAnnouncedCompleted = true
                 bind.root.announceA11y(getString(R.string.nav_all_phases_done))
@@ -301,6 +506,7 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
      * 误判为"用户点击了结束导航"而推进阶段。 */
     private fun enterOutdoorPhase(destination: String?) {
         outdoorController?.resetForRestart()
+        outdoorNavigationActive.value = false
         showOutdoorSelectGroup()
         bind.etEnd.setText(destination.orEmpty())
         bind.tvStatus.text = ""
@@ -417,6 +623,7 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
     }
     /** 仅在用户手动点击"结束导航"后调用：回到路线选择分组，推进到 LLM 计划的下一阶段 */
     private fun finishOutdoorPhase() {
+        outdoorNavigationActive.value = false
         showOutdoorSelectGroup()
         NavigationPlanManager.advanceToNextPhase()
     }
@@ -514,6 +721,7 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         }
 
         override fun onNavigationStarted() {
+            outdoorNavigationActive.value = true
             lastSpokenGuidance = null
             showOutdoorActiveGroup()
         }

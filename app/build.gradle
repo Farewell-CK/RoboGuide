@@ -150,6 +150,8 @@ dependencies {
 //    implementation("androidx.media3:media3-exoplayer:1.6.1")
 //    implementation("androidx.media3:media3-exoplayer-rtsp:1.6.1")
 //    implementation("androidx.media3:media3-ui:1.6.1")
+    // ExoPlayer 解不出眼镜端 RTSP 服务缺 fmtp 的 SDP（见上面被注释的 media3 依赖），改用 libVLC
+    implementation("org.videolan.android:libvlc-all:3.6.4")
     implementation 'com.google.protobuf:protobuf-java:4.29.3'
     implementation files('libs/my_galsses_sdk_0.0.7_20260403_release.aar')
 

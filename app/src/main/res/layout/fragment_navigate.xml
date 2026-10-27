@@ -155,10 +155,11 @@
                     android:textSize="@dimen/sp_13" />
 
                 <TextView
+                    android:id="@+id/tv_color_preview_label"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="@dimen/dp_8"
-                    android:text="D455F 彩色画面（实时）"
+                    android:text="@string/nav_color_preview_label_camera"
                     android:textColor="@color/color_text"
                     android:textSize="@dimen/sp_13" />
 
@@ -170,6 +171,23 @@
                     android:background="@drawable/bg_card"
                     android:importantForAccessibility="no"
                     android:scaleType="fitCenter" />
+
+                <!-- 眼镜直播画面：眼镜已连接且电量 > 30% 时替代上面的 iv_color_preview，二者互斥显示 -->
+                <!-- VLCVideoLayout 在 onAttachedToWindow 里会把自己的 LayoutParams 强制改成 match_parent，
+                     直接给它设固定高度会被覆盖成 0，所以高度/边距/显隐都放在外层容器上 -->
+                <FrameLayout
+                    android:id="@+id/container_glasses_preview"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/dp_200"
+                    android:layout_marginTop="@dimen/dp_6"
+                    android:background="@drawable/bg_card"
+                    android:visibility="gone">
+
+                    <org.videolan.libvlc.util.VLCVideoLayout
+                        android:id="@+id/vlc_glasses_preview"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent" />
+                </FrameLayout>
 
                 <TextView
                     android:layout_width="match_parent"

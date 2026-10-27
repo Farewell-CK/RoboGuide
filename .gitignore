@@ -99,3 +99,7 @@ lint/tmp/
 # Claude Code
 .claude/
 CLAUDE.md
+
+# AI coding tool local state
+.omc/
+**/.omc/
