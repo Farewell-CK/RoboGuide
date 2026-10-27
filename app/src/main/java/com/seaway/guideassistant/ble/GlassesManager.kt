@@ -12,6 +12,8 @@ import com.moyoung.glasses.CRPBleClient
 import com.moyoung.glasses.conn.CRPBleConnection
 import com.moyoung.glasses.conn.CRPBleDevice
 import com.moyoung.glasses.conn.listener.CRPBleConnectionStateListener
+import com.moyoung.glasses.conn.listener.CRPWifiChangeListener
+import com.moyoung.glasses.conn.type.CRPWifiType
 import com.moyoung.glasses.scan.bean.CRPScanDevice
 import com.moyoung.glasses.scan.callback.CRPScanCallback
 import kotlinx.coroutines.CoroutineScope
@@ -48,6 +50,14 @@ object GlassesManager {
     val connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     val batteryState = MutableStateFlow<BatteryState?>(null)
 
+    /** 眼镜直播（Wi-Fi 热点 + RTSP）地址；非空即表示直播已可拉流。画面是否渲染、电量阈值等业务判断
+     * 交给调用方（如 NavigateFragment），这里只负责开关直播和广播拿到的地址。 */
+    val liveUrl = MutableStateFlow<String?>(null)
+
+    /** 手机是否已连上眼镜的直播 Wi-Fi 并完成网络绑定。地址回调（[liveUrl]）可能早于这一步，
+     * 此时拉流会因为 socket 走了别的网络而一直挂起，所以播放必须两者都就绪后才能开始。 */
+    val liveWifiConnected = MutableStateFlow(false)
+
     // 断线后按地址直连重试的间隔，用完后回落到重新扫描
     private val reconnectDelaysMs = longArrayOf(2000L, 5000L, 10000L)
 
@@ -70,6 +80,44 @@ object GlassesManager {
         manualDisconnect = true
         bleDevice?.let { device ->
             if (device.isConnected()) device.disconnect()
+        }
+    }
+
+    /** 开启眼镜直播（切到直播 Wi-Fi），地址通过 [liveUrl] 广播。幂等，未连接时忽略。 */
+    fun startLiveStream() {
+        val conn = connection
+        Log.d(TAG, "startLiveStream: connection=$conn")
+        conn?.enableWifi(CRPWifiType.LIVE)
+    }
+
+    /** 关闭眼镜直播。幂等，未连接时忽略。 */
+    fun stopLiveStream() {
+        Log.d(TAG, "stopLiveStream: connection=$connection")
+        connection?.stopLive()
+        connection?.disableWifi()
+        liveUrl.value = null
+        liveWifiConnected.value = false
+    }
+
+    private val wifiListener = object : CRPWifiChangeListener {
+        override fun onWifiStateChange(type: CRPWifiType, state: Int) {
+            if (type == CRPWifiType.LIVE) {
+                if (state == CRPWifiChangeListener.STATE_SUCCESS) {
+                    connection?.connectWifi()
+                } else {
+                    Log.e(TAG, "直播 Wi-Fi 开启失败: $state")
+                }
+            }
+        }
+
+        override fun onWifiConnectionStateChanged(connected: Boolean) {
+            Log.d(TAG, "直播 Wi-Fi 连接状态: $connected")
+            liveWifiConnected.value = connected
+        }
+
+        override fun onLiveUrlChanged(url: String) {
+            Log.d(TAG, "直播地址: $url")
+            liveUrl.value = url
         }
     }
 
@@ -163,11 +211,14 @@ object GlassesManager {
                     }
                     conn.queryBattery()
                     conn.syncTime()
+                    conn.setWifiListener(wifiListener)
                 }
 
                 CRPBleConnectionStateListener.STATE_DISCONNECTED -> {
                     Log.d(TAG, "Disconnected!")
                     batteryState.value = null
+                    liveUrl.value = null
+                    liveWifiConnected.value = false
                     connectionState.value = ConnectionState.Disconnected
                     if (manualDisconnect) {
                         manualDisconnect = false

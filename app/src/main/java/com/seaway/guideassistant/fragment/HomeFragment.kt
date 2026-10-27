@@ -1,8 +1,6 @@
 package com.seaway.guideassistant.fragment
 
-import android.annotation.SuppressLint
 import android.os.Bundle
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.TextView
@@ -11,9 +9,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.viewpager2.widget.ViewPager2
-import com.moyoung.glasses.conn.CRPBleConnection
-import com.moyoung.glasses.conn.listener.CRPWifiChangeListener
-import com.moyoung.glasses.conn.type.CRPWifiType
 import com.seaway.guideassistant.R
 import com.seaway.guideassistant.auth.LoginActivity
 import com.seaway.guideassistant.base.BaseBindFragment
@@ -30,11 +25,6 @@ import com.seaway.guideassistant.ws.DeviceWatchClient
 import kotlinx.coroutines.launch
 
 class HomeFragment : BaseBindFragment<FragmentHomeBinding>() {
-
-    private var connection: CRPBleConnection? = null
-    private var liveUrl: String? = null
-    private var isLiveActive = false
-    private val TAG = "GlassSDK"
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -133,15 +123,6 @@ class HomeFragment : BaseBindFragment<FragmentHomeBinding>() {
             is GlassesManager.ConnectionState.Failed -> state.reason
         }
         bind.tvStatus.isClickable = state is GlassesManager.ConnectionState.PermissionDenied || state is GlassesManager.ConnectionState.Failed
-
-        when (state) {
-            GlassesManager.ConnectionState.Connected -> {
-                connection = GlassesManager.currentConnection()
-                connection?.setWifiListener(liveWifiListener)
-            }
-            GlassesManager.ConnectionState.Disconnected, is GlassesManager.ConnectionState.Reconnecting -> connection = null
-            else -> Unit
-        }
     }
 
     private fun updateGlassesBattery(state: GlassesManager.BatteryState?) {
@@ -202,58 +183,5 @@ class HomeFragment : BaseBindFragment<FragmentHomeBinding>() {
 
     private fun goToTab(index: Int) {
         requireActivity().findViewById<ViewPager2>(R.id.view_pager)?.currentItem = index
-    }
-
-    // Wi-Fi 直播相关监听，眼镜连接成功后挂到 GlassesManager 提供的 connection 上
-    private val liveWifiListener = object : CRPWifiChangeListener {
-        override fun onWifiStateChange(type: CRPWifiType, state: Int) {
-            if (type == CRPWifiType.LIVE) {
-                if (state == CRPWifiChangeListener.STATE_SUCCESS) {
-                    connection?.connectWifi()
-                    Log.e(TAG, "直播 Wi-Fi 开启成功: $state")
-                } else {
-                    Log.e(TAG, "直播 Wi-Fi 开启失败: $state")
-                }
-            }
-        }
-
-        override fun onWifiConnectionStateChanged(connected: Boolean) {
-            isLiveActive = connected
-            Log.d(TAG, "直播状态: " + (if (connected) "已连接" else "已断开"))
-        }
-
-        @SuppressLint("UnsafeOptInUsageError")
-        override fun onLiveUrlChanged(url: String) {
-            // 直播链接回调，视频流格式：rtsp
-            liveUrl = url
-            Log.d(TAG, "直播地址: $url")
-//            try {
-//                activity?.runOnUiThread {
-//                    val mediaItem = MediaItem.fromUri(url)
-//                    player.setMediaItem(mediaItem)
-//                    player.prepare()
-//                    player.play()
-//                }
-//            } catch (e: Exception) {
-//                Log.e("RTSP", "setMediaSource FAILED", e)
-//            }
-        }
-    }
-
-    // 时间同步
-    fun syncTime() {
-        connection?.syncTime()
-        Log.d(TAG, "时间已同步 / Time synced")
-    }
-
-    fun startLive() {
-    }
-
-    fun stopLive() {
-        connection?.stopLive()
-        connection?.disableWifi()
-        isLiveActive = false
-        liveUrl = null
-//        player.stop()
     }
 }

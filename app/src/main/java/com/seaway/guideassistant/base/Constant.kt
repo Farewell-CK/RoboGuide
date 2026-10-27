@@ -17,6 +17,7 @@ object Constant {
     //大模型意图识别接口
     const val LLM_API_BASE_URL: String = ""
     const val LLM_API_KEY: String = BuildConfig.LLM_API_KEY
+    const val LLM_VISUAL_API_KEY: String = BuildConfig.LLM_VISUAL_API_KEY
     val timeoutMillis: Int = 20_000
     const val AMAP_KEY:String = BuildConfig.AMAP_KEY
 }

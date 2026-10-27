@@ -131,6 +131,6 @@ class VoiceInputController(
 
     companion object {
         private const val SPEECH_AMPLITUDE_THRESHOLD = 800
-        private const val SILENCE_TIMEOUT_MS = 800L
+        private const val SILENCE_TIMEOUT_MS = 1500L
     }
 }
