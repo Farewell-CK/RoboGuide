@@ -13,6 +13,7 @@
 - [`project-goals-and-mvp.md`](project-goals-and-mvp.md)：通用 OS 目标、多机异构 MVP 和应用演进；
 - [`mvp-definition.md`](mvp-definition.md)：完整 MVP 草案、已批准的 Slice v0.1、候选场景和冻结清单；
 - [`implementation-backlog.md`](implementation-backlog.md)：V2 开放架构问题、待定 MVP 决策和延后实现项。
+- [`development/future-research-ideas.md`](development/future-research-ideas.md)：后续版本研究想法；智能监督与传统机器人本地智能组件均延后，不纳入当前版本或第一篇论文。
 - [`development/adr-follow-up-register.md`](development/adr-follow-up-register.md)：全 ADR 遗留项核验、已实现子集的文档纠正，以及隔离/持久化/调度/复制的依赖顺序。
 
 ## 开发
@@ -25,6 +26,7 @@
 - [`development/release-preparation-audit.md`](development/release-preparation-audit.md)：历史凭据扫描、许可证元数据、ADR 编号、quickstart 与认证边界；
 - [`development/pre-c1-readiness-audit-2026-09-15.md`](development/pre-c1-readiness-audit-2026-09-15.md)：Habitat Local EAIOS Bridge 前的生产链准入审计、证据范围与未闭环风险；
 - [`extensions/device-extension-conformance-v0.1.md`](extensions/device-extension-conformance-v0.1.md)：不修改 RoboGuide core 接入新 Local EAIOS 的配置、离线 conformance 与真机验证边界；
+- [`development/local-eaios-integration-lessons.md`](development/local-eaios-integration-lessons.md)：EMOS 接入经验、已确认缺口及新系统接入的可复用验收清单；
 - [`decisions/0001-rust-core-python-edges.md`](decisions/0001-rust-core-python-edges.md)：`Proposed` Rust 核心与 Python 边缘职责 ADR。
 - [`decisions/0002-deaios-node-contract.md`](decisions/0002-deaios-node-contract.md)：DEAIOS 与本地 EAIOS/厂商运行时之间的 Node Contract v0。
 - [`decisions/0003-mission-plan-contract.md`](decisions/0003-mission-plan-contract.md)：Mission Intelligence 向 Rust 核心交付 Task Graph 的 MissionPlan v0 合同。

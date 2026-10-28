@@ -1438,6 +1438,11 @@ Control reservation authority。
 
 V2 仍保留七类架构问题：State Authority、Spatial Authority、Control Topology、Execution Group Authority、Scheduling vs Runtime Coordination、Temporal Assurance、Resource Commitment Semantics。它们记录在 [`docs/implementation-backlog.md`](docs/implementation-backlog.md)；MVP 具体场景、拓扑和验收指标的草案记录在 [`docs/mvp-definition.md`](docs/mvp-definition.md)。
 
+[后续版本研究想法](docs/development/future-research-ideas.md)独立记录延后的智能监督和传统机器人
+本地智能组件；两者不纳入当前版本与第一篇论文。
+[Local EAIOS 接入经验](docs/development/local-eaios-integration-lessons.md)维护跨系统可复用的
+命令生命周期、目标绑定、能力、拓扑、恢复及证据验收清单，保留尚未关闭的问题。
+
 ## 仓库内容
 
 ```text

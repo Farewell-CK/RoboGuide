@@ -1,5 +1,10 @@
 # 架构与实现待决事项
 
+2026-10-28 新增独立的[后续版本研究想法](development/future-research-ideas.md)与
+[Local EAIOS 接入经验](development/local-eaios-integration-lessons.md)。持续智能监督和传统机器人
+本地智能组件均延后，不纳入当前版本或第一篇论文，也不阻塞当前 E1 收尾。
+经验文档保存通用规则、未关闭问题与验收层次；原始实验结果不纳入该文档。
+
 2026-10-26 复核：下文按日期保留历史决策缺口，后续实现不回写为当时已经具备。
 当前 [A1–F 队列](development/roboguide-software-completion-plan-2026-10-15.md)与
 [R01–R20 验收矩阵](development/nonrelease-acceptance-matrix-2026-10-26.md)是整改进度入口。
