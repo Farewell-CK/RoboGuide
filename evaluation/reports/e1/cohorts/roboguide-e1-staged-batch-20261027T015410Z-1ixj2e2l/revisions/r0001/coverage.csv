@@ -1,0 +1,13 @@
+family,purpose,arm,planned_workloads,runs,true,false,unavailable,formal,benchmark,fresh,reused
+perception,primary,emos,113,109,17,92,0,0,0,52,57
+perception,primary,roboguide,113,109,84,22,3,109,106,109,0
+perception,retry,emos,113,0,0,0,0,0,0,0,0
+perception,retry,roboguide,113,3,3,0,0,3,3,3,0
+perception,diagnostic,emos,113,0,0,0,0,0,0,0,0
+perception,diagnostic,roboguide,113,0,0,0,0,0,0,0,0
+rearrangement,primary,emos,100,100,18,77,5,0,0,10,90
+rearrangement,primary,roboguide,100,100,30,60,10,100,90,100,0
+rearrangement,retry,emos,100,1,0,0,1,0,0,1,0
+rearrangement,retry,roboguide,100,9,4,3,2,9,7,9,0
+rearrangement,diagnostic,emos,100,0,0,0,0,0,0,0,0
+rearrangement,diagnostic,roboguide,100,1,1,0,0,1,1,1,0

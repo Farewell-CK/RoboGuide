@@ -94,7 +94,7 @@ evaluation/
 ├── specs/e1/mobility-smoke.yaml   # E1 smoke 实验定义（可移植、无机器信息）
 ├── e1/controlled-workload-v0.1.yaml # Formal E1 candidate + fail-closed admission
 ├── e1/PREFLIGHT-CLOSURE.md        # preflight checks + exact remaining blocker
-├── reports/e1/README.md          # 经审阅结果的维护入口；首个发布包待迁移
+├── reports/e1/README.md          # 阶段结果、四类历史清点及审阅状态
 ├── local.yaml.example             # 本机配置模板（复制为 local.yaml，不入库）
 ├── src/roboguide_eval/
 │   ├── models.py                  # ExperimentSpec 领域模型与 canonical 序列化

@@ -1,51 +1,40 @@
 # E1 结果台账
 
-这是 RoboGuide E1 经审阅结果的固定维护入口。当前状态：**设计已记录；离线导出器、
-历史迁移和首个结果发布包尚未完成。** 本目录当前不包含真实实验成绩。
+首份可复算阶段结果包已导入，当前为 **staging：等待人工论文使用审阅**。这不是 E1 最终完成声明，也未启动新实验。
 
-## 维护约定
+## 从这里阅读
 
-- 设计与字段要求：[结果发布与维护 v0.1](../../docs/e1-results-publication-v0.1.md)。
-- 原始输入、模型调用、视频、轨迹和运行数据库留在独立归档；仓库发布脱敏投影、
-  逐次运行记录、统计、分析报告和实际证据引用。
-- 每个 cohort 保留实际代码、模型、数据集、选择方法和预算；primary、diagnostic、
-  retry 及历史导入分别标识，复制/复用原生运行不会增加实际执行次数。
-- 每个发布修订冻结保存，统计修正新增修订；不覆盖原始失败，不挑最好一次替换主结果。
-- 实际 benchmark true、false、unavailable、未执行和执行状态 unknown 分别记录。
-  Mission、局部技能、provenance、admission 与配对可比性保持各自含义。
-- 初次真实发布完成后才生成 `index.json` 和实际 cohort 目录，当前不创建空成绩文件。
+- [四类历史原档清点](inventories/20261030-r0001/REPORT.md)：478 个历史计划 workload，按来源版本分开。
+- [首次迁移的冻结批次](cohorts/roboguide-e1-staged-batch-20261027T015410Z-1ixj2e2l/revisions/r0001/REPORT.md)：完整 213 个计划条目及所有原始缺口。
+- [覆盖与结果 CSV](cohorts/roboguide-e1-staged-batch-20261027T015410Z-1ixj2e2l/revisions/r0001/coverage.csv)、[可重算统计](cohorts/roboguide-e1-staged-batch-20261027T015410Z-1ixj2e2l/revisions/r0001/summary.json)、[运行/配对/原档分片索引](cohorts/roboguide-e1-staged-batch-20261027T015410Z-1ixj2e2l/revisions/r0001/manifest.json)。
+- [首批选择及证据缺口](SOURCE_SELECTION_AND_GAPS.md)、[机器索引](index.json)。
+- [验证记录](VALIDATION.md)。
+- [离线工具与复算命令](../../docs/e1-publication-tools.md)、[发布规范](../../docs/e1-results-publication-v0.1.md)。
 
-## 首次迁移范围
+## 首次迁移结果
 
-| 范围 | 应保留的区别 | 当前发布状态 |
-| --- | --- | --- |
-| 历史四类任务 | 原始清单、不同代码/配置、证据缺口和附加变体 | 待只读导入与复核 |
-| 最近感知/重排完整批次 | primary、未运行条目、重试、历史 EMOS arm 复用 | 待只读导入与复核 |
-| 固定小样本工程诊断 | 选择理由、成功控制、单臂与真实配对，不生成总体成功率 | 待只读导入与复核 |
+| 类别 | 计划 workload | 已有双方结果 | RG 成功/失败/不可用 | EMOS 成功/失败/不可用 | 原记录可比且双方官方可用 |
+| --- | ---: | ---: | --- | --- | ---: |
+| perception | 113 | 109 | 84 / 22 / 3 | 17 / 92 / 0 | 106 |
+| rearrangement | 100 | 100 | 30 / 60 / 10 | 18 / 77 / 5 | 85 |
 
-具体历史数字须从封存来源重算后发布。本入口不手工维护第二份统计，不把历史
-覆盖数量当作统一代码/模型下的总实验成绩。
+清单缺口、重试和工程 smoke 没有填进上述主成绩。逐条运行、配对、调用量、耗时和失败标签都可离线复算；不以最好一次替代原失败。
 
-## 权威与后续工作
+## 身份和使用边界
 
-现有 [Fairness Foundation](../../docs/e1-fairness-foundation.md) 和
-[B1 evidence/admission](../../docs/evaluation-evidence-validity.md) 继续拥有原判定。
-发布层只消费既有结果，不修改协议、runner、Prompt、官方目标或任务初始状态。
+- RG 本批冻结于 `3db8816035efa21197a946ee8bcbb4de75983cc1`，并非当前 main。
+- 147 个 EMOS arm 复用历史，62 个是本批新鲜执行；13 次重试与 1 次 RG 工程 smoke 独立保留。
+- runs 的 `code_sha` 是原 launch 记录的启动器/封装版本，EMOS 行不因此证明原生 vendor Git 提交。冻结原生源码表面以 Population Manifest 的 Stage2 identity 摘要引用；原生仓库完整身份与论文依赖仍有证据缺口。
+- 主批次、旧版本历史、失败选择复测和诊断分别登记，不生成混合版本 E1 总成功率。
+- `pair_comparable` 与旧 scalar-only reset 是原记录的条件判断，不证明严格仅组织层变化或完整物理初态等价。
+- 可用于论文的阶段描述：明确冻结条件、完整清单和局部可比子集后的结果及缺口；不能声称原论文精确复现、新版 RG 成绩或组织层单因素因果。
+- 原始材料保持本机原位，当前 `local_only`。本包保存消费元数据与记账的原始摘要，并不表示视频、数据库、所有轨迹均已核验或远端备份。
 
-接下来按设计实现离线导出/校验、核对完整来源和独立备份，再审阅首个阶段发布包。
-只存在本机的原始证据标记 `local_only`，不能因为索引入库就声称原档已远端备份。
-通用缺陷和修复状态维护在
-[E1 问题登记](../../../docs/development/e1-baseline-and-execution-issue-register.md)。
-新实验和批量执行不属于发布操作；批量前的用户审阅门禁继续保留。
+## 维护状态
+
+已有离线 staged 导出器、原档清点与发布包校验；其他格式先保留来源和缺口，按批迁移。新运行新增 cohort，统计修正新增 revision。
+通用缺陷继续维护在 [E1 问题登记](../../../docs/development/e1-baseline-and-execution-issue-register.md)，不另造一套 issue 台账。
 
 ## English overview
 
-This is the maintained entry point for reviewed E1 result publications. The design is documented;
-the offline exporter, historical import and first real publication are pending. No experimental
-scores are published here yet. See the [v0.1 design](../../docs/e1-results-publication-v0.1.md).
-
-Publications retain exact execution identities, selection policies, source evidence and immutable
-revisions. Primary runs, retries, diagnostics and reused native runs remain distinct. Raw evidence
-is archived separately; a repository index does not prove an independent backup. Existing
-admission, pairing and benchmark authorities retain their meaning. Publication never launches
-experiments or changes historical outcomes.
+The first recomputable phase package is available as a staging publication, pending human review for paper use. It preserves all planned workloads, unavailable outcomes, separate retries and reused native runs. The four-family census and selected frozen cohort remain distinct; no mixed-version overall rate is produced. Raw evidence is local only. Offline validation proves projection integrity and reproducible arithmetic, not an independent backup, full physical equivalence, exact paper reproduction or organization-only causality.

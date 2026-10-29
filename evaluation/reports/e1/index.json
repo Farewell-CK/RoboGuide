@@ -1,0 +1,24 @@
+{
+  "combined_success_rate": null,
+  "entries": [
+    {
+      "kind": "cohort",
+      "manifest_sha256": "ff359c3c3699ebe35202bdaaa3f608dc6a8b15bae966883b83fcf134af4dd0d3",
+      "path": "cohorts/roboguide-e1-staged-batch-20261027T015410Z-1ixj2e2l/revisions/r0001",
+      "purpose": "primary",
+      "revision": "r0001",
+      "status": "staging"
+    },
+    {
+      "kind": "inventory",
+      "manifest_sha256": "5c3e2e0a6ebe85e90dc2b690386f9f5664a8af685e8b8bf8eed31fa34ce0c406",
+      "path": "inventories/20261030-r0001",
+      "purpose": "historical-census",
+      "revision": "r0001",
+      "status": "staging"
+    }
+  ],
+  "raw_backup_status": "local_only",
+  "schema_version": "roboguide.e1.publication-index/v0.1",
+  "status": "staging-awaiting-human-paper-review"
+}
