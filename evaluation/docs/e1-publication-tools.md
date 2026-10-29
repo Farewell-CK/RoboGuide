@@ -69,6 +69,7 @@ uv run python -m roboguide_eval.e1_publication export-staged \
 
 uv run python -m roboguide_eval.e1_publication census \
   --bindings /path/to/local-bindings.json \
+  --exporter-sha FULL_COMMITTED_EXPORTER_SHA \
   --output /path/to/new-stage/inventory
 ```
 

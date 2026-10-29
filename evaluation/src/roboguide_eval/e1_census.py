@@ -72,10 +72,12 @@ def census_summary(rows: list[dict[str, Any]], plans: dict[str, list[str]]) -> d
     }
 
 
-def export_census(bindings: Path, output: Path) -> dict[str, Any]:
+def export_census(bindings: Path, output: Path, exporter_sha: str) -> dict[str, Any]:
     """Use the historical locator only to find and re-read originals; publish no absolute paths."""
     if output.exists():
         raise ValueError("census output must be new")
+    if code_identity(exporter_sha) is None:
+        raise ValueError("census requires a complete exporter identity")
     local = json.loads(bindings.read_bytes())
     reader = ArchiveReader({key: Path(path) for key, path in local["archives"].items()})
     if any(
@@ -141,6 +143,7 @@ def export_census(bindings: Path, output: Path) -> dict[str, Any]:
         directory_value = (facts.get("process") or {}).get("directory") or facts.get("directory")
         if not directory_value and original_path.name == "arm-summary.json":
             directory_value = str(original_path.parent)
+        if original_path.name == "arm-summary.json":
             pair_doc, _ = reader.document(
                 original_path.parent.parent / "pair-outcome.json", optional=True
             )
@@ -238,6 +241,7 @@ def export_census(bindings: Path, output: Path) -> dict[str, Any]:
         encode(
             {
                 "schema_version": "roboguide.e1.archive-census/v0.1",
+                "exporter_code_sha": exporter_sha,
                 "record_files": files,
                 "artifact_files": artifact_files,
                 "source_ref": definition_ref,
@@ -322,6 +326,20 @@ def validate_census(root: Path) -> dict[str, Any]:
     identities = {(row["cohort"], row["family"], row["episode_id"], row["arm"]) for row in rows}
     if len(identities) != len(rows):
         raise ValueError("duplicate historical cohort/workload arm")
+    artifacts: list[dict[str, Any]] = []
+    for name in manifest["artifact_files"]:
+        if name not in files:
+            raise ValueError("missing census artifact shard")
+        artifacts.extend(json.loads(line) for line in (root / name).read_text().splitlines())
+    references = {row["artifact_id"] for row in artifacts}
+    if len(references) != len(artifacts):
+        raise ValueError("duplicate census artifact")
+    for row in rows:
+        if row["raw_official"] is not None and type(row["raw_official"]) is not bool:
+            raise ValueError("invalid historical official value")
+        for key in ("source_ref", "locator_ref", "launch_ref"):
+            if row.get(key) and row[key] not in references:
+                raise ValueError("unresolved census source")
     summary = census_summary(rows, manifest["plans"])
     if (
         encode(summary) != (root / "summary.json").read_bytes()

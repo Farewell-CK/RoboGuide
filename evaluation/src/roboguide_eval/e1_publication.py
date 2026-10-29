@@ -594,6 +594,7 @@ def main() -> int:
     census = sub.add_parser("census")
     census.add_argument("--bindings", type=Path, required=True)
     census.add_argument("--output", type=Path, required=True)
+    census.add_argument("--exporter-sha", required=True)
     census_check = sub.add_parser("validate-census")
     census_check.add_argument("directory", type=Path)
     export = sub.add_parser("export-staged")
@@ -608,7 +609,7 @@ def main() -> int:
         from roboguide_eval.e1_census import export_census, validate_census
 
         result = (
-            export_census(arguments.bindings, arguments.output)
+            export_census(arguments.bindings, arguments.output, arguments.exporter_sha)
             if arguments.operation == "census"
             else validate_census(arguments.directory)
         )
