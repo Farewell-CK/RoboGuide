@@ -11,7 +11,8 @@ E1 的收尾条件、配置记录、已实现启动门禁与待核验项见
 
 经审阅的结果维护入口为 [E1 结果台账](reports/e1/README.md)。
 [结果发布与维护设计 v0.1](docs/e1-results-publication-v0.1.md) 定义发布包、原始证据备份、
-统计修订和历史迁移要求；目前仅有设计，离线导出器和首个发布包尚未完成。
+统计修订和历史迁移要求；[离线发布工具](docs/e1-publication-tools.md) 实现第一版
+staged 原档导入、四类历史清点和可移植复算。原档备份和论文使用限制独立记录。
 
 [`e1-pair`](docs/e1-pair.md) 为 `e1-batch` 提供通用的原生 EMOS／生产 B1 配对入口。
 准确 episode 在原生环境构造前选定；模型响应、真实 reset、源码和归档完整性独立核对。
@@ -412,7 +413,8 @@ Plan-dependent invariants 在 Planner 阶段未实际执行时标记为 NOT_EVAL
 新的 E1 发布按 [结果发布与维护设计 v0.1](docs/e1-results-publication-v0.1.md)
 导出到 `evaluation/reports/e1/`，保存经审阅脱敏的轻量结果、配置身份和证据引用。
 视频、完整轨迹、原始请求响应和数据库保留独立归档；只有本机路径时标记
-`local_only`，不能宣称已独立备份。导出器、自动校验器和历史迁移尚待实现。
+`local_only`，不能宣称已独立备份。支持格式、复算命令和限制见
+[离线发布工具](docs/e1-publication-tools.md)，更广泛的历史源格式继续按批迁移。
 
 早期经确认复制到 `evaluation/baselines/<suite-name>/` 的快照保留原路径与历史含义，
 不批量搬迁或回写。该历史约定不再作为新 E1 原始运行目录整体入库的依据。当前已有：
