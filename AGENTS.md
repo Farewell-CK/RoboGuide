@@ -1783,7 +1783,11 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   re-implements their internals, reaches external systems only across process boundaries
   (machine-specific Conda/working-directory/credential configuration stays in Git-ignored
   `evaluation/local.yaml` or `ROBOGUIDE_EVAL_*` variables), never modifies Core contracts or
-  Proposal/Commit/Binding/Runtime semantics, and never commits real experiment results. The
+  Proposal/Commit/Binding/Runtime semantics, and keeps raw run directories out of Git. Reviewed,
+  redacted result publications belong in `evaluation/reports/e1/` under
+  `evaluation/docs/e1-results-publication-v0.1.md`; exporter/import implementation remains pending.
+  Publications preserve original run/arm identities, separate primary/retry/diagnostic cohorts
+  and reused native evidence, and never alter admission, pairing or benchmark authority. The
   RoboGuide system runner drives the real Controller/Node/Runtime/Local-EAIOS path and reduces
   persisted evidence; it never bypasses RoboGuide to call a simulator skill.
   Its process-only `e1-batch` supervisor runs frozen external pair commands. Exclusive
@@ -1818,7 +1822,8 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   original dataset episode before environment construction, then observes original reset/step
   results and cached official metrics without additional physical/RNG/model calls. It does not
   change native Leader/Stage2 decisions, B1 admission or Pair Validator dimensions. See
-  `evaluation/docs/e1-pair.md`; experimental manifests/results remain local. Each arm uses
+  `evaluation/docs/e1-pair.md`; original run manifests/results remain in their raw archives.
+  Reviewed publication projections use the separate E1 reporting policy above. Each arm uses
   byte-verified private vendor code copies, preserving production checkout containment and
   exact child-module origin checks. Bounded native progress proves only successful-step lower
   bounds after abrupt worker death, never official terminal truth or non-execution.
@@ -1940,7 +1945,8 @@ The supplied source is unchanged, the destination is new, and complete original/
 checks precede a qualified compatibility receipt. Both arms freeze the same prepared source;
 unknown input, copy failure or drift never grants completion. No runtime auto-patch, model,
 simulator, policy, official goal or Core contract change follows. Keep actual experiment
-artifacts local and stop before a full batch for user review. See ADR-0227 and the maintained
+artifacts outside Git; only reviewed publication projections may enter the result ledger. Stop
+before a full batch for user review. See ADR-0227 and the maintained
 `docs/development/e1-baseline-and-execution-issue-register.md`.
 Physical diagnostics v0.8 records the existing world-from-base Matrix4 at reset/terminal only,
 without new sensor, step or RNG calls. The vendor rotation scalar is not signed yaw. New reset

@@ -1623,7 +1623,10 @@ EMOS/Habitat-MAS 通过进程边界在摘要验证的私有代码副本中运行
 [`evaluation/specs/e1/mobility-smoke.yaml`](evaluation/specs/e1/mobility-smoke.yaml)
 （E1 Habitat-MAS Mobility，EMOS vs RoboGuide）作为第一条 workload。机器相关的
 Conda 环境、工作目录与凭据只来自 Git 忽略的 `evaluation/local.yaml` 或
-`ROBOGUIDE_EVAL_*` 环境变量；真实 results 不提交 Git。详见
+`ROBOGUIDE_EVAL_*` 环境变量；原始运行目录和本机配置不提交 Git。经审阅脱敏的结果
+发布包使用 [E1 结果台账](evaluation/reports/e1/README.md)，按
+[结果发布与维护设计 v0.1](evaluation/docs/e1-results-publication-v0.1.md) 保留实际运行身份、
+完整分母和原始证据引用；离线导出器及历史迁移尚未实现。详见
 [`evaluation/README.md`](evaluation/README.md)。
 
 ## Mission Console（任务旅程可视化）

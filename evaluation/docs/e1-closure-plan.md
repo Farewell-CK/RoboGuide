@@ -1,8 +1,10 @@
 # E1 收尾计划与配置核验
 
 本文件规定 E1 的收尾流程和启动检查，不记录真实实验成绩，也不替代
-Population Manifest、Pair Validator 或 Formal admission。实际进度、机器路径、配置
-指纹与结果保存在独立本机审计目录；真实实验结果不提交 Git。
+Population Manifest、Pair Validator 或 Formal admission。原始进度、机器路径、配置
+指纹与结果保存在独立原始归档。经审阅脱敏的阶段发布包按
+[结果发布与维护设计 v0.1](e1-results-publication-v0.1.md) 入库；原始工作输出和机器配置
+继续不提交 Git。发布层的实现和历史迁移状态见 [结果台账](../reports/e1/README.md)。
 
 ## 1. 完成条件
 
@@ -124,7 +126,9 @@ relocation_completion_binding。legacy v0.1 保留兼容，但新 completion 批
 - [ ] 超时、恢复和中断只继续观察原 request_id，不重新创建 Mission Request。
 - [ ] 归档先于服务清理；accounting drain、事件尾部确认和诊断/视频损失检查完成。
 - [ ] SHA256 索引、逐 pair 判定、失败 owner、各 population 分母和原始证据离线复核。
-- [ ] 只发布代码与通用文档；本机配置、实验成绩和无关用户文件不提交。
+- [ ] 原始运行、本机配置和无关用户文件不提交；只发布经审阅脱敏的轻量结果包，
+  保留原始来源、版本、样本选择、完整分母、缺口与独立备份状态。
+- [ ] 发布和统计修订遵循结果台账政策；不覆盖 primary 失败，不用诊断代替整体成绩。
 
 ## 6. 排期与停止优化的规则
 
