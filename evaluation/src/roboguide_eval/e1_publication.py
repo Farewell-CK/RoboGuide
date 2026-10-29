@@ -225,7 +225,7 @@ def coverage_csv(summary: dict[str, Any]) -> bytes:
         "fresh",
         "reused",
     ]
-    writer = csv.DictWriter(stream, fieldnames=fields)
+    writer = csv.DictWriter(stream, fieldnames=fields, lineterminator="\n")
     writer.writeheader()
     for family, data in summary["families"].items():
         for purpose, arms in data["groups"].items():
@@ -485,7 +485,7 @@ def seal_package(
         ),
     }
     stream = io.StringIO(newline="")
-    writer = csv.DictWriter(stream, fieldnames=WORKLOAD_FIELDS)
+    writer = csv.DictWriter(stream, fieldnames=WORKLOAD_FIELDS, lineterminator="\n")
     writer.writeheader()
     writer.writerows(sorted(workloads, key=lambda row: row["job_id"]))
     write_new(root / "workloads.csv", stream.getvalue().encode())

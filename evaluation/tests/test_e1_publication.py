@@ -225,6 +225,8 @@ def test_package_recomputes_without_original_sources(tmp_path: Path) -> None:
     for name in ("first", "second"):
         seal_package(tmp_path / name, {"status": "staging"}, workloads, runs, pairs, artifacts)
         assert validate_package(tmp_path / name)["runs"] == 2
+        assert b"\r\n" not in (tmp_path / name / "coverage.csv").read_bytes()
+        assert b"\r\n" not in (tmp_path / name / "workloads.csv").read_bytes()
     assert (tmp_path / "first/SHA256SUMS").read_bytes() == (
         tmp_path / "second/SHA256SUMS"
     ).read_bytes()
@@ -345,6 +347,13 @@ def test_committed_phase_packages_are_recomputable() -> None:
     from roboguide_eval.e1_census import validate_census
 
     base = Path(__file__).parents[1] / "reports/e1"
+    index = base / "index.json"
+    if index.exists():
+        for entry in json.loads(index.read_bytes())["entries"]:
+            relative = Path(entry["path"])
+            assert not relative.is_absolute() and ".." not in relative.parts
+            manifest = base / relative / "manifest.json"
+            assert sha256(manifest.read_bytes()) == entry["manifest_sha256"]
     for manifest in sorted((base / "cohorts").glob("*/revisions/*/manifest.json")):
         assert validate_package(manifest.parent)["state"] == "PASS"
     for manifest in sorted((base / "inventories").glob("*/manifest.json")):
