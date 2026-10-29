@@ -1107,6 +1107,37 @@ def compare_reset(left: JSONObject, right: JSONObject) -> JSONObject:
         "goal_entity_positions",
         "goal_conjuncts",
     )
+    use_transforms = any(
+        snapshot.get("schema_version") == "roboguide.e1.physical-diagnostics/v0.8"
+        or any(
+            "base_transform" in object_value(agent)
+            for agent in object_value(snapshot.get("agents")).values()
+        )
+        for snapshot in (left, right)
+    )
+
+    def transform_matrix(value: JSONValue) -> JSONValue:
+        """Accept only the recorded complete world-from-base matrix declaration."""
+        transform = object_value(value)
+        matrix = transform.get("matrix")
+        if (
+            transform.get("schema_version") != "roboguide.base-transform-observation/v0.1"
+            or transform.get("source") != "articulated_agent.base_transformation"
+            or transform.get("direction") != "world-from-base"
+            or transform.get("layout") != "row-major"
+            or not isinstance(matrix, list)
+            or len(matrix) != 4
+            or not all(
+                isinstance(row, list)
+                and len(row) == 4
+                and all(
+                    type(item) in (int, float) and math.isfinite(cast(float, item)) for item in row
+                )
+                for row in matrix
+            )
+        ):
+            return None
+        return matrix
 
     def vector(value: JSONValue) -> bool:
         """Accept only recorded finite physical position vectors."""
@@ -1125,6 +1156,13 @@ def compare_reset(left: JSONObject, right: JSONObject) -> JSONObject:
         poses: JSONObject = {}
         for name, raw in agents.items():
             agent = object_value(raw)
+            if use_transforms:
+                matrix = transform_matrix(agent.get("base_transform"))
+                if not vector(agent.get("position")) or matrix is None:
+                    value.pop("agents", None)
+                    break
+                poses[name] = {"position": agent["position"], "base_transform_matrix": matrix}
+                continue
             rotation = agent.get("rotation")
             angle = object_value(rotation).get("value") if isinstance(rotation, dict) else rotation
             if (
@@ -1162,6 +1200,11 @@ def compare_reset(left: JSONObject, right: JSONObject) -> JSONObject:
         "unavailable_fields": cast(list[JSONValue], unavailable),
         "different_fields": cast(list[JSONValue], differences),
         "basis": "actual first returned reset snapshots, never inferred from seed",
+        "orientation_evidence": "unavailable"
+        if "agents" in unavailable
+        else "full-world-from-base-matrix"
+        if use_transforms
+        else "legacy-rotation-scalar-only",
     }
 
 

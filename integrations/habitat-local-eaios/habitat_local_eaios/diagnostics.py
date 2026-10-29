@@ -32,7 +32,7 @@ from .manipulation_diagnostics import ManipulationDiagnostics
 from .model import CanonicalInvocation, CanonicalMobilityInvocation
 from .motion_diagnostics import MotionDiagnostics
 
-DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.7"
+DIAGNOSTICS_SCHEMA = "roboguide.e1.physical-diagnostics/v0.8"
 DIAGNOSTICS_ENV_FLAG = "ROBOGUIDE_B1_PHYSICAL_DIAGNOSTICS"
 DIAGNOSTICS_MAX_RECORD_BYTES = 65_536
 DIAGNOSTICS_WRITE_BATCH_RECORDS = 32
@@ -212,19 +212,39 @@ def _restore_instance_attribute(instance: Any, name: str, original: Any) -> None
 
 
 def _rotation(sim: Any, agent_id: int) -> dict[str, Any]:
-    """Read one agent's base rotation with an explicit representation and unit."""
+    """Retain the vendor scalar without promoting an angle magnitude to signed yaw."""
     agent = sim.get_agent_data(agent_id).articulated_agent
     rot = getattr(agent, "base_rot", None)
     if rot is None:
         return {"_status": _UNAVAILABLE, "reason": "embodiment exposes no base_rot"}
     try:
-        return {"representation": "yaw", "unit": "radians", "value": float(rot)}
+        return {
+            "representation": "vendor-base-rotation-scalar",
+            "unit": "radians",
+            "value": float(rot),
+        }
     except (TypeError, ValueError):
         return {
             "representation": "components",
             "unit": "implementation_defined",
             "value": [float(component) for component in rot],
         }
+
+
+def _base_transform(sim: Any, agent_id: int) -> dict[str, Any]:
+    """Read the full original base transform once, without sensors or quaternion inference."""
+    transform = sim.get_agent_data(agent_id).articulated_agent.base_transformation
+    # Magnum Matrix4 indexes columns first. Store explicitly row-major values.
+    rows = [[float(transform[column][row]) for column in range(4)] for row in range(4)]
+    if not all(math.isfinite(component) for row in rows for component in row):
+        raise ValueError("base transform contains nonfinite values")
+    return {
+        "schema_version": "roboguide.base-transform-observation/v0.1",
+        "source": "articulated_agent.base_transformation",
+        "direction": "world-from-base",
+        "layout": "row-major",
+        "matrix": rows,
+    }
 
 
 def _habitat_seed(habitat_env: Any, backend_config: Any) -> Any:
@@ -911,6 +931,7 @@ class PhysicalDiagnostics:
                         "position": _read(_position, sim, agent_id),
                         "pddl_reference_position": _read(_pddl_reference_position, sim, agent_id),
                         "rotation": _read(_rotation, sim, agent_id),
+                        "base_transform": _read(_base_transform, sim, agent_id),
                         "semantic_location": _read(self._agent_location, sim, agent_id),
                     }
                     for agent_id in self._agent_ids
@@ -1066,6 +1087,7 @@ class PhysicalDiagnostics:
                         "position": _read(_position, sim, agent_id),
                         "pddl_reference_position": _read(_pddl_reference_position, sim, agent_id),
                         "rotation": _read(_rotation, sim, agent_id),
+                        "base_transform": _read(_base_transform, sim, agent_id),
                         "semantic_location": _read(self._agent_location, sim, agent_id),
                         "last_navigation_target_location": _read(
                             self._terminal_nav_location, sim, agent_id

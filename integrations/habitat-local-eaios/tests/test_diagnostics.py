@@ -1184,11 +1184,83 @@ def test_early_episode_end_and_continued_shared_world_are_recorded(tmp_path: Pat
     assert rows[0]["agents"]["0"]["oracle_nav_finished_sensor_post_step"] is True
     assert rows[1]["agents"]["0"]["position"] == [4.0, 5.0, 6.0]
     assert rows[1]["agents"]["0"]["rotation"] == {
-        "representation": "yaw",
+        "representation": "vendor-base-rotation-scalar",
         "unit": "radians",
         "value": 0.25,
     }
     assert terminal["termination_reason"] == "episode_done"
+
+
+class ColumnMajorTransform:
+    """Expose the original Magnum indexing convention without any simulator interface."""
+
+    def __init__(self, rows: list[list[float]]) -> None:
+        """Retain an exact matrix and its original world translation."""
+        self.rows = rows
+        self.translation = [rows[index][3] for index in range(3)]
+
+    def __getitem__(self, column: int) -> list[float]:
+        """Read one existing column without changing state or sampling RNG."""
+        return [row[column] for row in self.rows]
+
+
+def test_initial_and_terminal_preserve_full_transform_without_inferred_yaw(tmp_path: Path) -> None:
+    """Record signed orientation and translation while retaining the vendor scalar as such."""
+    env = FakeEnv([FakePredicate("target", False)])
+    rows = [[0.0, 0.0, 1.0, 4.0], [0.0, 1.0, 0.0, 5.0], [-1.0, 0.0, 0.0, 6.0], [0.0, 0.0, 0.0, 1.0]]
+    transform = ColumnMajorTransform(rows)
+    env.sim._agents[0].base_transformation = transform
+    diagnostics = make_diagnostics(tmp_path)
+    diagnostics.record_reset(env, None)
+    diagnostics.record_terminal(env, 0, "observed-end")
+    for name in ["diagnostics-initial.json", "diagnostics-terminal.json"]:
+        saved = json.loads((tmp_path / "evidence" / name).read_text())
+        pose = saved["agents"]["0"]
+        assert pose["base_transform"] == {
+            "schema_version": "roboguide.base-transform-observation/v0.1",
+            "source": "articulated_agent.base_transformation",
+            "direction": "world-from-base",
+            "layout": "row-major",
+            "matrix": rows,
+        }
+        assert pose["rotation"]["representation"] == "vendor-base-rotation-scalar"
+    assert env.sim._agents[0].base_transformation is transform and transform.rows == rows
+
+
+@pytest.mark.parametrize("failure", ["unreadable", "nonfinite"])
+def test_full_transform_read_failure_preserves_other_diagnostics(
+    tmp_path: Path, failure: str
+) -> None:
+    """Optional pose evidence failure cannot alter execution or skip final evidence flush."""
+    env = FakeEnv([FakePredicate("target", False)])
+    if failure == "nonfinite":
+        env.sim._agents[0].base_transformation = ColumnMajorTransform(
+            [[float("nan"), 0.0, 0.0, 0.0]] * 4
+        )
+    diagnostics = make_diagnostics(tmp_path)
+    diagnostics.record_reset(env, None)
+    diagnostics.record_terminal(env, 0, "original-failure")
+    for name in ["diagnostics-initial.json", "diagnostics-terminal.json"]:
+        saved = json.loads((tmp_path / "evidence" / name).read_text())
+        assert saved["agents"]["0"]["base_transform"]["_status"] == "unavailable"
+        assert saved["agents"]["0"]["position"] == [0.5, 1.0, 2.0]
+
+
+def test_disabled_diagnostics_do_not_read_full_transform(tmp_path: Path) -> None:
+    """A disabled observer neither reads optional pose evidence nor creates artifacts."""
+    diagnostics = PhysicalDiagnostics(tmp_path / "disabled", (0,), False, 0)
+
+    class UnreadableWorld:
+        """Reject every read so an accidental disabled-path access fails this test."""
+
+        @property
+        def sim(self) -> Any:
+            """Refuse the simulator read while keeping disabled behavior model-free."""
+            raise AssertionError("disabled diagnostics read the simulator")
+
+    diagnostics.record_reset(UnreadableWorld(), None)
+    diagnostics.record_terminal(UnreadableWorld(), 0, "end")
+    assert not (tmp_path / "disabled").exists()
 
 
 def test_record_budget_is_bounded_and_explicit(tmp_path: Path) -> None:

@@ -987,6 +987,75 @@ def test_reset_comparison_requires_actual_pose_and_goal_evidence() -> None:
     assert compare_reset(initial, {"habitat_seed_config": 40})["status"] == "unavailable"
 
 
+def test_reset_full_transform_detects_opposite_signed_orientation() -> None:
+    """Equal angle magnitudes cannot conceal different actual base orientations."""
+    transform: JSONObject = {
+        "schema_version": "roboguide.base-transform-observation/v0.1",
+        "source": "articulated_agent.base_transformation",
+        "direction": "world-from-base",
+        "layout": "row-major",
+        "matrix": [[0, 0, 1, 0], [0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 0, 1]],
+    }
+    initial: JSONObject = {
+        "schema_version": "roboguide.e1.physical-diagnostics/v0.8",
+        "episode_id": "generic",
+        "scene_id": "scene",
+        "habitat_seed_config": 40,
+        "agents": {"0": {"position": [0, 0, 0], "rotation": 1.5708, "base_transform": transform}},
+        "goal_entity_positions": {"goal": [1, 2, 3]},
+        "goal_conjuncts": ["goal"],
+    }
+    same = compare_reset(initial, initial)
+    assert same["status"] == "matched"
+    assert same["orientation_evidence"] == "full-world-from-base-matrix"
+    other_transform: JSONObject = {
+        **transform,
+        "matrix": [[0, 0, -1, 0], [0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 0, 1]],
+    }
+    other: JSONObject = {
+        **initial,
+        "agents": {
+            "0": {"position": [0, 0, 0], "rotation": 1.5708, "base_transform": other_transform}
+        },
+    }
+    assert compare_reset(initial, other)["status"] == "mismatch"
+    legacy: JSONObject = {**initial, "agents": {"0": {"position": [0, 0, 0], "rotation": 1.5708}}}
+    assert compare_reset(initial, legacy)["status"] == "unavailable"
+
+
+@pytest.mark.parametrize("fault", ["missing", "shape", "nonfinite", "frame"])
+def test_new_reset_pose_evidence_never_falls_back_to_angle_only(fault: str) -> None:
+    """A declared complete pose cannot be accepted from an unavailable or changed matrix."""
+    transform: JSONObject = {
+        "schema_version": "roboguide.base-transform-observation/v0.1",
+        "source": "articulated_agent.base_transformation",
+        "direction": "world-from-base",
+        "layout": "row-major",
+        "matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+    }
+    if fault == "shape":
+        transform["matrix"] = [[1, 0, 0, 0]]
+    elif fault == "nonfinite":
+        transform["matrix"] = [[float("inf"), 0, 0, 0]] * 4
+    elif fault == "frame":
+        transform["direction"] = "base-from-world"
+    agent: JSONObject = {"position": [0, 0, 0], "rotation": 0}
+    if fault != "missing":
+        agent["base_transform"] = transform
+    snapshot: JSONObject = {
+        "schema_version": "roboguide.e1.physical-diagnostics/v0.8",
+        "episode_id": "generic",
+        "scene_id": "scene",
+        "habitat_seed_config": 40,
+        "agents": {"0": agent},
+        "goal_entity_positions": {"goal": [1, 2, 3]},
+        "goal_conjuncts": ["goal"],
+    }
+    result = compare_reset(snapshot, snapshot)
+    assert result["status"] == "unavailable"
+    assert result["orientation_evidence"] == "unavailable"
+
+
 @pytest.mark.parametrize(
     ("records", "expected"),
     [

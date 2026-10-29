@@ -448,7 +448,10 @@ class EmosStage2Runtime:
                         "habitat_baselines.rl.multi_agent.multi_agent_access_mgr",
                         "habitat_baselines.rl.multi_agent.multi_llm_policy",
                         "habitat_mas.agents.crab_agent",
+                        "habitat_mas.scene_graph.utils",
+                        "habitat_mas.tasks.habitat_mas_sensors",
                         "habitat_mas.utils.models",
+                        "habitat_local_eaios.diagnostics",
                         "habitat_local_eaios.native_usage_observer",
                         "habitat_local_eaios.stage2_feedback",
                         *(
