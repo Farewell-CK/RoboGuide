@@ -20,12 +20,20 @@ from habitat_local_eaios.vendor_compatibility import (  # noqa: E402
     preserve_target_identity,
 )
 
-FIXTURE = Path(__file__).parent / "fixtures/emos-hssd-object-description.txt"
+FIXTURE = Path(__file__).parent / "fixtures/emos-hssd-object-description.json"
+
+
+def published_source() -> bytes:
+    """Restore exact published bytes from escaped lines, including upstream whitespace."""
+    fixture = json.loads(FIXTURE.read_text())
+    raw = "".join(fixture["source_lines"]).encode(fixture["encoding"])
+    assert hashlib.sha256(raw).hexdigest() == fixture["sha256"]
+    return raw
 
 
 def source_tree(root: Path) -> bytes:
     """Create original-shaped packages with an actual published function fixture."""
-    original = FIXTURE.read_bytes()
+    original = published_source()
     for name in ("habitat-lab", "habitat-baselines", "habitat-mas", "data"):
         (root / name).mkdir(parents=True)
     path = root / SOURCE_PATH
@@ -50,7 +58,7 @@ def describe(raw: bytes, objects: list[Any], aliases: dict[str | None, str]) -> 
 
 def test_exact_alias_height_binding_and_background_fallback() -> None:
     """Fix the observed ID loss without breaking ordinary unlabelled background objects."""
-    raw = FIXTURE.read_bytes()
+    raw = published_source()
     objects = [
         SimpleNamespace(full_name="high_cup:0000", label="label-ignored", center=[0.0, 1.4, 0.0]),
         SimpleNamespace(full_name="screwdriver:0000", label=None, center=[0.0, 0.4, 0.0]),
@@ -92,7 +100,7 @@ def test_unknown_source_refuses_before_creating_output(tmp_path: Path, change: s
     elif change == "missing":
         raw = b"# No original function.\n"
     elif change == "duplicate":
-        raw += FIXTURE.read_bytes()
+        raw += published_source()
     elif change == "decorated":
         raw = raw.replace(
             b"def generate_objects_description", b"@unknown\ndef generate_objects_description"
