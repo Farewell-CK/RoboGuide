@@ -19,9 +19,30 @@ from habitat_local_eaios.model import IntegrationError  # noqa: E402
 from habitat_local_eaios.stage2_context import (  # noqa: E402
     MAX_CONTEXT_BYTES,
     MAX_RECENT_EXCHANGES,
+    _message_bytes,
     bounded_messages,
     model_request_scope,
 )
+
+
+def test_sdk_explicit_null_fields_are_inside_the_message_byte_bound() -> None:
+    """Original SDK serialization may include null fields; they cannot disappear from accounting."""
+
+    class Message:
+        """Represent an SDK assistant message with explicit null content and metadata."""
+
+        def model_dump(self, *, mode: str, exclude_none: bool = False) -> dict[str, Any]:
+            """Preserve the original SDK's explicit-null serialization behavior."""
+            assert mode == "json"
+            value = {"role": "assistant", "content": None, "refusal": None}
+            return (
+                {key: item for key, item in value.items() if item is not None}
+                if exclude_none
+                else value
+            )
+
+    message = Message()
+    assert _message_bytes(message) >= len(json.dumps(message.model_dump(mode="json")).encode())
 
 
 class Client:

@@ -47,7 +47,9 @@ def _message_bytes(message: Any) -> int:
         dump = getattr(value, "model_dump", None)
         if not callable(dump):
             raise IntegrationError("Stage2 context contains an unsupported message")
-        value = dump(mode="json", exclude_none=True)
+        # Explicit nulls can remain on the original SDK wire. Counting all fields
+        # conservatively also covers unset defaults without changing the message.
+        value = dump(mode="json")
     try:
         return len(json.dumps(value, ensure_ascii=True, allow_nan=False).encode("utf-8"))
     except (TypeError, ValueError, OverflowError) as error:
