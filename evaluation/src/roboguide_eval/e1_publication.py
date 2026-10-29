@@ -12,7 +12,9 @@ from typing import Any
 
 from roboguide_eval.publication_io import (
     MAX_PUBLIC_BYTES,
+    code_identity,
     encode,
+    number,
     public_safe,
     safe_relative,
     sha256,
@@ -112,6 +114,10 @@ def _counts(runs: list[dict[str, Any]]) -> dict[str, Any]:
         },
         "benchmark_denominator": len(benchmark),
         "benchmark_true": sum(row["official_pddl_success"] is True for row in benchmark),
+        "benchmark_official": {
+            k: sum(row["official_outcome"] == k for row in benchmark)
+            for k in ("true", "false", "unavailable")
+        },
         "elapsed_seconds": {
             "sum": round(sum(elapsed), 6),
             "known": len(elapsed),
@@ -135,6 +141,9 @@ def _counts(runs: list[dict[str, Any]]) -> dict[str, Any]:
             "basis": "sum of per-call observed latency, not exclusive wall time",
         },
         "failures_nonexclusive": dict(sorted(failure.items())),
+        "evidence_gap_counts": dict(
+            sorted(Counter(gap for row in runs for gap in row["gaps"]).items())
+        ),
         "code_identities": dict(
             sorted(Counter(row["code_sha"] or "unavailable" for row in runs).items())
         ),
@@ -191,6 +200,13 @@ def summarize(
             "groups": groups,
             "pairs_recorded": sum(p["family"] == family for p in pairs),
             "recorded_comparison_eligible": len(eligible),
+            "pair_eligibility": {
+                key: sum(
+                    p["family"] == family and p["recorded_comparison_eligible"] is value
+                    for p in pairs
+                )
+                for key, value in (("true", True), ("false", False), ("unavailable", None))
+            },
             "eligible_both_official_available": len(complete),
             "paired_official_matrix": {
                 k: matrix[k] for k in ("both_true", "rg_only", "emos_only", "both_false")
@@ -261,6 +277,8 @@ def validate_records(
         raise ValueError("duplicate publication identity")
     for artifact in artifacts:
         safe_relative(artifact["logical_path"])
+        if type(artifact["available"]) is not bool:
+            raise ValueError("artifact availability is not a strict boolean")
         if artifact["available"]:
             if (
                 not isinstance(artifact["sha256"], str)
@@ -303,6 +321,27 @@ def validate_records(
         official = row["official_pddl_success"]
         if official is not None and type(official) is not bool:
             raise ValueError("official result is not a strict boolean")
+        if (
+            row["physical_episode_executed"] is not None
+            and type(row["physical_episode_executed"]) is not bool
+        ):
+            raise ValueError("physical execution is not a strict boolean")
+        if row["code_sha"] is not None and code_identity(row["code_sha"]) is None:
+            raise ValueError("invalid original code identity")
+        for key in ("elapsed_seconds", "simulator_steps"):
+            if row[key] is not None and number(row[key]) is None:
+                raise ValueError("invalid nonnegative measurement")
+        for key in (
+            "provenance_valid",
+            "valid_for_formal_population",
+            "valid_for_benchmark_population",
+            "benchmark_authority_available",
+            "system_failure",
+            "model_failure",
+        ):
+            fact = (row["admission"] or {}).get(key)
+            if fact is not None and type(fact) is not bool:
+                raise ValueError("admission fact is not a strict boolean")
         if row["official_outcome"] != (
             "unavailable" if official is None else str(official).lower()
         ):
@@ -359,6 +398,9 @@ def validate_records(
         if any(ref.split("#", 1)[0] not in refs for ref in pair.get("source_refs", [])):
             raise ValueError("pair source is unresolved")
         pair_jobs.add(pair["job_id"])
+        eligible = pair["recorded_comparison_eligible"]
+        if eligible is not None and type(eligible) is not bool:
+            raise ValueError("pair eligibility is not a strict boolean")
         selected = [lookup.get(key) for key in pair["runs"]]
         if len(selected) != 2 or any(
             not row or row["purpose"] != "primary" or row["job_id"] != pair["job_id"]
@@ -367,7 +409,7 @@ def validate_records(
             raise ValueError("pair references invalid primary runs")
         if {row["arm"] for row in selected if row} != {"emos", "roboguide"}:
             raise ValueError("pair does not contain both arms")
-        if pair["recorded_comparison_eligible"] and (
+        if eligible is True and (
             pair["comparability"] != "pair_comparable" or pair["reset_status"] != "matched"
         ):
             raise ValueError("missing comparison evidence became comparable")

@@ -49,6 +49,12 @@ JSONL 分片文件由每个 `manifest.json` 的 `record_files` 指定；不要�
 
 ```json
 {
+  "publication": {
+    "prepared_utc": "2026-10-30T00:00:00Z",
+    "prepared_by": "MAINTAINER",
+    "python_version": "ACTUAL_EXPORTER_PYTHON_VERSION",
+    "dependency_lock_sha256": "ACTUAL_64_HEX_UV_LOCK_SHA256"
+  },
   "archives": {
     "original-staged-archive": "/path/to/frozen-batch",
     "original-native-archive": "/path/to/original-native-runs"
@@ -59,6 +65,9 @@ JSONL 分片文件由每个 `manifest.json` 的 `record_files` 指定；不要�
 清点另需 `census.dataset_census`、`census.historical_locator` 与
 `census.staged_source_id`。这些是本机读取定位，不是公开路径。
 批次保存的其他原生引用必须全部有显式命名空间绑定；缺绑定时拒绝而不扫描任意目录。
+`publication` 是本次导出的冻结准备收据；缺字段明确记为 unavailable，不能冒充历史
+运行日期。原进程起止时间没有保存时仍为 null；Provider 首末调用时间单独保存在
+provider 投影中，不代替进程开始、物理执行或关闭时间。
 
 ```bash
 uv run python -m roboguide_eval.e1_publication export-staged \

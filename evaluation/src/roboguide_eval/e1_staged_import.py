@@ -18,6 +18,7 @@ from roboguide_eval.publication_io import (
     number,
     object_value,
     public_safe,
+    publication_metadata,
     sha256,
     write_new,
 )
@@ -228,6 +229,8 @@ def _run(
         and not failure_stage
     ):
         gaps.append("exact_failure_stage_unavailable")
+    if not process.get("started_utc") or not process.get("ended_utc"):
+        gaps.append("original_process_start_or_end_unavailable_provider_times_separate")
     return {
         "run_key": run_key,
         "job_id": job["job_id"],
@@ -259,8 +262,8 @@ def _run(
         "source_ref": source_ref,
         "evidence_refs": sorted(set(evidence_refs)),
         "gaps": sorted(set(gaps)),
-        "started_utc": provider["first_request_utc"],
-        "ended_utc": provider["last_response_utc"],
+        "started_utc": process.get("started_utc"),
+        "ended_utc": process.get("ended_utc"),
     }
 
 
@@ -405,7 +408,7 @@ def export_staged(
                     "family": job["family"],
                     "runs": [row["emos_run"], row["roboguide_run"]],
                     "comparability": doc.get("comparability") if doc else None,
-                    "recorded_comparison_eligible": outcome.get("comparison_eligible") is True,
+                    "recorded_comparison_eligible": boolean(outcome.get("comparison_eligible")),
                     "reset_status": reset.get("status"),
                     "orientation_evidence": "legacy-rotation-scalar-only",
                     "source_refs": [outcome_ref, pair_ref],
@@ -443,6 +446,7 @@ def export_staged(
         "status": "staging",
         "purpose": "primary",
         "exporter_code_sha": exporter_sha,
+        "publication": publication_metadata(local),
         "source_code_sha": original["code_sha"],
         "original_registered_utc": original["registered_utc"],
         "original_closed_status_utc": status["updated_utc"],

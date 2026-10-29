@@ -169,6 +169,12 @@ def test_retry_success_does_not_replace_failed_primary() -> None:
         "missing_reset",
         "unstarted_fake_run",
         "backup_claim",
+        "pair_string",
+        "admission_number",
+        "availability_number",
+        "negative_elapsed",
+        "partial_code",
+        "physical_string",
     ],
 )
 def test_invalid_publication_refuses(change: str) -> None:
@@ -188,6 +194,18 @@ def test_invalid_publication_refuses(change: str) -> None:
         pairs[0]["recorded_comparison_eligible"] = True
     elif change == "unstarted_fake_run":
         workloads[0]["state"] = "not_started"
+    elif change == "pair_string":
+        pairs[0]["recorded_comparison_eligible"] = "false"
+    elif change == "admission_number":
+        runs[0]["admission"]["valid_for_formal_population"] = 1
+    elif change == "availability_number":
+        artifacts[0]["available"] = 1
+    elif change == "negative_elapsed":
+        runs[0]["elapsed_seconds"] = -1
+    elif change == "partial_code":
+        runs[0]["code_sha"] = "1234567"
+    elif change == "physical_string":
+        runs[0]["physical_episode_executed"] = "true"
     else:
         artifacts[0]["backup_status"] = "backup_verified"
     with pytest.raises(ValueError):
@@ -203,6 +221,15 @@ def test_reused_native_run_not_counted_as_new_execution() -> None:
     assert values["fresh_runs"] == 0 and values["reused_runs"] == 1
     assert runs[0]["original_run_id"] == runs[1]["original_run_id"]
     assert len({r["run_key"] for r in runs}) == 2
+
+
+def test_unknown_pair_eligibility_remains_unavailable() -> None:
+    """Missing historical comparability is neither an accepted pair nor a recorded refusal."""
+    workloads, runs, pairs, artifacts = records()
+    pairs[0]["recorded_comparison_eligible"] = None
+    validate_records(workloads, runs, pairs, artifacts)
+    stats = summarize(workloads, runs, pairs)["families"]["fixture"]
+    assert stats["pair_eligibility"] == {"true": 0, "false": 0, "unavailable": 1}
 
 
 def test_official_true_can_coexist_with_system_failure() -> None:
@@ -426,3 +453,30 @@ def test_staged_adapter_imports_full_plan_without_launching(tmp_path: Path) -> N
     assert summary["families"]["fixture"]["coverage_states"]["not_started"] == len(jobs) - 1
     assert not list((tmp_path / "published").glob("*local-source-witness*"))
     assert (bindings.parent / "original-published-local-source-witness.json").is_file()
+    manifest = json.loads((tmp_path / "published/manifest.json").read_bytes())
+    assert manifest["publication"]["prepared_utc"] is None
+    assert "prepared_utc" in manifest["publication"]["missing_receipt_fields"]
+    emitted = [
+        json.loads(line)
+        for name in manifest["record_files"]["runs"]
+        for line in (tmp_path / "published" / name).read_text().splitlines()
+    ]
+    assert all(row["started_utc"] is None and row["ended_utc"] is None for row in emitted)
+
+
+def test_export_receipt_is_separate_frozen_metadata() -> None:
+    """Freeze actual export provenance without changing or guessing historical run clocks."""
+    from roboguide_eval.publication_io import publication_metadata
+
+    receipt = {
+        "prepared_utc": "2026-10-30T01:00:00Z",
+        "prepared_by": "fixture-maintainer",
+        "python_version": "3.13.0",
+        "dependency_lock_sha256": "a" * 64,
+    }
+    metadata = publication_metadata({"publication": receipt})
+    assert metadata["missing_receipt_fields"] == []
+    assert {k: metadata[k] for k in receipt} == receipt
+    receipt["prepared_utc"] = "2026-10-30T01:00:00"
+    with pytest.raises(ValueError, match="timezone"):
+        publication_metadata({"publication": receipt})

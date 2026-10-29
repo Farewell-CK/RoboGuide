@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import re
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -54,6 +55,24 @@ def boolean(value: Any) -> bool | None:
 def code_identity(value: Any) -> str | None:
     """Accept only an observed full Git object identity, never today's fallback commit."""
     return value if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) else None
+
+
+def publication_metadata(local: dict[str, Any]) -> dict[str, Any]:
+    """Retain a frozen export receipt separately from historical execution identity."""
+    fields = ("prepared_utc", "prepared_by", "python_version", "dependency_lock_sha256")
+    supplied = object_value(local.get("publication") or {})
+    result = {key: supplied.get(key) for key in fields}
+    if result["prepared_utc"] is not None:
+        stamp = datetime.fromisoformat(result["prepared_utc"].replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            raise ValueError("publication receipt needs an explicit timezone")
+    digest = result["dependency_lock_sha256"]
+    if digest is not None and not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("invalid exporter dependency lock digest")
+    result["review_status"] = "awaiting-human-paper-review"
+    result["missing_receipt_fields"] = [key for key in fields if result[key] is None]
+    public_safe(result)
+    return result
 
 
 def public_safe(value: Any) -> None:
