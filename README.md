@@ -1691,6 +1691,16 @@ Bound live relocation uses [ADR-0226](docs/decisions/0226-fresh-relocation-navig
 fresh guarded navigation calls re-evaluate arrival and invalidate only a moved selected target's
 cached point. Local How v0.20 declares this scope; native EMOS and official goals remain unchanged.
 
+For the known public HSSD target-name regression, [ADR-0227](docs/decisions/0227-explicit-emos-target-identity-compatibility.md)
+provides an explicit preparation-only private vendor view. Both arms freeze its actual byte
+identity and compatibility receipt; original sources, planning, skills and official goals are
+preserved. This baseline correction is separately disclosed and is not an exact paper-reproduction
+claim. The [E1 issue register](docs/development/e1-baseline-and-execution-issue-register.md) records
+remaining evidence gaps and the required user review before any new full batch.
+Physical diagnostics v0.8 records complete original base transforms at reset and terminal
+boundaries. New paired-start checks use that actual matrix, while legacy angle-only records
+remain qualified; equal seeds or angle magnitudes do not establish equal orientation.
+
 软件进程停止与本地执行结果是独立证据（[ADR-0110](docs/decisions/0110-execution-generation-and-process-stop-evidence.md)）。
 Habitat Local EAIOS 在原 worker 真实退出后发布 safe-state v0.3，完整绑定原 Group、attempt
 和 generation；Failed/Completed 不会被改写为 Cancelled。缺失证明保留 ownership；

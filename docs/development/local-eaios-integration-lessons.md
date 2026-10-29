@@ -1,6 +1,6 @@
 # Local EAIOS 接入经验与验收清单
 
-维护日期：2026-10-28。本文从 EMOS/Habitat 接入中提炼可复用的工程经验，
+维护日期：2026-10-29。本文从 EMOS/Habitat 接入中提炼可复用的工程经验，
 记录确认程度、现有修复和未关闭问题，避免接入其他系统时重复犯错。
 本文不保存实验结果、凭据或原始运行证据，也不新增公开协议、准入规则或调度权威。
 架构与合同仍以 [V2](../architecture/v2/README.md)、已接受 ADR 和
@@ -20,16 +20,16 @@ EMOS 的内部字段不能成为其他厂商接口的通用协议；新系统优
 
 **确认的问题。** 本地导航可能锁存“这个目标已完成”。再次接纳同目标的新命令时，
 旧状态会屏蔽实际执行，同时新的完成观察仍为 false，最终只消耗技能预算。
-现有适配器的导航生命周期只覆盖观察采集，搬运路径尚未接入。
+此前适配器的导航生命周期只覆盖观察采集，搬运路径遗漏了接线。
 
 **通用要求。** 区分原命令重传与新命令。重传保留原句柄与原结果；新命令在 Guard 和
 原始映射完成后，精确绑定 endpoint、execution/attempt、invocation、call 与 sequence，
 由本地系统支持的方式建立本次命令状态，再根据当前世界重新观察结果。
 不得清除 peer 状态、覆盖未知执行、提前写成功或重置整个环境。
 
-**状态：已确认，搬运修复与组合验收待完成。**
+**状态：搬运接线已由 ADR-0226 实现并有确定性测试，固定物理回归仍须独立验收。**
 [生产绑定](../../integrations/habitat-local-eaios/habitat_local_eaios/live_bindings.py)、
-[当前观察专用实现](../../integrations/habitat-local-eaios/habitat_local_eaios/navigation_dispatch.py)、
+[精确命令生命周期](../../integrations/habitat-local-eaios/habitat_local_eaios/navigation_dispatch.py)、
 [现有测试](../../integrations/habitat-local-eaios/tests/test_navigation_dispatch.py)。
 其他系统是否存在同类缺陷，需要检查其实际接口，不根据 EMOS 行为推断。
 
@@ -126,6 +126,21 @@ MI 使用允许的抽象规划证据；当前节点资格、资源和 placement 
 [诊断实现](../../integrations/habitat-local-eaios/habitat_local_eaios/diagnostics.py)、
 [有界观察与证据归档](../extensions/bounded-observation-and-evidence-closure.md)。
 
+## INT-L09：任务实体 ID 必须贯穿场景描述与工具参数
+
+**确认的问题。** 上游公开描述器可能先解析任务别名，再被展示名称覆盖。
+模型能读到物体高度，却无法把它可靠关联到任务和工具中的目标 ID。源码来自作者公开分支，
+也不证明与论文历史执行版等价；直接回退旧函数还可能破坏普通背景对象的名称兜底。
+
+**通用要求。** 权威实体 ID、显示名、几何和能力引用保留显式对应；不能根据顺序、
+名字相似或模型常识补造绑定。修复已知回归时检查原始正确路径和普通对象退化路径。
+对比双方使用有记录的同一基础输入修复，声明版本、补丁和实际加载字节，保留原结果。
+
+**状态：ADR-0227 已实现显式源码准备和确定性测试，真实请求及物理验收仍须单独记录。**
+[版本化兼容准备](../decisions/0227-explicit-emos-target-identity-compatibility.md)、
+[准备工具](../../integrations/habitat-local-eaios/habitat_local_eaios/vendor_compatibility.py)、
+[E1 问题登记](e1-baseline-and-execution-issue-register.md)。
+
 ## 新接入的可复用验收矩阵
 
 | 类别 | 应验证的场景 | 需要证明的边界 |
@@ -147,4 +162,5 @@ MI 使用允许的抽象规划证据；当前节点资格、资源和 placement 
 架构或协议确需调整时另走 ADR，不在经验记录中直接宣布变更。
 
 原始报告及实验结果继续保存在独立分析目录，本页只保存可复用经验。
+[E1 问题登记](e1-baseline-and-execution-issue-register.md)区分当前已确认问题与缺证据事项。
 [未来研究想法](future-research-ideas.md)单独维护；当前缺陷修复不启动下一版智能模块。

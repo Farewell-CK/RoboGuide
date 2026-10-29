@@ -1933,6 +1933,20 @@ independent preflight/evaluation readers check both scopes. No extra act/step/RN
 rewrite, native EMOS edit or official success follows. See ADR-0226; physical acceptance and
 initial pick/place failures remain separate.
 
+ADR-0227 owns an explicit preparation-only EMOS target-identity compatibility source view in
+`habitat_local_eaios.vendor_compatibility`. Only the known source function may join its fallback
+to the original alias/label chain; ordinary unlabelled objects retain their handle fallback.
+The supplied source is unchanged, the destination is new, and complete original/copied byte
+checks precede a qualified compatibility receipt. Both arms freeze the same prepared source;
+unknown input, copy failure or drift never grants completion. No runtime auto-patch, model,
+simulator, policy, official goal or Core contract change follows. Keep actual experiment
+artifacts local and stop before a full batch for user review. See ADR-0227 and the maintained
+`docs/development/e1-baseline-and-execution-issue-register.md`.
+Physical diagnostics v0.8 records the existing world-from-base Matrix4 at reset/terminal only,
+without new sensor, step or RNG calls. The vendor rotation scalar is not signed yaw. New reset
+comparison requires the complete matrix on both arms and leaves missing data unavailable;
+legacy scalar-only comparison is explicitly qualified, never upgraded to full pose evidence.
+
 The v0.13 acquisition tool `scan_for_object` is backed by an independently scoped local HRL
 skill and verified original base-yaw interfaces. Only a real guarded model selection invokes it;
 32-step/90-degree/1.5rad/s bounds clip to the original remaining acquisition budget. Zero
