@@ -679,6 +679,26 @@ def test_contract_freezes_selection_order_ports_and_model_environment(
     assert env["ROBOGUIDE_B1_HABITAT_PORT_B"] == str(a.ports["endpoint_b"])
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_observation_render_reuse_comes_only_from_frozen_pair_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    """Both arms inherit only the explicit common optimization, never a hidden host switch."""
+    population, config_path = setup_pair(tmp_path)
+    config = json.loads(config_path.read_text())
+    config["observation_read_cache"] = enabled
+    config_path.write_text(json.dumps(config))
+    spec = PairSpec.load(population, config_path, "pair-0")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-private-value")
+    monkeypatch.setenv("ROBOGUIDE_HABITAT_OBSERVATION_READ_CACHE", "1")
+    env = arm_environment(spec, tmp_path / "arm", spec.ports["proxy"])
+    assert env.get("ROBOGUIDE_HABITAT_OBSERVATION_READ_CACHE") == ("1" if enabled else None)
+    config["observation_read_cache"] = 1
+    config_path.write_text(json.dumps(config))
+    with pytest.raises(ValueError, match="explicit Boolean"):
+        PairSpec.load(population, config_path, "pair-0")
+
+
 def test_private_checkout_passes_production_containment_and_isolates_writes(tmp_path: Path) -> None:
     """A real private config survives B1 deployment admission and never mutates shared code."""
     from roboguide_eval.b1_deployment import freeze_deployment

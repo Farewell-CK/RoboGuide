@@ -182,6 +182,8 @@ class PairSpec:
                 raise ValueError("invalid pair budget: " + name)
         if type(config.get("gpu_device")) is not int or cast(int, config["gpu_device"]) < 0:
             raise ValueError("invalid GPU device")
+        if type(config.get("observation_read_cache", False)) is not bool:
+            raise ValueError("observation read cache requires an explicit Boolean")
         raw_ports = object_value(config.get("ports"))
         if set(raw_ports) not in tuple(endpoint_port_names(count) for count in range(1, 5)) or any(
             type(p) is not int or not 1 <= p <= 65535 for p in raw_ports.values()
@@ -552,6 +554,8 @@ def arm_environment(spec: PairSpec, directory: Path, proxy_port: int) -> dict[st
     )
     if "b1_deployment" in spec.config:
         env["ROBOGUIDE_B1_DEPLOYMENT"] = str(code / required_text(spec.config, "b1_deployment"))
+    if spec.config.get("observation_read_cache") is True:
+        env["ROBOGUIDE_HABITAT_OBSERVATION_READ_CACHE"] = "1"
     for name, field in (
         ("CONTROLLER_GRPC", "grpc"),
         ("CONTROLLER", "controller"),

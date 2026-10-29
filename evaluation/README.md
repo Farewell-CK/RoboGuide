@@ -17,6 +17,13 @@ E1 的收尾条件、配置记录、已实现启动门禁与待核验项见
 准确 episode 在原生环境构造前选定；模型响应、真实 reset、源码和归档完整性独立核对。
 入口不注入历史计划、不修改原生策略或 benchmark，也不按结果筛选 population。
 
+配对 worker 可显式设置 `observation_read_cache: true`；缺省为 false，非布尔值拒绝。
+Harness 清除继承的 Habitat 开关，仅由冻结配置对两臂同时设置
+`ROBOGUIDE_HABITAT_OBSERVATION_READ_CACHE=1`。此共享后端优化只复用单次原始谓词读取内
+未变化的原始图像；完整声明、实现摘要、实际加载源码和最终计数应进入新运行证据。
+不得据此更改旧运行或官方结果。见
+[ADR-0229](../docs/decisions/0229-scoped-original-observation-read-cache.md)。
+
 Formal B1 的 provenance、failure owner 和 population 规则见
 [Evaluation Evidence Validity](docs/evaluation-evidence-validity.md)。Formal population
 只由有效 provenance 与显式 external-infrastructure failure 决定；benchmark population
