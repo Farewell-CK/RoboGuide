@@ -12,6 +12,7 @@ from .model import CanonicalInvocation, IntegrationError
 from .navigation_dispatch import NavigationDispatchLifecycle, inspect_navigation_dispatch
 from .observation_control import ObservationAcquisitionControl
 from .relocation_completion import RelocationCompletionBinding
+from .reset_completion import ResetCompletionBinding
 from .stage2_contract import (
     RelocationExecutionState,
     Stage2ActionAudit,
@@ -76,6 +77,38 @@ class LivePolicyBindings:
             if not self.feedbacks[agent].operation_completed(self.originals[agent].name)
         }
 
+    def _retire_messages(
+        self, agent: int, contract: Stage2ExecutionContract, *, entering: bool = False
+    ) -> None:
+        """Discard only this original child endpoint's unread retired-attempt inbox."""
+        if not getattr(self.runtime, "_bounded_execution_lifecycle", False):
+            return
+        original = self.originals[agent]
+        queues = getattr(type(original), "message_pipe", None)
+        if not isinstance(queues, dict):
+            raise IntegrationError("live inbox lifecycle requires the original message queue")
+        messages = queues.get(original.name, [])
+        if not isinstance(messages, list) or any(not isinstance(item, str) for item in messages):
+            raise IntegrationError("original live inbox contains malformed message evidence")
+        try:
+            if messages:
+                self.record_feedback(
+                    {
+                        "event": "attempt-inbox-retired",
+                        "scope_contract": contract.as_dict(),
+                        "boundary": "before-new-attempt" if entering else "after-attempt-terminal",
+                        "queued_message_owner": "unavailable-in-original-inbox",
+                        "agent_name": original.name,
+                        "unread_message_count": len(messages),
+                        "delivery_acknowledged": False,
+                        "raw_message_source": "original-sender-tool-call-evidence",
+                    }
+                )
+        except Exception:  # noqa: BLE001 - failed archival cannot authorize stale delivery
+            _LOG.exception("retired live inbox evidence unavailable")
+        finally:
+            queues.pop(original.name, None)
+
     def idle(self, agent: int) -> None:
         """Use original wait after local completion or before the first assignment."""
         policy = self.actor._active_policies[agent]
@@ -114,6 +147,8 @@ class LivePolicyBindings:
         contract = Stage2ExecutionContract.for_invocation(
             invocation, allow_view_scan=scan is not None
         )
+        lifecycle = bool(getattr(self.runtime, "_bounded_execution_lifecycle", False))
+        self._retire_messages(agent, contract, entering=True)
         contracts = {original.name: contract}
         states = (
             {
@@ -178,6 +213,18 @@ class LivePolicyBindings:
                     observation_control is not None
                     and agent in getattr(self.runtime, "_compound_observers", set())
                 ),
+                reset_completion=(
+                    ResetCompletionBinding(
+                        self.runtime._habitat_env,
+                        policy,
+                        agent,
+                        contract,
+                        self.record_feedback,
+                    )
+                    if lifecycle and completion is not None
+                    else None
+                ),
+                bounded_model_context=lifecycle,
             )
         except BaseException:
             if scan is not None:
@@ -268,6 +315,9 @@ class LivePolicyBindings:
 
     def finish(self, agent: int) -> None:
         """Close one observed attempt and make the released local endpoint passive."""
+        contract = self.contracts.get(agent)
+        if contract is not None:
+            self._retire_messages(agent, contract)
         self.contracts.pop(agent, None)
         restore = self.restores.pop(agent, None)
         if restore is not None:

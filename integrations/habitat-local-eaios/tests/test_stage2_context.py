@@ -196,6 +196,16 @@ def test_original_provider_error_and_cleanup_are_retained() -> None:
     assert client.create == original
 
 
+def test_one_scope_cannot_add_another_model_call() -> None:
+    """Unexpected repeated SDK invocation refuses before a second request reaches the client."""
+    value = model(1)
+    with model_request_scope(value, lambda _: None):
+        value.client.chat.completions.create(messages=messages(value))
+        with pytest.raises(IntegrationError):
+            value.client.chat.completions.create(messages=messages(value))
+    assert len(value.client.chat.completions.requests) == 1
+
+
 def test_recording_failure_is_not_a_provider_retry() -> None:
     """A failed evidence sink cannot change the original request's result or multiplicity."""
     value = model(1)
@@ -209,3 +219,73 @@ def test_recording_failure_is_not_a_provider_retry() -> None:
             "original-provider-response"
         )
     assert len(value.client.chat.completions.requests) == 1
+
+
+def test_production_guard_binds_the_original_response_after_context_selection() -> None:
+    """Context selection must not break raw response/receipt ownership in the real Guard path."""
+    from habitat_local_eaios.stage2_contract import install_stage2_contract_guard
+    from habitat_local_eaios.stage2_feedback import Stage2ExecutionFeedback
+    from test_stage2_feedback import VendorAgent, _contract
+
+    value = model(300)
+    value.chat_history.pop()
+    value.planning_stage, value.code_execution = False, False
+    agent = VendorAgent()
+    value.actions = agent.llm_model.actions
+
+    def chat(content: str, crab_planning: bool = False) -> Any:
+        """Use the original request assembly and raw tool ledger over a zero-network SDK."""
+        assert not crab_planning
+        value.chat_history.append([{"role": "user", "content": content}])
+        response = value.client.chat.completions.create(
+            messages=messages(value), model="test-model", tools=value.actions
+        )
+        assert response == "original-provider-response"
+        value.chat_history[-1].extend(
+            [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "fresh-call",
+                            "function": {
+                                "name": "nav_to_obj",
+                                "arguments": '{"target_obj":"entrance:north"}',
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "fresh-call",
+                    "name": "nav_to_obj",
+                    "content": "Success",
+                },
+            ]
+        )
+        return "nav_to_obj", {"target_obj": "entrance:north"}
+
+    value.chat = chat
+    agent.llm_model = value
+    contract = _contract()
+    rows: list[dict[str, Any]] = []
+    feedback = Stage2ExecutionFeedback(
+        {agent.name: contract}, rows.append, bounded_model_context=True
+    )
+    restore = install_stage2_contract_guard(
+        [agent], {agent.name: contract}, rows.append, feedback=feedback
+    )
+    try:
+        result = agent.chat("latest actual observation")
+        assert result["arguments"]["target_obj"] == "entrance:north"
+        assert len(value.chat_history) == 302
+        assert len(value.client.chat.completions.requests) == 1
+        contexts = [row for row in rows if row.get("event") == "model-working-context"]
+        assert contexts[0]["retained_recent_exchanges"] == MAX_RECENT_EXCHANGES
+        assert contexts[0]["contract"] == contract.as_dict()
+        receipt = json.loads(value.chat_history[-1][-1]["content"])
+        assert receipt["tool_call_id"] == "fresh-call"
+        assert receipt["local_skill_completed"] is None
+    finally:
+        restore()
+        feedback.close()

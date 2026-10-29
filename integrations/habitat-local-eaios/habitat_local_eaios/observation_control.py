@@ -19,12 +19,18 @@ OBSERVATION_CONTROL_PROFILE = "bounded-visual-feedback/v0.1"
 MAX_OBSERVATION_PAUSE_STEPS = 16
 
 
-def observation_control_declaration(*, compound: bool = False) -> dict[str, Any]:
+def observation_control_declaration(
+    *, compound: bool = False, per_step_pause: bool = False
+) -> dict[str, Any]:
     """Publish the actual local feedback and pause contract without promising visibility."""
     return {
-        "profile": "bounded-visual-feedback/v0.2" if compound else OBSERVATION_CONTROL_PROFILE,
+        "profile": "bounded-visual-feedback/v0.3"
+        if per_step_pause
+        else "bounded-visual-feedback/v0.2"
+        if compound
+        else OBSERVATION_CONTROL_PROFILE,
         "observation_source": "existing-gym-observation",
-        "max_pause_simulator_steps": MAX_OBSERVATION_PAUSE_STEPS,
+        "max_pause_simulator_steps": 500 if per_step_pause else MAX_OBSERVATION_PAUSE_STEPS,
         "pause_bound": "minimum-of-profile-limit-and-original-remaining-budget",
         "condition_persistence_guaranteed": False,
         "official_success_authority": "habitat-pddl",
@@ -52,10 +58,13 @@ class ObservationAcquisitionControl:
         start_step: int,
         max_steps: int,
         semantic_digest: str,
+        *,
+        per_step_pause: bool = False,
     ) -> None:
         """Freeze authority before any model call; later samples cannot renew the budget."""
         if (
-            type(agent_id) is not int
+            type(per_step_pause) is not bool
+            or type(agent_id) is not int
             or agent_id < 0
             or type(start_step) is not int
             or start_step < 0
@@ -70,6 +79,7 @@ class ObservationAcquisitionControl:
         self.start_step = start_step
         self.max_steps = max_steps
         self.semantic_digest = semantic_digest
+        self.per_step_pause = per_step_pause
         self._sample: dict[str, Any] | None = None
 
     def update(self, receipt: dict[str, Any]) -> None:
@@ -129,7 +139,9 @@ class ObservationAcquisitionControl:
         sample = self._sample
         elapsed = 0 if sample is None else sample["simulator_step"] - self.start_step
         return {
-            **observation_control_declaration(compound=self.invocation.requires_arrival),
+            **observation_control_declaration(
+                compound=self.invocation.requires_arrival, per_step_pause=self.per_step_pause
+            ),
             "invocation_digest": "sha256:" + self.invocation.request_key(),
             "mission_id": self.invocation.mission_id,
             "task_id": self.invocation.task_id,
@@ -151,4 +163,4 @@ class ObservationAcquisitionControl:
         remaining = self.snapshot()["remaining_simulator_steps"]
         if remaining <= 0:
             raise IntegrationError("observation control budget exhausted before tool dispatch")
-        return min(MAX_OBSERVATION_PAUSE_STEPS, int(remaining))
+        return min(500 if self.per_step_pause else MAX_OBSERVATION_PAUSE_STEPS, int(remaining))

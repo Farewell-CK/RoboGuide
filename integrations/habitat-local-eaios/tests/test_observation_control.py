@@ -146,9 +146,20 @@ def test_detached_or_malformed_feedback_cannot_replace_the_current_sample(
     assert control.snapshot() == original
 
 
-def test_disclosed_pause_mapping_returns_control_within_the_original_budget() -> None:
-    """The same raw wait becomes a declared 16-step pause; final budget clips without renewal."""
-    control = _control(40)
+@pytest.mark.parametrize("per_step_pause", [False, True])
+def test_disclosed_pause_mapping_returns_control_within_the_original_budget(
+    per_step_pause: bool,
+) -> None:
+    """Both declared pause generations clip the same raw wait without renewing any budget."""
+    prior = _control(1200 if per_step_pause else 40)
+    control = ObservationAcquisitionControl(
+        prior.invocation,
+        prior.agent_id,
+        prior.start_step,
+        prior.max_steps,
+        prior.semantic_digest,
+        per_step_pause=per_step_pause,
+    )
     control.update(_sample(control, 10, False))
     agent = VendorAgent()
     model = ObservationModel()
@@ -164,7 +175,10 @@ def test_disclosed_pause_mapping_returns_control_within_the_original_budget() ->
         [agent], {agent.name: contract}, rows.append, feedback=feedback
     )
     try:
-        for elapsed, expected_pause in ((0, 16), (16, 16), (32, 8)):
+        pauses = (
+            ((0, 500), (500, 500), (1000, 200)) if per_step_pause else ((0, 16), (16, 16), (32, 8))
+        )
+        for elapsed, expected_pause in pauses:
             control.update(_sample(control, 10 + elapsed, False))
             result = agent.chat("Choose the next local action")
             assert result == {"name": "wait", "arguments": [str(expected_pause)]}
@@ -177,8 +191,8 @@ def test_disclosed_pause_mapping_returns_control_within_the_original_budget() ->
             assert raw_call.function.name == "wait" and raw_call.function.arguments == "{}"
             assert model.actions == original_tools
         assert len(model.requests) == 3
-        assert control.max_steps == 40
-        control.update(_sample(control, 50, False))
+        assert control.max_steps == prior.max_steps
+        control.update(_sample(control, 10 + prior.max_steps, False))
         with pytest.raises(IntegrationError, match="budget exhausted"):
             agent.chat("No budget remains")
         assert len(model.requests) == 3

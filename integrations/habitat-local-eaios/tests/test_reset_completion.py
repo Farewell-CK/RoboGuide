@@ -52,13 +52,26 @@ class Result(list[bool]):
         return Result([value and other for value in self])
 
 
+class Vector(list[float]):
+    """Keep the controller's numerical copy/reshape interface distinct from skill storage."""
+
+    def copy(self) -> Vector:
+        """Retain the controller reference without aliasing its original storage."""
+        return Vector(self)
+
+    def reshape(self, shape: tuple[int, int]) -> Matrix:
+        """Expose one environment without coercing the target to a skill observation dtype."""
+        assert shape == (1, len(self))
+        return Matrix(list(self))
+
+
 class Action:
     """Represent an original controller whose reference was actually sampled earlier."""
 
     def __init__(self) -> None:
         """Keep an actual home distinct from the failed skill-entry pose."""
         self.is_init = True
-        self._init_joint_pos = [0.0, 1.0]
+        self._init_joint_pos = Vector([0.0, 1.0])
 
 
 class Parent:
@@ -217,3 +230,54 @@ def test_failed_archival_does_not_change_completion(monkeypatch: pytest.MonkeyPa
     admit(binding)
     assert skill._is_skill_done([2.0, 3.0]) == [False]
     assert skill._is_skill_done([0.0, 1.0]) == [True]
+
+
+def test_reference_binding_composes_with_production_feedback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Feedback must observe the qualified original check, not the stale entry reference."""
+    from habitat_local_eaios.stage2_feedback import Stage2ExecutionFeedback
+    from test_stage2_feedback import VendorModel
+
+    environment, skill, original_binding, _ = harness(monkeypatch)
+    contract = original_binding._contract
+    original_binding.close()
+
+    def terminate(instance: Skill, joints: list[float], **kwargs: Any) -> Any:
+        """Expose one original-shaped HRL decision and keep its budget untouched."""
+        del kwargs
+        return instance._is_skill_done(joints), [False], {}
+
+    monkeypatch.setattr(Skill, "should_terminate", terminate, raising=False)
+    policy = SimpleNamespace(
+        _skills={0: skill},
+        _name_to_idx={"reset_arm": 0},
+        _idx_to_name={0: "reset_arm"},
+        _high_level_policy=SimpleNamespace(llm_agent=SimpleNamespace(name="agent_0")),
+    )
+    rows: list[dict[str, Any]] = []
+    binding = module.ResetCompletionBinding(environment, policy, 0, contract, rows.append)
+    feedback = Stage2ExecutionFeedback({"agent_0": contract}, rows.append, reset_completion=binding)
+    feedback.install([policy])
+    model = VendorModel()
+    model.next_action = ("reset_arm", {})
+    model.chat("reset using the original controller")
+    feedback.admit("agent_0", model, {"name": "reset_arm", "arguments": {}})
+    feedback.bind_observation_dispatch("agent_0", {"name": "reset_arm", "arguments": {}})
+    try:
+        assert skill.should_terminate(  # type: ignore[attr-defined]
+            [2.0, 3.0], batch_idx=[0], skill_name=["reset_arm"], hl_wants_skill_term=[False]
+        )[0] == [False]
+        feedback.physical_step()
+        assert skill.should_terminate(  # type: ignore[attr-defined]
+            [0.0, 1.0], batch_idx=[0], skill_name=["reset_arm"], hl_wants_skill_term=[False]
+        )[0] == [True]
+        terminal = [row for row in rows if row.get("event") == "skill-terminated"][-1]
+        assert terminal["termination"]["base_is_skill_done"] is True
+        assert terminal["source"] == "controller-qualified-original-skill-should-terminate"
+        assert terminal["reset_reference_profile"] == "controller-bound-arm-reset/v0.1"
+        assert terminal["local_skill_completed"] is True
+        assert skill._init_joint_pos.row == [2.0, 3.0]
+    finally:
+        feedback.close()
+    assert skill._is_skill_done([2.0, 3.0]) == [True]

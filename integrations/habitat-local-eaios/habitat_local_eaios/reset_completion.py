@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Callable
+from numbers import Real
 from typing import Any
 
 from .model import IntegrationError
@@ -55,6 +56,8 @@ def _joints(value: Any) -> tuple[float, ...]:
     try:
         if isinstance(value, (str, bytes, dict)) or not 1 <= len(value) <= 64:
             raise ValueError("invalid joint vector")
+        if any(isinstance(item, bool) or not isinstance(item, Real) for item in value):
+            raise ValueError("joint vector is not numerical")
         result = tuple(float(item) for item in value)
         if not all(math.isfinite(item) for item in result):
             raise ValueError("nonfinite joint vector")
@@ -115,6 +118,10 @@ class ResetCompletionBinding:
         self._reported: str | None = None
         self._previous: Any = _MISSING
         self._installed = False
+
+    def owns(self, name: str, contract: Stage2ExecutionContract) -> bool:
+        """Keep reference qualification inside the exact original endpoint and attempt."""
+        return not self._closed and name == f"agent_{self._agent}" and contract == self._contract
 
     def _current_target(self) -> tuple[float, ...] | None:
         """Reject changed worlds, controllers and already frozen reference targets."""
@@ -195,8 +202,14 @@ class ResetCompletionBinding:
             previous = self.skill._init_joint_pos
             if tuple(getattr(previous, "shape", ())) != (1, len(target)):
                 raise IntegrationError("reset skill target does not match the original joint space")
-            aligned = previous.copy()
-            aligned[0] = target
+            # Keep the controller's actual numerical precision, rather than casting
+            # its target into the skill observation array's potentially different dtype.
+            raw_target = self.action._init_joint_pos
+            if not callable(getattr(raw_target, "copy", None)) or not callable(
+                getattr(raw_target, "reshape", None)
+            ):
+                raise IntegrationError("original reset target has no numerical copy interface")
+            aligned = raw_target.copy().reshape((1, len(target)))
             self.skill._init_joint_pos = aligned
             try:
                 result = original(*args, **kwargs)

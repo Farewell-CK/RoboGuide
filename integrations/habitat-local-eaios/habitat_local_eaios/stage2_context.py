@@ -69,16 +69,22 @@ def _complete_exchange(exchange: list[Any]) -> None:
                 if isinstance(message, Mapping)
                 else getattr(message, "tool_calls", None)
             )
+            if calls is not None and (not isinstance(calls, list) or len(calls) > 32):
+                raise IntegrationError("Stage2 context tool-call collection is invalid")
             for call in calls or []:
                 identity = (
                     call.get("id") if isinstance(call, Mapping) else getattr(call, "id", None)
                 )
-                if not isinstance(identity, str) or not identity or identity in pending:
+                if (
+                    not isinstance(identity, str)
+                    or not 1 <= len(identity) <= 1024
+                    or identity in pending
+                ):
                     raise IntegrationError("Stage2 context tool identity is invalid")
                 pending.add(identity)
         elif role == "tool":
             identity = message.get("tool_call_id") if isinstance(message, Mapping) else None
-            if identity not in pending:
+            if not isinstance(identity, str) or identity not in pending:
                 raise IntegrationError("Stage2 context exchange contains an orphan tool receipt")
             pending.remove(identity)
         elif role != "user" or pending:
@@ -155,16 +161,19 @@ def model_request_scope(model: Any, record: Callable[[dict[str, Any]], None]) ->
         ) from error
     if not callable(original) or getattr(original, "_roboguide_context_scope", False):
         raise IntegrationError("Stage2 request context boundary is unavailable or already owned")
+    issued = False
 
     def create(*args: Any, **kwargs: Any) -> Any:
         """Change only request messages; preserve endpoint, model, tools and original errors."""
-        if args or "messages" not in kwargs:
+        nonlocal issued
+        if issued or args or "messages" not in kwargs:
             raise IntegrationError("Stage2 request context requires explicit original messages")
         selected, observation = bounded_messages(model, kwargs["messages"])
         try:
             record(dict(observation, event="model-working-context"))
         except Exception:  # noqa: BLE001 - archival failure does not replace the actual request
             _LOG.exception("Stage2 working context evidence unavailable")
+        issued = True
         return original(**dict(kwargs, messages=selected))
 
     create._roboguide_context_scope = True  # type: ignore[attr-defined]

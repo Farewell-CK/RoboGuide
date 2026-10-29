@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -763,7 +764,12 @@ def _guard_agent(
                     )
                 model.actions = offered_actions
             try:
-                result = original_model_chat(content, crab_planning=crab_planning)
+                with (
+                    feedback.request_context(agent_name, model)
+                    if feedback is not None and not crab_planning
+                    else nullcontext()
+                ):
+                    result = original_model_chat(content, crab_planning=crab_planning)
             finally:
                 if bound_actions:
                     _restore_attribute(model, "actions", original_actions)

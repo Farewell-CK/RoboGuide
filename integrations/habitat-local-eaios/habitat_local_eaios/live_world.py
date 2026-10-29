@@ -18,6 +18,7 @@ from .backend import LocalExecutionOutcome, _observation_true
 from .diagnostics import diagnostics_enabled
 from .endpoint_registry import FINALITY_PROFILE, LIVE_PROFILE, load_endpoint_registry
 from .evidence_io import json_observation
+from .execution_lifecycle import EXECUTION_LIFECYCLE_SCHEMA, lifecycle_declaration
 from .live_bindings import LivePolicyBindings as LivePolicyBindings
 from .live_coordinator import LiveWorldCoordinator as LiveWorldCoordinator
 from .live_session import LiveSlotLedger as LiveSlotLedger
@@ -48,6 +49,7 @@ from .operation_admission import OPERATION_FEASIBILITY_SCHEMA
 from .perception import cached_detection_observations, inspect_perception, observe_detection
 from .perception_diagnostics import PerceptionDiagnostics
 from .preassignment_feasibility import preassignment_digest
+from .reset_completion import inspect_reset_completion
 from .shared_world import SharedEmosStage2Runtime
 from .view_motion import motion_feedback_declaration
 from .view_recovery import preparation_reselection_declaration, view_recovery_declaration
@@ -60,6 +62,8 @@ LIVE_FEASIBILITY_SCHEMA = "roboguide.deployment-intent-feasibility/v0.6"
 
 class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
     """Opt-in one-to-four-agent execution; legacy shared-world runtime is unchanged."""
+
+    _bounded_execution_lifecycle = False
 
     def initialize(self) -> None:
         """Verify actual configured robot classes and source bytes before exposing endpoints."""
@@ -137,6 +141,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 inspect_navigation_dispatch(environment, agent)
                 inspect_view_scan(environment, actor._active_policies[agent], agent)
         relocation_navigation = getattr(self._config, "relocation_completion_binding", False)
+        self._bounded_execution_lifecycle = bool(relocation_navigation or acquisition)
         if relocation_navigation:
             for record in self.registry["endpoints"]:
                 if "object.relocate@v1" in record["operations"]:
@@ -149,6 +154,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                     ):
                         raise IntegrationError("relocation requires the original navigation skill")
                     inspect_navigation_dispatch(environment, agent)
+                    inspect_reset_completion(environment, actor._active_policies[agent], agent)
         optics: dict[str, Any] = {}
         condition_path = path.parent / "observation-condition-declaration.json"
         formats = (
@@ -318,6 +324,18 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                     "schema_version": RELOCATION_NAVIGATION_SCHEMA,
                     "base_profile": live_how,
                     "relocation_navigation_dispatch": relocation_navigation_declaration(),
+                },
+            )
+        if self._bounded_execution_lifecycle:
+            predecessor = json.loads((self._evidence_dir() / "local-how-profile.json").read_bytes())
+            self._write_json(
+                "local-how-profile.json",
+                {
+                    "schema_version": EXECUTION_LIFECYCLE_SCHEMA,
+                    "predecessor_profile": predecessor,
+                    **lifecycle_declaration(
+                        relocation=relocation_navigation, acquisition=acquisition
+                    ),
                 },
             )
 
@@ -548,6 +566,7 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                             steps,
                             self._config.observation_acquisition_max_steps,
                             acquisition_digests[agent],
+                            per_step_pause=self._bounded_execution_lifecycle,
                         )
                         observed = observe_detection(
                             invocation,

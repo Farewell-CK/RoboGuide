@@ -454,8 +454,14 @@ class EmosStage2Runtime:
                         "habitat_local_eaios.diagnostics",
                         "habitat_local_eaios.native_usage_observer",
                         "habitat_local_eaios.stage2_feedback",
+                        "habitat_local_eaios.execution_lifecycle",
+                        "habitat_local_eaios.stage2_context",
+                        "habitat_local_eaios.reset_completion",
                         *(
                             (
+                                "habitat.tasks.rearrange.actions.actions",
+                                "habitat.tasks.rearrange.actions.reset_action",
+                                "habitat_baselines.rl.hrl.skills.reset",
                                 "habitat_local_eaios.relocation_completion",
                                 "habitat_local_eaios.navigation_dispatch",
                                 "habitat_local_eaios.live_bindings",

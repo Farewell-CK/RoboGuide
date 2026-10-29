@@ -101,8 +101,15 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
         "roboguide.e1.b1-deployment/v0.4",
     }
     published_schema = actual_schema
+    from .execution_lifecycle import unwrap_execution_lifecycle
     from .navigation_dispatch import unwrap_relocation_navigation_profile
 
+    actual = unwrap_execution_lifecycle(
+        actual,
+        live=live,
+        relocation=enabled is True,
+        acquisition=declaration.get("enable_observation_acquisition") is True,
+    )
     actual = unwrap_relocation_navigation_profile(actual, enabled=enabled is True, live=live)
     actual_schema = actual.get("schema_version")
     if live:

@@ -57,6 +57,20 @@ union, historical stage-goal latches and official goal truth remain separate. No
 render/sensor/predicate call is made. Read/storage faults preserve execution, original errors
 and already buffered rows. See the bounded observation extension for limits and schema.
 
+## Controlled execution lifecycle
+
+Live deployments with bound relocation or acquisition publish Local How v0.21
+([ADR-0228](../../docs/decisions/0228-controlled-execution-lifecycle.md)). It binds
+reset completion to the actual own controller target, bounds SDK working context
+while retaining full raw history, and retires unread own inboxes before Task reuse.
+Acquisition waits retain the original 500-step maximum clipped to remaining budget;
+existing cached condition checks still run after every physical step. Earlier
+sixteen-step profiles retain their historical meaning. Reset actuator commands,
+completion thresholds, world/skill budgets and official truth do not change. Native EMOS installs none of
+these controlled-arm policies; new physical validation is required. The declared
+`predecessor_profile` records the previous generation, and the named effective
+lifecycle fields govern the changes.
+
 ## Opt-in object relocation
 
 `--enable-relocation` enables the existing canonical `object.relocate@v1` for the

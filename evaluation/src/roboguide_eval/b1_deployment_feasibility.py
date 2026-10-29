@@ -168,6 +168,84 @@ def _validate_preparation_feedback(value: object) -> None:
         raise ValueError("loaded action preparation feedback contract is invalid")
 
 
+def _unwrap_execution_lifecycle_profile(
+    how: dict[str, Any], declared: dict[str, Any]
+) -> dict[str, Any]:
+    """Independently validate effective lifecycle overrides before their frozen predecessor."""
+    schema = "roboguide.habitat-local-how-profile/v0.21"
+    if how.get("schema_version") != schema:
+        return how
+    relocation = declared.get("relocation_completion_binding", False)
+    acquisition = declared.get("enable_observation_acquisition", False)
+    expected = {
+        "stage2_working_context": {
+            "profile": "bounded-stage2-working-context/v0.1",
+            "scope": "controlled-live-attempt-only",
+            "mandatory": ["system", "initial-planning-exchange", "current-observed-input"],
+            "max_recent_complete_exchanges": 8,
+            "max_serialized_message_bytes": 131_072,
+            "max_original_exchanges_per_attempt": 16_384,
+            "history_policy": "whole-exchanges-newest-contiguous-tail",
+            "oversized_mandatory_input": "local-contract-failure-before-provider",
+            "original_history": "unchanged-and-fully-archived",
+            "tools_model_and_parameters": "unchanged",
+            "model_response_rewritten": False,
+        },
+        "reset_completion_binding": {
+            "profile": "controller-bound-arm-reset/v0.1",
+            "operation": "object.relocate@v1",
+            "target_source": "own-original-reset-controller._init_joint_pos",
+            "completion": "original-skill-check-with-controller-reference",
+            "uninitialized_target": "wait-for-original-controller-step",
+            "tolerance_and_budget": "unchanged-original-skill",
+            "call_identity": "agent-attempt-invocation-tool-call-sequence",
+            "actuator_commands_changed": False,
+            "official_success_authority": "habitat-pddl",
+        }
+        if relocation
+        else None,
+        "observation_pause": {
+            "profile": "per-step-observed-vendor-pause/v0.1",
+            "max_pause_simulator_steps": 500,
+            "duration": "original-wait-clipped-to-original-remaining-budget",
+            "condition_checks": "existing-cache-after-every-gym-step",
+            "early_completion": "actual-current-condition-only",
+            "model_action_rewritten": False,
+        }
+        if acquisition
+        else None,
+        "peer_message_lifecycle": {
+            "profile": "live-attempt-inbox/v0.1",
+            "scope": "original-shared-world-child-agents",
+            "retired_attempt_inbox": "discard-with-count-before-endpoint-reuse",
+            "operation_delegation_supported": False,
+        },
+    }
+
+    def same(left: Any, right: Any) -> bool:
+        """Check exact JSON types so integer bounds cannot be replaced by booleans."""
+        if type(left) is not type(right):
+            return False
+        if isinstance(right, dict):
+            return left.keys() == right.keys() and all(same(left[k], v) for k, v in right.items())
+        if isinstance(right, list):
+            return len(left) == len(right) and all(same(left[i], v) for i, v in enumerate(right))
+        return bool(left == right)
+
+    predecessor = how.get("predecessor_profile")
+    if (
+        type(relocation) is not bool
+        or type(acquisition) is not bool
+        or not (relocation or acquisition)
+        or set(how) != {"schema_version", "predecessor_profile", *expected}
+        or not isinstance(predecessor, dict)
+        or predecessor.get("schema_version") == schema
+        or not same({key: how.get(key) for key in expected}, expected)
+    ):
+        raise ValueError("controlled execution lifecycle declaration is invalid")
+    return predecessor
+
+
 def _unwrap_relocation_navigation_profile(
     how: dict[str, Any], declared: dict[str, Any]
 ) -> dict[str, Any]:
@@ -229,6 +307,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     ):
         raise ValueError("live deployment registry and declaration differ")
     declared = deployment["declaration"]
+    how = _unwrap_execution_lifecycle_profile(how, declared)
     how = _unwrap_relocation_navigation_profile(how, declared)
     expected_requirement = {
         "schema_version": "roboguide.e1.b1-local-execution-profile-required/v0.1",

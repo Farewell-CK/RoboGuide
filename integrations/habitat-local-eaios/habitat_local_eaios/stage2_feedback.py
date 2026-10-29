@@ -11,6 +11,7 @@ import json
 import logging
 import math
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from .navigation_dispatch import NavigationDispatchLifecycle
     from .observation_control import ObservationAcquisitionControl
     from .relocation_completion import RelocationCompletionBinding
+    from .reset_completion import ResetCompletionBinding
     from .stage2_contract import Stage2ExecutionContract
     from .view_scan import ViewScanBinding
 
@@ -178,6 +180,8 @@ class Stage2ExecutionFeedback:
         navigation_dispatch: NavigationDispatchLifecycle | None = None,
         view_scan: ViewScanBinding | None = None,
         preparation_reselection: bool = False,
+        reset_completion: ResetCompletionBinding | None = None,
+        bounded_model_context: bool = False,
     ) -> None:
         """Freeze own contracts, optionally reading a deployment-owned active-peer projection."""
         self._contracts = dict(contracts)
@@ -188,6 +192,16 @@ class Stage2ExecutionFeedback:
         self._observation_control = observation_control
         self._navigation_dispatch = navigation_dispatch
         self._view_scan = view_scan
+        self._reset_completion = reset_completion
+        self._bounded_model_context = bounded_model_context
+        if type(bounded_model_context) is not bool or (
+            reset_completion is not None
+            and (
+                len(contracts) != 1
+                or any(not reset_completion.owns(name, value) for name, value in contracts.items())
+            )
+        ):
+            raise IntegrationError("execution lifecycle needs its exact attempt and declaration")
         if type(preparation_reselection) is not bool:
             raise IntegrationError("preparation reselection requires an explicit Boolean")
         if preparation_reselection and (navigation_dispatch is None or observation_control is None):
@@ -275,6 +289,8 @@ class Stage2ExecutionFeedback:
             "source": "before-crab-agent-dispatch",
         }
         exact_action = deepcopy(dict(action))
+        if self._reset_completion is not None and action["name"] == "reset_arm":
+            document["reset_reference_profile"] = "controller-bound-arm-reset/v0.1"
         if (
             previous is not None
             and previous.model is model
@@ -361,6 +377,25 @@ class Stage2ExecutionFeedback:
             else None
         )
 
+    def request_context(self, agent_name: str, model: Any) -> AbstractContextManager[None]:
+        """Bound only an opted-in own model request while retaining complete raw history."""
+        if agent_name not in self._contracts:
+            raise IntegrationError("working context has no admitted agent contract")
+        if not self._bounded_model_context:
+            return nullcontext()
+        from .stage2_context import model_request_scope
+
+        def record(document: dict[str, Any]) -> None:
+            """Attribute the selected context to its immutable current execution attempt."""
+            self._emit(
+                "model-working-context",
+                dict(
+                    document, agent_name=agent_name, contract=self._contracts[agent_name].as_dict()
+                ),
+            )
+
+        return model_request_scope(model, record)
+
     def observation_scan_tool(self) -> dict[str, Any] | None:
         """Offer the explicit tool only when its original control/skill binding exists."""
         return self._view_scan.tool() if self._view_scan is not None else None
@@ -391,6 +426,15 @@ class Stage2ExecutionFeedback:
         A bound relocation navigation call instead re-evaluates its original
         action through the separate exact-attempt lifecycle.
         """
+        if self._reset_completion is not None:
+            pending_reset = self._pending.get(agent_name)
+            if pending_reset is not None and pending_reset.action["name"] == "reset_arm":
+                self._reset_completion.bind_call(
+                    agent_name,
+                    action,
+                    pending_reset.document["tool_call_id"],
+                    pending_reset.document["action_sequence"],
+                )
         if self._observation_control is None and self._navigation_dispatch is None:
             return action
         pending = self._pending.get(agent_name)
@@ -701,6 +745,9 @@ class Stage2ExecutionFeedback:
         """Observe supported skill instances; unavailable interfaces never imply success."""
         owners: dict[int, str] = {}
         try:
+            if self._reset_completion is not None:
+                self._reset_completion.install()
+                self._restores.append(self._reset_completion.close)
             if self._completion_binding is not None:
                 self._completion_binding.install(policies)
             for policy in policies:
@@ -901,7 +948,9 @@ class Stage2ExecutionFeedback:
                 if base_done is False
                 else None
             ),
-            source="original-skill-should-terminate",
+            source="controller-qualified-original-skill-should-terminate"
+            if self._reset_completion is not None and expected_skill == "reset_arm"
+            else "original-skill-should-terminate",
             source_timing="policy-input-before-following-gym-step",
             physical_steps_since_call=pending.physical_steps,
             termination={

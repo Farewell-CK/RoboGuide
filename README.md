@@ -1701,6 +1701,12 @@ Physical diagnostics v0.8 records complete original base transforms at reset and
 boundaries. New paired-start checks use that actual matrix, while legacy angle-only records
 remain qualified; equal seeds or angle magnitudes do not establish equal orientation.
 
+[ADR-0228](docs/decisions/0228-controlled-execution-lifecycle.md) declares controlled Local How
+v0.21: reset completion follows the actual controller reference, Provider working context is
+bounded while raw history remains, acquisition checks retain every physical step during original
+bounded waits, and retired inboxes cannot leak into successor Tasks. These are Local EAIOS
+contracts, not new Core/MI authority or proof of physical benchmark success.
+
 软件进程停止与本地执行结果是独立证据（[ADR-0110](docs/decisions/0110-execution-generation-and-process-stop-evidence.md)）。
 Habitat Local EAIOS 在原 worker 真实退出后发布 safe-state v0.3，完整绑定原 Group、attempt
 和 generation；Failed/Completed 不会被改写为 Cancelled。缺失证明保留 ownership；

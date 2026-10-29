@@ -1008,6 +1008,14 @@ def test_loaded_perception_initialization_archives_actual_readiness(
     assert all(agent.llm_model.calls == 0 for agent in actor.originals)
     assert runtime.test_diagnostics.terminals == []
     how = json.loads((run / "local-how-profile.json").read_bytes())
+    if acquisition:
+        from habitat_local_eaios.execution_lifecycle import (
+            EXECUTION_LIFECYCLE_SCHEMA,
+            unwrap_execution_lifecycle,
+        )
+
+        assert how["schema_version"] == EXECUTION_LIFECYCLE_SCHEMA
+        how = unwrap_execution_lifecycle(how, live=True, relocation=False, acquisition=True)
     assert how["schema_version"] == (
         "roboguide.habitat-local-how-profile/v0.16"
         if acquisition
@@ -1358,6 +1366,7 @@ def test_perception_negative_read_completes_only_observation(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize("undispatched_successor", [False, True])
+@pytest.mark.parametrize("per_step_pause", [False, True])
 @pytest.mark.parametrize(
     "detected_at,budget,world_limit,expected_state,expected_steps",
     [
@@ -1375,8 +1384,20 @@ def test_active_acquisition_requires_actual_detection_not_navigation_completion(
     expected_state: str,
     expected_steps: int,
     undispatched_successor: bool,
+    per_step_pause: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Use the exact declared lifetime; long approaches never renew the original budget."""
+    from habitat_local_eaios import live_world as live_module
+    from habitat_local_eaios.observation_control import ObservationAcquisitionControl
+
+    original_control = ObservationAcquisitionControl
+
+    def control(*args: Any, **kwargs: Any) -> Any:
+        """Isolate pause policy from model-request policy while using the actual live loop."""
+        return original_control(*args, **dict(kwargs, per_step_pause=per_step_pause))
+
+    monkeypatch.setattr(live_module, "ObservationAcquisitionControl", control)
 
     class DetectionGym(Gym):
         """Update only the returned original sensor cache at a prescribed physical step."""

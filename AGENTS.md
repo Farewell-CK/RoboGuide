@@ -1947,6 +1947,16 @@ without new sensor, step or RNG calls. The vendor rotation scalar is not signed 
 comparison requires the complete matrix on both arms and leaves missing data unavailable;
 legacy scalar-only comparison is explicitly qualified, never upgraded to full pose evidence.
 
+ADR-0228 owns explicit controlled Local How v0.21. The actual original reset controller target
+qualifies only its own admitted reset's original check; actuator commands, tolerance, budgets
+and failures remain. Bounded SDK context retains system, initial planning, latest input and
+complete recent exchanges; full raw history stays archived. New acquisition pauses keep original
+waits clipped to remaining budget while existing per-step cache checks retain early completion.
+Retired own inboxes cannot reach successor Tasks; original queue provenance remains unavailable.
+Runtime and independent evaluation validate every effective override and complete predecessor.
+No native EMOS, MI Prompt, Core/Plan, official truth or old result changes apply. Physical
+acceptance remains separate. See ADR-0228.
+
 The v0.13 acquisition tool `scan_for_object` is backed by an independently scoped local HRL
 skill and verified original base-yaw interfaces. Only a real guarded model selection invokes it;
 32-step/90-degree/1.5rad/s bounds clip to the original remaining acquisition budget. Zero
