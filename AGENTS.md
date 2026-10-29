@@ -1963,6 +1963,16 @@ Runtime and independent evaluation validate every effective override and complet
 No native EMOS, MI Prompt, Core/Plan, official truth or old result changes apply. Physical
 acceptance remains separate. See ADR-0228.
 
+ADR-0229 owns default-off same-read raw-render reuse in Local EAIOS
+`observation_read_cache`. Exact original predicate sources, actual unchanged
+clock/body/joint/camera witnesses and original no-noise types precede reuse.
+All predicates still execute; owned buffers, scope cleanup and bounds retain
+original exceptions and fresh reads on unknowns. Native and production constructors
+share the same explicit paired configuration and actual source/counter evidence.
+No vendor policy, threshold, world/skill budget, MI/Core or old result changes apply.
+Separate physical equivalence and archival gates precede an authorized queue.
+See `docs/decisions/0229-scoped-original-observation-read-cache.md`.
+
 The v0.13 acquisition tool `scan_for_object` is backed by an independently scoped local HRL
 skill and verified original base-yaw interfaces. Only a real guarded model selection invokes it;
 32-step/90-degree/1.5rad/s bounds clip to the original remaining acquisition budget. Zero

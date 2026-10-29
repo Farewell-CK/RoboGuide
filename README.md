@@ -1710,6 +1710,13 @@ bounded while raw history remains, acquisition checks retain every physical step
 bounded waits, and retired inboxes cannot leak into successor Tasks. These are Local EAIOS
 contracts, not new Core/MI authority or proof of physical benchmark success.
 
+[ADR-0229](docs/decisions/0229-scoped-original-observation-read-cache.md) adds optional
+same-read raw-render reuse for the original Habitat predicate sensor. Default-off,
+source-bound unchanged-world/noise checks preserve all original predicate computations.
+The same explicitly frozen configuration applies to both comparison arms; bounded owned
+pixel buffers and actual final counters distinguish performance evidence from official
+truth. Historical frozen sources and outcomes are never upgraded in place.
+
 软件进程停止与本地执行结果是独立证据（[ADR-0110](docs/decisions/0110-execution-generation-and-process-stop-evidence.md)）。
 Habitat Local EAIOS 在原 worker 真实退出后发布 safe-state v0.3，完整绑定原 Group、attempt
 和 generation；Failed/Completed 不会被改写为 Cancelled。缺失证明保留 ownership；

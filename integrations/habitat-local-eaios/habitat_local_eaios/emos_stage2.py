@@ -164,6 +164,8 @@ def _make_episode_gym_environment(
     episode_id: str,
     make_dataset: Callable[..., Any],
     make_gym_from_config: Callable[..., Any],
+    *,
+    evidence_dir: Path | None = None,
 ) -> tuple[Any, Any, Any]:
     """Construct Habitat with exactly the requested episode loaded from startup.
 
@@ -190,6 +192,10 @@ def _make_episode_gym_environment(
     dataset.episodes = [episode]
     gym_env = make_gym_from_config(config, dataset=dataset)
     habitat_env = gym_env.habitat_env
+    from .observation_read_cache import configure_observation_read_cache
+
+    if evidence_dir is not None:
+        configure_observation_read_cache(habitat_env, evidence_dir)
     loaded = [
         candidate for candidate in habitat_env.episodes if str(candidate.episode_id) == episode_id
     ]
@@ -311,6 +317,7 @@ class EmosStage2Runtime:
                 self._config.episode_id,
                 make_dataset,
                 make_gym_from_config,
+                evidence_dir=self._evidence_dir(),
             )
             if self._config.agent_id >= len(config.habitat.simulator.agents_order):
                 gym_env.close()
@@ -453,6 +460,7 @@ class EmosStage2Runtime:
                         "habitat_mas.utils.models",
                         "habitat_local_eaios.diagnostics",
                         "habitat_local_eaios.native_usage_observer",
+                        "habitat_local_eaios.observation_read_cache",
                         "habitat_local_eaios.stage2_feedback",
                         "habitat_local_eaios.execution_lifecycle",
                         "habitat_local_eaios.stage2_context",

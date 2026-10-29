@@ -74,6 +74,9 @@ def install_workload(
             dataset = module.make_dataset(id_dataset=habitat.dataset.type, config=habitat.dataset)
         selected = select_episode(dataset, episode_id, scene_id)
         original(env, config, selected)
+        from .observation_read_cache import configure_observation_read_cache
+
+        configure_observation_read_cache(env, directory)
         # Selection and the original constructor are authoritative. Everything
         # below only observes their result, including argument evaluation.
         try:
@@ -409,6 +412,7 @@ def main(argv: list[str] | None = None) -> None:
                         "habitat_mas.utils.models",
                         "habitat_local_eaios.diagnostics",
                         "habitat_local_eaios.native_usage_observer",
+                        "habitat_local_eaios.observation_read_cache",
                     )
                 ),
             )

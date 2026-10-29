@@ -224,7 +224,7 @@ def test_initialization_records_compiled_simulator_without_route_diagnostics(
     monkeypatch.setattr(
         emos_stage2,
         "_make_episode_gym_environment",
-        lambda *a: (gym, object(), object()),
+        lambda *a, **kw: (gym, object(), object()),
     )
     monkeypatch.setattr(
         emos_stage2,

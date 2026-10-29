@@ -1,5 +1,15 @@
 # Habitat Local EAIOS Bridge
 
+Optional shared backend performance profile
+`ROBOGUIDE_HABITAT_OBSERVATION_READ_CACHE=1` reuses owned raw images only within one
+unchanged original predicate-sensor read. It is off by default, pins known original
+predicate sources and refuses noise, unknown geometry or over-budget buffers.
+Every predicate still executes; original steps, actions and truth remain original.
+Both native and production constructors record actual loaded sources and
+`observation-read-cache.json` admission/final counters. Paired use must explicitly
+enable and freeze the same profile on both arms. See
+[ADR-0229](../../docs/decisions/0229-scoped-original-observation-read-cache.md).
+
 This deployment-owned bridge is the C1-S0 reference path from the generic
 `roboguide-node` Local Integration Engine into an existing EMOS/Habitat environment. It is not a
 RoboGuide Core module and does not add Habitat, EMOS, Gym, Torch, or simulator dependencies to the
