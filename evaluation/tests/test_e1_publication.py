@@ -415,3 +415,5 @@ def test_staged_adapter_imports_full_plan_without_launching(tmp_path: Path) -> N
     assert result["workloads"] == len(jobs) and result["runs"] == 2
     summary = json.loads((tmp_path / "published/summary.json").read_bytes())
     assert summary["families"]["fixture"]["coverage_states"]["not_started"] == len(jobs) - 1
+    assert not list((tmp_path / "published").glob("*local-source-witness*"))
+    assert (bindings.parent / "original-published-local-source-witness.json").is_file()

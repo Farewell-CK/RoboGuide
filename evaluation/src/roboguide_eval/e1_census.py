@@ -252,7 +252,7 @@ def export_census(bindings: Path, output: Path) -> dict[str, Any]:
         "".join(f"{sha256(p.read_bytes())}  {p.name}\n" for p in sorted(output.iterdir())).encode(),
     )
     write_new(
-        output.parent / (output.name + "-local-source-witness.json"),
+        bindings.parent / (output.name + "-census-local-source-witness.json"),
         encode(
             {
                 "sources": {key: str(path) for key, path in reader.paths.items()},

@@ -464,7 +464,7 @@ def export_staged(
     seal_package(output, manifest, workloads, runs, pairs, list(reader.artifacts.values()))
     reader.verify_unchanged()
     # This local receipt binds namespaces to actual files and never belongs in the publication.
-    local_receipt = output.parent / (output.name + "-local-source-witness.json")
+    local_receipt = bindings.parent / (source_id + "-" + output.name + "-local-source-witness.json")
     write_new(
         local_receipt,
         encode(
