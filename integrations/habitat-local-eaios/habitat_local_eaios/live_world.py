@@ -31,7 +31,12 @@ from .model import (
     CanonicalRelocationInvocation,
     IntegrationError,
 )
-from .navigation_dispatch import inspect_navigation_dispatch, navigation_dispatch_declaration
+from .navigation_dispatch import (
+    RELOCATION_NAVIGATION_SCHEMA,
+    inspect_navigation_dispatch,
+    navigation_dispatch_declaration,
+    relocation_navigation_declaration,
+)
 from .observation_conditions import LEGACY_FORMAT, read_condition_declaration
 from .observation_control import (
     ObservationAcquisitionControl,
@@ -131,6 +136,19 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
             for agent in observer_ids:
                 inspect_navigation_dispatch(environment, agent)
                 inspect_view_scan(environment, actor._active_policies[agent], agent)
+        relocation_navigation = getattr(self._config, "relocation_completion_binding", False)
+        if relocation_navigation:
+            for record in self.registry["endpoints"]:
+                if "object.relocate@v1" in record["operations"]:
+                    agent = record["agent_id"]
+                    if (
+                        actor._active_policies[agent]._skills.get(
+                            actor._active_policies[agent]._name_to_idx.get("nav_to_obj")
+                        )
+                        is None
+                    ):
+                        raise IntegrationError("relocation requires the original navigation skill")
+                    inspect_navigation_dispatch(environment, agent)
         optics: dict[str, Any] = {}
         condition_path = path.parent / "observation-condition-declaration.json"
         formats = (
@@ -292,6 +310,16 @@ class LiveEmosStage2Runtime(SharedEmosStage2Runtime):
                 ),
             },
         )
+        if relocation_navigation:
+            live_how = json.loads((self._evidence_dir() / "local-how-profile.json").read_bytes())
+            self._write_json(
+                "local-how-profile.json",
+                {
+                    "schema_version": RELOCATION_NAVIGATION_SCHEMA,
+                    "base_profile": live_how,
+                    "relocation_navigation_dispatch": relocation_navigation_declaration(),
+                },
+            )
 
     def supported_operations(self) -> tuple[str, ...]:
         """Advertise observation only after actual sensor readiness has been inspected."""

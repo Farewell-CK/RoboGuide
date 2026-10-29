@@ -43,6 +43,13 @@ Local How v0.19 在 v0.18 的基础上声明
 不更新搜索次数、操作或世界步数预算；Provider、未知错误和已执行动作不进入该路径。
 模型自行重新选择工具，适配器不会自动导航或暂停。完整声明由运行期和独立归档读者核对，
 旧 Local How 行为保留；见 [ADR-0225](../decisions/0225-bounded-preparation-feedback.md)。
+
+显式启用搬运完成绑定的 live 部署同时使用
+[ADR-0226](../decisions/0226-fresh-relocation-navigation.md) 的新导航调用生命周期。
+Local How v0.20 在原 live profile 外增加闭合声明：Guard 接受且原始工具映射一致后，
+新调用只清除自己 endpoint 的旧导航完成标记。若所选实体实际移动，只移除该实体的旧导航点；
+下一次原始技能自行解析当前目标。重复/过期调用、跨 endpoint、缺失位置均拒绝，不能借此
+修改模型目标或伪造 finished。acquisition 的视点搜索、暂停和恢复预算保持原作用域。
 当前感知部署将它统一设为已经声明的 world step horizon，并同步 Node 最大 cycle 声明与
 无库存 planning classes；不再另加短于普通长距离接近过程的默认截断。部署仍可显式选择
 更短的操作上限，该上限耗尽属于真实局部失败。选择变化必须冻结为新配置，不重算历史结果。

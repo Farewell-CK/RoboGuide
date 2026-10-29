@@ -522,6 +522,55 @@ def observe_wait_exit(bindings: live_bindings.LivePolicyBindings, agent: int) ->
     )
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_live_relocation_installs_fresh_navigation_for_each_reused_endpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    """Real live bindings dispatch the model's object and retain peer state across Tasks."""
+    # Place observation has its own full harness. Isolate it here so this test
+    # specifically composes live ownership, Guard, original mapping and navigation.
+    monkeypatch.setattr(live_bindings, "RelocationCompletionBinding", lambda *args: None)
+    bindings, runtime, actor = task_bindings(tmp_path)
+    runtime._config.relocation_completion_binding = enabled
+    assert runtime._habitat_env is not None and runtime._gym_env is not None
+    action = runtime._habitat_env.task.actions["agent_0_oracle_nav_action"]
+    peer = runtime._habitat_env.task.actions["agent_1_oracle_nav_action"]
+    peer_before = dict(vars(peer))
+    previous = None
+    try:
+        for task in (1, 2):
+            target = f"object-{task}"
+            action._poss_entities.append(SimpleNamespace(name=target))
+            index = len(action._poss_entities) - 1
+            action.prev_match_target_id = index
+            action.prev_nav_done = action.skill_done = True
+            request = bind_task(bindings, 0, task, relocation=True)
+            assert bindings.contracts[0].invocation_digest == request.request_key()
+            feedback = bindings.feedbacks[0]
+            model = request_model("agent_1", relocation=True)
+            model.response = ("nav_to_obj", {"target_obj": target})
+            original: Any = actor.originals[0]
+            original.llm_model = model
+            mapped = original.chat("current original observation")
+            assert mapped == {
+                "name": "nav_to_obj",
+                "arguments": {"target_obj": target, "robot": "agent_0"},
+            }
+            assert action.prev_nav_done is not enabled
+            assert (feedback._navigation_dispatch is not None) is enabled
+            if previous is not None:
+                assert not previous.owns("agent_0", bindings.contracts[0])
+            previous = feedback._navigation_dispatch
+            action.step(index)
+            assert action.skill_done is enabled
+            assert model.calls == 1 and runtime._gym_env.steps == actor.calls == 0
+            bindings.finish(0)
+        assert vars(peer) == peer_before
+        assert action.queries == (2 if enabled else 0)
+    finally:
+        bindings.close()
+
+
 @pytest.mark.parametrize("relocation", [False, True])
 def test_live_guard_accepts_only_current_model_bearing_peers(
     tmp_path: Path, relocation: bool

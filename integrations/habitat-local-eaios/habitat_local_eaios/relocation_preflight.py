@@ -100,6 +100,11 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
         "roboguide.e1.b1-deployment/v0.3",
         "roboguide.e1.b1-deployment/v0.4",
     }
+    published_schema = actual_schema
+    from .navigation_dispatch import unwrap_relocation_navigation_profile
+
+    actual = unwrap_relocation_navigation_profile(actual, enabled=enabled is True, live=live)
+    actual_schema = actual.get("schema_version")
     if live:
         from .endpoint_registry import LIVE_PROFILE, verify_endpoint_sources
 
@@ -269,6 +274,8 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
             or actual.get("execution_profile") != LIVE_PROFILE
             or actual.get("endpoint_registry_digest") != registry["digest"]
             or actual.get("observation_enabled") is not declaration.get("enable_observation")
+            or actual.get("official_success_authority") != "habitat-pddl"
+            or actual.get("unassigned_policy") != "original-wait-model-free"
             or _read_object(run / "evidence/endpoint-registry-used.json") != registry
         ):
             raise IntegrationError("actual live Local How differs from frozen endpoint sources")
@@ -314,7 +321,7 @@ def _check_execution_profile(run: Path, frozen_digest: str) -> dict[str, Any]:
         "requirement_sha256": requirement_digest,
         "deployment_sha256": deployment_digest,
         "local_how_sha256": actual_digest,
-        "local_how_schema": actual_schema,
+        "local_how_schema": published_schema,
     }
     readiness_path = run / "evidence/relocation-completion-readiness.json"
     if enabled:

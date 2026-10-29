@@ -168,6 +168,39 @@ def _validate_preparation_feedback(value: object) -> None:
         raise ValueError("loaded action preparation feedback contract is invalid")
 
 
+def _unwrap_relocation_navigation_profile(
+    how: dict[str, Any], declared: dict[str, Any]
+) -> dict[str, Any]:
+    """Independently check the closed relocation lifecycle envelope before its base profile."""
+    schema = "roboguide.habitat-local-how-profile/v0.20"
+    if how.get("schema_version") != schema:
+        return how
+    expected = {
+        "profile": "fresh-relocation-navigation-command/v0.1",
+        "operation": "object.relocate@v1",
+        "boundary": "after-guarded-original-tool-mapping-before-skill-entry",
+        "reset_fields": ["prev_nav_done", "skill_done"],
+        "target_cache_policy": "invalidate-selected-entry-only-when-entity-position-changes",
+        "call_identity": "agent-attempt-invocation-tool-call-sequence",
+        "max_calls_per_attempt": 65_536,
+        "arrival_authority": "original-oracle-action-recomputation",
+        "official_success_authority": "habitat-pddl",
+    }
+    actual = how.get("relocation_navigation_dispatch")
+    base = how.get("base_profile")
+    if (
+        declared.get("relocation_completion_binding") is not True
+        or set(how) != {"schema_version", "base_profile", "relocation_navigation_dispatch"}
+        or actual != expected
+        or not isinstance(actual, dict)
+        or any(type(actual[key]) is not type(value) for key, value in expected.items())
+        or not isinstance(base, dict)
+        or base.get("schema_version") == schema
+    ):
+        raise ValueError("relocation navigation Local How envelope is invalid")
+    return base
+
+
 def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     """Cross-bind opt-in topology and operations to actual run-local Node configuration.
 
@@ -196,6 +229,7 @@ def _validate_live_sources(run: Path, matrix: dict[str, Any]) -> None:
     ):
         raise ValueError("live deployment registry and declaration differ")
     declared = deployment["declaration"]
+    how = _unwrap_relocation_navigation_profile(how, declared)
     expected_requirement = {
         "schema_version": "roboguide.e1.b1-local-execution-profile-required/v0.1",
         "run_id": run.name,

@@ -200,8 +200,17 @@ class Stage2ExecutionFeedback:
             or any(not contract.allow_view_scan for contract in contracts.values())
         ):
             raise IntegrationError("view scan must bind the exact admitted acquisition control")
-        if navigation_dispatch is not None and observation_control is None:
-            raise IntegrationError("fresh navigation dispatch requires acquisition feedback")
+        if navigation_dispatch is not None and (
+            len(contracts) != 1
+            or any(
+                not navigation_dispatch.owns(name, contract) for name, contract in contracts.items()
+            )
+            or (
+                observation_control is None
+                and any(not contract.is_relocation for contract in contracts.values())
+            )
+        ):
+            raise IntegrationError("fresh navigation dispatch requires its exact attempt feedback")
         if observation_control is not None and (
             len(contracts) != 1
             or any(
@@ -374,13 +383,15 @@ class Stage2ExecutionFeedback:
                 pending.document["view_search_motion"] = observation
 
     def bind_observation_dispatch(self, agent_name: str, action: Any) -> Any:
-        """Translate an admitted pause to its advertised Local EAIOS duration.
+        """Bind exact fresh navigation and the acquisition profile's advertised pause.
 
         The original raw model choice and arguments are unchanged. Only the
         vendor's fixed 500-step wait mapping is replaced in this opt-in local
-        profile; navigation, relocation and unassigned policies retain theirs.
+        profile; relocation and unassigned pauses retain their original duration.
+        A bound relocation navigation call instead re-evaluates its original
+        action through the separate exact-attempt lifecycle.
         """
-        if self._observation_control is None:
+        if self._observation_control is None and self._navigation_dispatch is None:
             return action
         pending = self._pending.get(agent_name)
         if pending is None:
@@ -439,6 +450,8 @@ class Stage2ExecutionFeedback:
                 raise rejection from error
             self._stationary_scan = None
         if pending.action["name"] not in {"wait", "send_request"}:
+            return action
+        if self._observation_control is None:
             return action
         if action != {"name": "wait", "arguments": ["500"]}:
             raise IntegrationError("original observation pause mapping changed")

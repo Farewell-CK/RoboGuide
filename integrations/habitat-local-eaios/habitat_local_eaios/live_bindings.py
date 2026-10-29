@@ -167,6 +167,10 @@ class LivePolicyBindings:
                         ),
                     )
                     if observation_control is not None
+                    or (
+                        contract.is_relocation
+                        and getattr(self.runtime._config, "relocation_completion_binding", False)
+                    )
                     else None
                 ),
                 view_scan=scan,

@@ -452,7 +452,11 @@ class EmosStage2Runtime:
                         "habitat_local_eaios.native_usage_observer",
                         "habitat_local_eaios.stage2_feedback",
                         *(
-                            ("habitat_local_eaios.relocation_completion",)
+                            (
+                                "habitat_local_eaios.relocation_completion",
+                                "habitat_local_eaios.navigation_dispatch",
+                                "habitat_local_eaios.live_bindings",
+                            )
                             if getattr(self._config, "relocation_completion_binding", False)
                             else ()
                         ),

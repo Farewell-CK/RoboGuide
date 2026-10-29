@@ -1687,6 +1687,9 @@ documented in [the extension guide](docs/extensions/bounded-observation-and-evid
 with authority and physical release limits in [ADR-0094](docs/decisions/0094-bounded-observation-and-local-contract-recovery.md).
 Acquisition Local How v0.11 supplies actual cached condition/budget feedback and disclosed bounded
 pauses; it preserves raw model choices, the original attempt budget and official terminal authority.
+Bound live relocation uses [ADR-0226](docs/decisions/0226-fresh-relocation-navigation.md):
+fresh guarded navigation calls re-evaluate arrival and invalidate only a moved selected target's
+cached point. Local How v0.20 declares this scope; native EMOS and official goals remain unchanged.
 
 软件进程停止与本地执行结果是独立证据（[ADR-0110](docs/decisions/0110-execution-generation-and-process-stop-evidence.md)）。
 Habitat Local EAIOS 在原 worker 真实退出后发布 safe-state v0.3，完整绑定原 Group、attempt

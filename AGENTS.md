@@ -1924,6 +1924,15 @@ require the complete declaration; old profiles keep their original scope. No
 fallback command, Prompt, native EMOS, Core/Plan or official truth changes apply.
 See `docs/decisions/0225-bounded-preparation-feedback.md`; physical validation remains separate.
 
+ADR-0226 extends exact fresh-command navigation to explicitly bound live relocation.
+Guard and original mapping precede endpoint/attempt/call/sequence validation; duplicate,
+stale and closed calls refuse. Only own completion latches reset. A selected cached entity
+whose actual position changed loses only that cache entry; original following skills still
+own sampling, arrival and budgets. Closed Local How v0.20 wraps the original live profile;
+independent preflight/evaluation readers check both scopes. No extra act/step/RNG, target
+rewrite, native EMOS edit or official success follows. See ADR-0226; physical acceptance and
+initial pick/place failures remain separate.
+
 The v0.13 acquisition tool `scan_for_object` is backed by an independently scoped local HRL
 skill and verified original base-yaw interfaces. Only a real guarded model selection invokes it;
 32-step/90-degree/1.5rad/s bounds clip to the original remaining acquisition budget. Zero
