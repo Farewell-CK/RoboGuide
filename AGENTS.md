@@ -2088,6 +2088,14 @@ This zero-Provider, zero-simulator gate exercises canonical parsing, SQLite roun
 real loopback HTTP boundary. B1 runs it before starting SUT processes or calling MI; it is not
 physical readiness evidence. Set `ROBOGUIDE_HABITAT_PYTHON` for the matching pytest subprocess test.
 
+`evaluation/src/roboguide_eval/mi_ablation/` owns the MI-only shared-prefix component
+experiment. It calls unchanged production Responses adapters, retains exact drafts/review/context
+digests and fixed budgets, and never submits Controller work. Private necessary-condition rubrics
+never enter Provider input; passing them remains pending independent semantic review. A/B/C share
+original calls, so physical billing and logical per-branch costs stay distinct. Raw experiments
+remain local; no model score, physical success or formal E1/E2/E6 result follows from fake-transport
+tests or candidate acceptance. See `evaluation/docs/mi-ablation-v0.1.md`.
+
 For evaluation harness changes, run:
 
 ```bash

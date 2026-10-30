@@ -1611,6 +1611,10 @@ uv run pytest -q
 
 ## Eval Harness（实验驱动开发）
 
+MI 的 [Reviewer/Repairer 配对组件消融](evaluation/docs/mi-ablation-v0.1.md)复用生产
+Responses 适配器，共享初始草案与 Review，保留私有评分和盲审包。它不提交 Controller，
+不启动 Node/模拟器；必要条件通过不等于语义正确或物理成功，原始结果保持独立本地归档。
+
 仓库进入实验驱动阶段后，[`evaluation/`](evaluation/) 提供独立的 Eval Harness：
 
 [`e1-batch`](evaluation/docs/e1-batch.md) 在冻结配置下监督独立的对照进程，支持后台启动、
