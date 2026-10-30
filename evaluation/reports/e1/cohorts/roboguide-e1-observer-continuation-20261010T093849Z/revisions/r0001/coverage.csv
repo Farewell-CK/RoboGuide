@@ -1,0 +1,7 @@
+family,purpose,arm,planned_workloads,runs,true,false,unavailable,formal,benchmark,fresh,reused
+height_man,primary,emos,166,166,19,143,4,0,0,154,12
+height_man,primary,roboguide,166,166,119,40,7,166,159,154,12
+height_man,retry,emos,166,0,0,0,0,0,0,0,0
+height_man,retry,roboguide,166,0,0,0,0,0,0,0,0
+height_man,diagnostic,emos,166,0,0,0,0,0,0,0,0
+height_man,diagnostic,roboguide,166,0,0,0,0,0,0,0,0

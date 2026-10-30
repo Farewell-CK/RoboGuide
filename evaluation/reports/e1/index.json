@@ -16,6 +16,30 @@
       "purpose": "historical-census",
       "revision": "r0001",
       "status": "staging"
+    },
+    {
+      "kind": "cohort",
+      "manifest_sha256": "b99ff3fb1b24040f219bf0db98949a276ac601ea1c1f5db16dcd01bc5b115ad2",
+      "path": "cohorts/e1-batch-99-seed40-continuation-20261007T014435Z/revisions/r0001",
+      "purpose": "historical-primary",
+      "revision": "r0001",
+      "status": "staging"
+    },
+    {
+      "kind": "cohort",
+      "manifest_sha256": "6e085e1fd0d611306ac012200b5e265ecaecaebb76936bc13088c872af4165dc",
+      "path": "cohorts/roboguide-e1-observer-continuation-20261010T093849Z/revisions/r0001",
+      "purpose": "historical-primary",
+      "revision": "r0001",
+      "status": "staging"
+    },
+    {
+      "kind": "overview",
+      "manifest_sha256": "048c4f7595acfd6302937f6761e99bdddbbd9f1a63d9965393f97c6c67d9aa0f",
+      "path": "overviews/20261030-r0001",
+      "purpose": "four-family-phase-overview",
+      "revision": "r0001",
+      "status": "staging"
     }
   ],
   "raw_backup_status": "local_only",

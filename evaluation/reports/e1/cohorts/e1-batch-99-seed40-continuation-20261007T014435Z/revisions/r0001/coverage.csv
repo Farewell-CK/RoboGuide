@@ -1,0 +1,7 @@
+family,purpose,arm,planned_workloads,runs,true,false,unavailable,formal,benchmark,fresh,reused
+navigation,primary,emos,99,99,28,71,0,0,0,99,0
+navigation,primary,roboguide,99,99,50,0,49,98,50,99,0
+navigation,retry,emos,99,0,0,0,0,0,0,0,0
+navigation,retry,roboguide,99,0,0,0,0,0,0,0,0
+navigation,diagnostic,emos,99,0,0,0,0,0,0,0,0
+navigation,diagnostic,roboguide,99,0,0,0,0,0,0,0,0
