@@ -1,8 +1,12 @@
 # RoboGuide
 
+当前代码维护和 E1 待办以[统一基线与进度对账（2026-10-30）](docs/development/code-and-e1-baseline-2026-10-30.md)
+为入口：main 保存已验证基线，dev 用于日常开发；实验始终冻结各自代码与配置。
+下文整改验收和历史开发分支按其原时点阅读，不代表另有一份待合并的最新实现。
+
 ## 当前整改状态 · 2026-10-26
 
-通用非发布整改的功能实现与本地组合验收已完成，开发始终使用唯一分支
+通用非发布整改的功能实现与本地组合验收已完成，该阶段开发使用分支
 `codex/nonrelease-remediation-closure`。
 已完成的实现与原进程验收按 [A1–F 唯一队列](docs/development/roboguide-software-completion-plan-2026-10-15.md)
 和 [R01–R20 总矩阵](docs/development/nonrelease-acceptance-matrix-2026-10-26.md)逐项对账。

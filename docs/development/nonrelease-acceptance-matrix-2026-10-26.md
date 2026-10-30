@@ -2,7 +2,8 @@
 
 状态：R01–R20 软件实现与本地完整组合验收通过；`SoftwareComplete` 交付同时要求下述
 当前 CI/main 门禁。本文对照原 14 层与 R01–R20，不建立新的缩减范围。
-唯一开发分支为 `codex/nonrelease-remediation-closure`；[原计划](roboguide-software-completion-plan-2026-10-15.md)
+该阶段开发分支为 `codex/nonrelease-remediation-closure`；当前代码维护入口见
+[统一基线与进度对账](code-and-e1-baseline-2026-10-30.md)。[原计划](roboguide-software-completion-plan-2026-10-15.md)
 的 A1–F 是执行队列。各项先以公开入口完成实际软件链路，再集中运行全模块检查。
 
 ## 固定验收范围
