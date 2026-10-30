@@ -15,6 +15,11 @@ runner，不访问 Provider、提交 Mission 或修改 admission/Pair Validator 
   和官方结果分别重算；包内 SHA256SUMS、自引用、来源引用、去重和统计均独立检查。
 - `e1_census` 使用已有历史 locator 查找并重新读取原始结果，清点四类历史覆盖，
   不把 locator 的评估修订覆盖原始值，不合并历史版本的成功率。
+- `e1_history_import` 消费导航原计划/续跑报告和搬运 Population/迁移记录，保留完整
+  计划、每臂版本、原始配对资格与独立 sidecar。原始代码条件分别分组，不把未知配对
+  补写成 comparable，不把 sidecar 的 true 覆盖原始 unavailable。
+- `e1_overview` 要求导航、单层搬运、感知、重排四类修订齐全，固定源 manifest 摘要后
+  重算四类入口、CSV 与统计。缺类、重复类别或来源变化均拒绝。
 
 这是有明确源格式的第一版导入器，不是任意实验目录的通用猜测器。其他源格式先记录
 清点状态和缺口；没有原档或最终关闭记录时，不推测“没跑过”或“已完成”。
@@ -30,6 +35,9 @@ uv run python -m roboguide_eval.e1_publication validate \
 
 uv run python -m roboguide_eval.e1_publication validate-census \
   evaluation/reports/e1/inventories/20261030-r0001
+
+uv run python -m roboguide_eval.e1_publication validate-overview \
+  --base evaluation/reports/e1 evaluation/reports/e1/overviews/20261030-r0001
 ```
 
 JSONL 分片文件由每个 `manifest.json` 的 `record_files` 指定；不要假设记录只在
@@ -89,6 +97,28 @@ uv run python -m roboguide_eval.e1_publication census \
 导出器前后重新核对所有消费来源，保存仅本机可用的 `*-local-source-witness.json`；
 该文件包含绝对路径，不复制进公开修订。发布索引只在完整包验证后更新，原档不写入。
 统计错误新增修订，真实新运行新增 cohort；原始失败、旧版本和重试均不覆盖。
+
+## 历史两类与四类入口
+
+本机绑定的 `history.navigation_original_root`、`history.navigation_root` 和
+`history.height_root` 分别指向导航原始计划、导航续跑集合和搬运最终续跑集合。
+迁移记录引用的保留目录必须在 `archives` 中显式绑定。命令只读历史材料：
+
+```bash
+uv run python -m roboguide_eval.e1_publication export-history \
+  --bindings /path/to/local-bindings.json --family navigation \
+  --exporter-sha FULL_COMMITTED_EXPORTER_SHA --output /path/to/new-navigation/r0001
+uv run python -m roboguide_eval.e1_publication export-history \
+  --bindings /path/to/local-bindings.json --family height_man \
+  --exporter-sha FULL_COMMITTED_EXPORTER_SHA --output /path/to/new-manipulation/r0001
+uv run python -m roboguide_eval.e1_publication overview \
+  --base evaluation/reports/e1 --exporter-sha FULL_COMMITTED_EXPORTER_SHA \
+  --output evaluation/reports/e1/overviews/NEW_REVISION
+```
+
+两类历史包继续用 `validate <revision-directory>` 校验。导航/搬运包含多个历史
+代码条件，以 `historical_details.primary_by_original_code` 分别复算；四类表只给
+覆盖和各来源结果，不生成混合版本总体成功率。原 staged 修订与历史清点均保持不变。
 
 ## 首份结果的使用边界
 

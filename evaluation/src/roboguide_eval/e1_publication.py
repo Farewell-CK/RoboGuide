@@ -531,14 +531,14 @@ def seal_package(
     writer.writeheader()
     writer.writerows(sorted(workloads, key=lambda row: row["job_id"]))
     write_new(root / "workloads.csv", stream.getvalue().encode())
-    summary = summarize(workloads, runs, pairs)
+    summary = package_summary(manifest, workloads, runs, pairs)
     manifest = {**manifest, "schema_version": SCHEMA, "record_files": files}
     manifest["planned_workload_count"] = len(workloads)
     public_safe(manifest)
     write_new(root / "manifest.json", encode(manifest))
     write_new(root / "summary.json", encode(summary))
     write_new(root / "coverage.csv", coverage_csv(summary))
-    write_new(root / "REPORT.md", report_text(summary).encode())
+    write_new(root / "REPORT.md", package_report(manifest, summary).encode())
     write_new(
         root / "changes.json",
         encode(
@@ -581,11 +581,11 @@ def validate_package(root: Path) -> dict[str, Any]:
     if manifest.get("planned_workload_count") != len(workloads):
         raise ValueError("planned workload coverage changed")
     validate_records(workloads, collections["runs"], collections["pairs"], collections["artifacts"])
-    summary = summarize(workloads, collections["runs"], collections["pairs"])
+    summary = package_summary(manifest, workloads, collections["runs"], collections["pairs"])
     if (
         encode(summary) != (root / "summary.json").read_bytes()
         or coverage_csv(summary) != (root / "coverage.csv").read_bytes()
-        or report_text(summary).encode() != (root / "REPORT.md").read_bytes()
+        or package_report(manifest, summary).encode() != (root / "REPORT.md").read_bytes()
     ):
         raise ValueError("published aggregate does not recompute from records")
     return {
@@ -596,6 +596,32 @@ def validate_package(root: Path) -> dict[str, Any]:
         "pairs": len(collections["pairs"]),
         "raw_archive_verification": "not performed by portable validation",
     }
+
+
+def package_summary(
+    manifest: dict[str, Any],
+    workloads: list[dict[str, Any]],
+    runs: list[dict[str, Any]],
+    pairs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Dispatch explicit historical projections while preserving sealed staged arithmetic."""
+    summary = summarize(workloads, runs, pairs)
+    if manifest.get("report_profile") == "historical-family/v0.1":
+        from roboguide_eval.e1_history_import import historical_details
+
+        summary["historical_details"] = historical_details(manifest, runs, pairs)
+    elif manifest.get("report_profile") is not None:
+        raise ValueError("unknown publication report profile")
+    return summary
+
+
+def package_report(manifest: dict[str, Any], summary: dict[str, Any]) -> str:
+    """Render each explicit source profile without borrowing another cohort's limitations."""
+    if manifest.get("report_profile") == "historical-family/v0.1":
+        from roboguide_eval.e1_history_import import historical_report
+
+        return historical_report(manifest, summary)
+    return report_text(summary)
 
 
 def verify_files(root: Path) -> dict[str, str]:
@@ -644,6 +670,18 @@ def main() -> int:
     export.add_argument("--source-id", required=True)
     export.add_argument("--output", type=Path, required=True)
     export.add_argument("--exporter-sha", required=True)
+    history = sub.add_parser("export-history")
+    history.add_argument("--bindings", type=Path, required=True)
+    history.add_argument("--family", choices=("navigation", "height_man"), required=True)
+    history.add_argument("--output", type=Path, required=True)
+    history.add_argument("--exporter-sha", required=True)
+    overview = sub.add_parser("overview")
+    overview.add_argument("--base", type=Path, required=True)
+    overview.add_argument("--output", type=Path, required=True)
+    overview.add_argument("--exporter-sha", required=True)
+    overview_check = sub.add_parser("validate-overview")
+    overview_check.add_argument("--base", type=Path, required=True)
+    overview_check.add_argument("directory", type=Path)
     arguments = parser.parse_args()
     if arguments.operation == "validate":
         result = validate_package(arguments.directory)
@@ -654,6 +692,20 @@ def main() -> int:
             export_census(arguments.bindings, arguments.output, arguments.exporter_sha)
             if arguments.operation == "census"
             else validate_census(arguments.directory)
+        )
+    elif arguments.operation == "export-history":
+        from roboguide_eval.e1_history_import import export_history
+
+        result = export_history(
+            arguments.bindings, arguments.family, arguments.output, arguments.exporter_sha
+        )
+    elif arguments.operation in ("overview", "validate-overview"):
+        from roboguide_eval.e1_overview import export_overview, validate_overview
+
+        result = (
+            export_overview(arguments.base, arguments.output, arguments.exporter_sha)
+            if arguments.operation == "overview"
+            else validate_overview(arguments.base, arguments.directory)
         )
     else:
         from roboguide_eval.e1_staged_import import export_staged

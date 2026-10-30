@@ -1786,11 +1786,13 @@ inherited by nonwriter children. No process evidence establishes device safety. 
   Proposal/Commit/Binding/Runtime semantics, and keeps raw run directories out of Git. Reviewed,
   redacted result publications belong in `evaluation/reports/e1/` under
   `evaluation/docs/e1-results-publication-v0.1.md`. The offline `e1_publication`,
-  `e1_staged_import`, `e1_census` and `publication_io` modules consume explicitly bound original
+  `e1_staged_import`, `e1_history_import`, `e1_census` and `publication_io` consume bound original
   archives, retain primary/retry/diagnostic and native reuse, and write bounded new revisions.
   Portable validation recomputes records and exact byte inventories without models, archives or
   simulators; it never establishes missing original bytes or independent backup. See
   `evaluation/docs/e1-publication-tools.md` and the run/artifact publication shape schema.
+  `e1_overview` requires four exact source families and recomputes their separate phase table;
+  historical continuation conditions and old assessments never replace original outcomes.
   Publications preserve original run/arm identities, separate primary/retry/diagnostic cohorts
   and reused native evidence, and never alter admission, pairing or benchmark authority. The
   RoboGuide system runner drives the real Controller/Node/Runtime/Local-EAIOS path and reduces

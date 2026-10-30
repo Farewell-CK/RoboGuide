@@ -35,11 +35,21 @@ def _label(value: Any) -> str | None:
     return value
 
 
-def provider_projection(reader: ArchiveReader, directory: Path) -> tuple[dict[str, Any], list[str]]:
+def provider_projection(
+    reader: ArchiveReader,
+    directory: Path,
+    files: tuple[str, ...] = ("provider-accounting.jsonl",),
+) -> tuple[dict[str, Any], list[str]]:
     """Aggregate actual accounting metadata without copying prompts, responses or headers."""
-    raw, reference = reader.read(directory / "provider-accounting.jsonl", optional=True)
     calls: list[dict[str, Any]] = []
-    if raw is not None:
+    references = []
+    available = False
+    for name in files:
+        raw, reference = reader.read(directory / name, optional=True)
+        references.append(reference)
+        if raw is None:
+            continue
+        available = True
         for line in raw.splitlines():
             if line.strip():
                 if len(line) > 1024 * 1024 or len(calls) >= 20000:
@@ -48,6 +58,7 @@ def provider_projection(reader: ArchiveReader, directory: Path) -> tuple[dict[st
                 if row.get("schema_version") != "roboguide.provider-call-observation/v0.1":
                     raise ValueError("unsupported accounting observation schema")
                 calls.append(row)
+    calls.sort(key=lambda row: str(row.get("request_utc") or ""))
     usage = [number((row.get("usage") or {}).get("total_tokens")) for row in calls]
     latency = [number(row.get("latency_ms")) for row in calls]
     grouped: Counter[tuple[Any, ...]] = Counter()
@@ -61,7 +72,7 @@ def provider_projection(reader: ArchiveReader, directory: Path) -> tuple[dict[st
             )
         ] += 1
     projection = {
-        "calls_archived": len(calls) if raw is not None else None,
+        "calls_archived": len(calls) if available else None,
         "total_tokens": sum(v for v in usage if v is not None)
         if any(v is not None for v in usage)
         else None,
@@ -109,7 +120,7 @@ def provider_projection(reader: ArchiveReader, directory: Path) -> tuple[dict[st
         public_safe(allowed)
         variants[sha256(encode(allowed))] = allowed
     projection["parameter_variants"] = [variants[key] for key in sorted(variants)]
-    return projection, [reference]
+    return projection, references
 
 
 def _admission(value: Any) -> dict[str, Any] | None:

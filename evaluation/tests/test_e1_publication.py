@@ -372,6 +372,7 @@ def test_structural_schema_matches_runtime_record_generation() -> None:
 def test_committed_phase_packages_are_recomputable() -> None:
     """CI recomputes every committed revision with zero models, archives or simulators."""
     from roboguide_eval.e1_census import validate_census
+    from roboguide_eval.e1_overview import validate_overview
 
     base = Path(__file__).parents[1] / "reports/e1"
     index = base / "index.json"
@@ -385,6 +386,8 @@ def test_committed_phase_packages_are_recomputable() -> None:
         assert validate_package(manifest.parent)["state"] == "PASS"
     for manifest in sorted((base / "inventories").glob("*/manifest.json")):
         assert validate_census(manifest.parent)["state"] == "PASS"
+    for manifest in sorted((base / "overviews").glob("*/manifest.json")):
+        assert validate_overview(base, manifest.parent)["state"] == "PASS"
 
 
 def test_staged_adapter_imports_full_plan_without_launching(tmp_path: Path) -> None:
