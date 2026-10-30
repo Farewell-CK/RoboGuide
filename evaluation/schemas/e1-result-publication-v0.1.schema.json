@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/schemas/e1-result-publication-v0.1",
+  "title": "E1 result publication v0.1 record shapes",
+  "description": "Offline publication projections only; cross-record authority, references, coverage and recomputation are validated by e1_publication, not this structural schema.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/run"
+    },
+    {
+      "$ref": "#/$defs/artifact"
+    }
+  ],
+  "$defs": {
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_key",
+        "job_id",
+        "family",
+        "episode_id",
+        "arm",
+        "purpose",
+        "execution_mode",
+        "original_run_id",
+        "original_namespace",
+        "source_directory",
+        "code_sha",
+        "code_identity_basis",
+        "system_outcome",
+        "official_pddl_success",
+        "official_outcome",
+        "physical_episode_executed",
+        "simulator_steps",
+        "admission",
+        "elapsed_seconds",
+        "provider",
+        "failure_codes",
+        "failure_stage",
+        "retry_of",
+        "source_ref",
+        "evidence_refs",
+        "gaps",
+        "started_utc",
+        "ended_utc"
+      ],
+      "properties": {
+        "run_key": {
+          "type": "string"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "family": {
+          "type": "string"
+        },
+        "episode_id": {
+          "type": "string"
+        },
+        "arm": {
+          "enum": [
+            "emos",
+            "roboguide"
+          ]
+        },
+        "purpose": {
+          "enum": [
+            "primary",
+            "retry",
+            "diagnostic"
+          ]
+        },
+        "execution_mode": {
+          "enum": [
+            "fresh",
+            "reused"
+          ]
+        },
+        "original_run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "original_namespace": {
+          "type": "string"
+        },
+        "source_directory": {
+          "type": "string"
+        },
+        "code_sha": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{40}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "code_identity_basis": {
+          "type": "string"
+        },
+        "system_outcome": {
+          "type": "string"
+        },
+        "official_pddl_success": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "official_outcome": {
+          "enum": [
+            "true",
+            "false",
+            "unavailable"
+          ]
+        },
+        "physical_episode_executed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "simulator_steps": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "admission": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "elapsed_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "provider": {
+          "type": "object"
+        },
+        "failure_codes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "failure_stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retry_of": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_ref": {
+          "type": "string"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "started_utc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ended_utc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "namespace",
+        "logical_path",
+        "available",
+        "sha256",
+        "size_bytes",
+        "backup_status",
+        "remote_uri"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "logical_path": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "size_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "backup_status": {
+          "enum": [
+            "local_only",
+            "unavailable"
+          ]
+        },
+        "remote_uri": {
+          "type": "null"
+        }
+      }
+    }
+  }
+}

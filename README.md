@@ -1626,7 +1626,8 @@ Conda 环境、工作目录与凭据只来自 Git 忽略的 `evaluation/local.ya
 `ROBOGUIDE_EVAL_*` 环境变量；原始运行目录和本机配置不提交 Git。经审阅脱敏的结果
 发布包使用 [E1 结果台账](evaluation/reports/e1/README.md)，按
 [结果发布与维护设计 v0.1](evaluation/docs/e1-results-publication-v0.1.md) 保留实际运行身份、
-完整分母和原始证据引用；离线导出器及历史迁移尚未实现。详见
+完整分母和原始证据引用；[离线发布工具](evaluation/docs/e1-publication-tools.md)
+支持封存 staged 格式的首次迁移、四类历史清点和零原档的统计重算。详见
 [`evaluation/README.md`](evaluation/README.md)。
 
 ## Mission Console（任务旅程可视化）
