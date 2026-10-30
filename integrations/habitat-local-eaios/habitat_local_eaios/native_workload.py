@@ -22,7 +22,7 @@ from .diagnostics import PhysicalDiagnostics, _json_scalar
 from .evidence_io import write_text_atomic
 from .native_reset_observer import install_reset_observer
 from .native_usage_observer import install_usage_observer
-from .source_provenance import build_runtime_source_manifest
+from .source_provenance import build_runtime_source_manifest, runtime_source_modules
 
 
 def select_episode(dataset: Any, episode_id: str, scene_id: str) -> Any:
@@ -396,25 +396,7 @@ def main(argv: list[str] | None = None) -> None:
             _save(
                 args.evidence_dir,
                 "runtime-source-manifest.json",
-                build_runtime_source_manifest(
-                    (
-                        "habitat.tasks.rearrange.actions.habitat_mas_actions",
-                        "habitat.tasks.rearrange.actions.oracle_nav_action",
-                        "habitat_sim",
-                        "habitat_sim._ext.habitat_sim_bindings",
-                        "habitat_baselines.rl.hrl.hl.llm_policy",
-                        "habitat_baselines.rl.hrl.skills.wait",
-                        "habitat_baselines.rl.multi_agent.multi_agent_access_mgr",
-                        "habitat_baselines.rl.multi_agent.multi_llm_policy",
-                        "habitat_mas.agents.crab_agent",
-                        "habitat_mas.scene_graph.utils",
-                        "habitat_mas.tasks.habitat_mas_sensors",
-                        "habitat_mas.utils.models",
-                        "habitat_local_eaios.diagnostics",
-                        "habitat_local_eaios.native_usage_observer",
-                        "habitat_local_eaios.observation_read_cache",
-                    )
-                ),
+                build_runtime_source_manifest(runtime_source_modules("emos")),
             )
         except Exception:  # noqa: BLE001 - source observation cannot mask original failure
             pass

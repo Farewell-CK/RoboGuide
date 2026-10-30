@@ -38,7 +38,7 @@ from .navigation_preparation import (
 from .navmesh_profile import STEP_AWARE_PROFILE
 from .relocation_capability import inspect_relocation_capability
 from .relocation_completion import COMPLETION_PROFILE, RelocationCompletionBinding
-from .source_provenance import build_runtime_source_manifest
+from .source_provenance import build_runtime_source_manifest, runtime_source_modules
 from .spatial_navigation import (
     GOAL_AWARE_ARRIVAL_PROFILE,
     GOAL_AWARE_POINT_RESOLVER,
@@ -445,62 +445,12 @@ class EmosStage2Runtime:
             self._write_json(
                 "runtime-source-manifest.json",
                 build_runtime_source_manifest(
-                    (
-                        "habitat.tasks.rearrange.actions.habitat_mas_actions",
-                        "habitat.tasks.rearrange.actions.oracle_nav_action",
-                        "habitat_sim",
-                        "habitat_sim._ext.habitat_sim_bindings",
-                        "habitat_baselines.rl.hrl.hl.llm_policy",
-                        "habitat_baselines.rl.hrl.skills.wait",
-                        "habitat_baselines.rl.multi_agent.multi_agent_access_mgr",
-                        "habitat_baselines.rl.multi_agent.multi_llm_policy",
-                        "habitat_mas.agents.crab_agent",
-                        "habitat_mas.scene_graph.utils",
-                        "habitat_mas.tasks.habitat_mas_sensors",
-                        "habitat_mas.utils.models",
-                        "habitat_local_eaios.diagnostics",
-                        "habitat_local_eaios.native_usage_observer",
-                        "habitat_local_eaios.observation_read_cache",
-                        "habitat_local_eaios.stage2_feedback",
-                        "habitat_local_eaios.execution_lifecycle",
-                        "habitat_local_eaios.stage2_context",
-                        "habitat_local_eaios.reset_completion",
-                        *(
-                            (
-                                "habitat.tasks.rearrange.actions.actions",
-                                "habitat.tasks.rearrange.actions.reset_action",
-                                "habitat_baselines.rl.hrl.skills.reset",
-                                "habitat_local_eaios.relocation_completion",
-                                "habitat_local_eaios.navigation_dispatch",
-                                "habitat_local_eaios.live_bindings",
-                            )
-                            if getattr(self._config, "relocation_completion_binding", False)
-                            else ()
+                    runtime_source_modules(
+                        "roboguide",
+                        relocation_binding=bool(
+                            getattr(self._config, "relocation_completion_binding", False)
                         ),
-                        "habitat_local_eaios.idle_endpoint",
-                        "habitat_local_eaios.relocation_capability",
-                        "habitat_local_eaios.stage2_contract",
-                        "habitat_local_eaios.operation_admission",
-                        "habitat_local_eaios.emos_stage2",
-                        "habitat_local_eaios.goal_region_action",
-                        "habitat_local_eaios.goal_region_navigation",
-                        "habitat_local_eaios.navmesh_profile",
-                        "habitat_local_eaios.reset_route_support",
-                        "habitat_local_eaios.navmesh_region",
-                        "habitat_local_eaios.idle_endpoint",
-                        "habitat_local_eaios.shared_world",
-                        "habitat_local_eaios.stage2_contract",
-                        *(
-                            (
-                                "habitat.tasks.rearrange.actions.actions",
-                                "habitat_local_eaios.spatial_navigation",
-                                "habitat_local_eaios.spatial_navigation_action",
-                                "habitat.gym.gym_wrapper",
-                                "habitat_local_eaios.navigation_preparation",
-                            )
-                            if spatial_arrival_enabled
-                            else ()
-                        ),
+                        spatial_arrival=spatial_arrival_enabled,
                     )
                 ),
             )

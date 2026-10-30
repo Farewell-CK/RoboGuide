@@ -256,6 +256,15 @@ def test_initialization_records_compiled_simulator_without_route_diagnostics(
             "path": str(extension.resolve()),
             "sha256": hashlib.sha256(extension.read_bytes()).hexdigest(),
         }
+        for name in [
+            "habitat.tasks.rearrange.actions.actions",
+            "habitat.tasks.rearrange.actions.reset_action",
+            "habitat_baselines.rl.hrl.skills.reset",
+        ]:
+            assert (
+                manifest["modules"][name]["sha256"]
+                == hashlib.sha256(ordinary.read_bytes()).hexdigest()
+            )
         runtime.close()
         assert model_type._record_usage is original_usage
     assert calls == []

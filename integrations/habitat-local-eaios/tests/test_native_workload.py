@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.machinery
+import importlib.util
 import json
+import runpy
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +21,67 @@ from habitat_local_eaios.native_workload import (  # noqa: E402
     install_workload,
     select_episode,
 )
+
+
+def test_native_finalizer_records_original_reset_sources_and_preserves_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real native finally path emits common reset sources without executing an episode."""
+    from habitat_local_eaios import native_workload
+
+    original_error = RuntimeError("original evaluator failed")
+    source = tmp_path / "original.py"
+    source.write_text("# frozen source fixture\n")
+
+    def forbidden(*args: Any, **kwargs: Any) -> None:
+        """No environment, model or physical execution is allowed in source-finalization tests."""
+        raise AssertionError("unexpected physical or model call")
+
+    factory = SimpleNamespace(make_gym_from_config=forbidden)
+    monkeypatch.setattr(importlib, "import_module", lambda name: factory)
+    monkeypatch.setattr(native_workload, "install_usage_observer", lambda *a: None)
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name: importlib.machinery.ModuleSpec(name, None, origin=str(source)),
+    )
+
+    def fail(*args: Any, **kwargs: Any) -> None:
+        """Expose the original evaluator error without invoking any model or simulator."""
+        raise original_error
+
+    monkeypatch.setattr(runpy, "run_module", fail)
+    previous_argv = sys.argv
+    with pytest.raises(RuntimeError) as raised:
+        native_workload.main(
+            [
+                "--evidence-dir",
+                str(tmp_path / "evidence"),
+                "--run-id",
+                "source-only-fixture",
+                "--episode-id",
+                "fixture",
+                "--scene-id",
+                "fixture-scene",
+                "--dataset-path",
+                str(tmp_path / "unused-dataset.json"),
+                "--dataset-sha256",
+                "a" * 64,
+            ]
+        )
+    assert raised.value is original_error and sys.argv is previous_argv
+    assert factory.make_gym_from_config is forbidden
+    manifest = json.loads((tmp_path / "evidence/runtime-source-manifest.json").read_text())
+    for name in [
+        "habitat.tasks.rearrange.actions.actions",
+        "habitat.tasks.rearrange.actions.reset_action",
+        "habitat_baselines.rl.hrl.skills.reset",
+    ]:
+        assert manifest["modules"][name] == {
+            "path": str(source.resolve()),
+            "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        }
+    assert "habitat_local_eaios.reset_completion" not in manifest["modules"]
 
 
 class Dataset:
