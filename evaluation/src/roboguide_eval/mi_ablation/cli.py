@@ -166,16 +166,19 @@ def summarize(directory: Path) -> JSONObject:
     """Retain all planned slots, unavailable outcomes and unreviewed semantics in totals."""
     manifest = read_object(directory / "manifest.json")
     counts: dict[str, JSONObject] = {name: {} for name in ("A", "B", "C")}
-    planned, closed, claimed, calls = 0, 0, 0, 0
+    planned, closed, claimed, closed_trial_calls = 0, 0, 0, 0
+    persisted_requests, persisted_call_results = 0, 0
     for slot in objects(manifest["slots"]):
         planned += 1
         trial = directory / "trials" / str(slot["id"])
         claimed += int((trial / "claim.json").exists())
+        persisted_requests += len(list((trial / "calls").glob("call-*/request.json")))
+        persisted_call_results += len(list((trial / "calls").glob("call-*/metadata.json")))
         if not (trial / "result.json").exists():
             continue
         result = read_object(trial / "result.json")
         closed += 1
-        calls += int(cast(int, result["actual_provider_calls"]))
+        closed_trial_calls += int(cast(int, result["actual_provider_calls"]))
         for name, raw in object_value(result["branches"]).items():
             branch = object_value(raw)
             status = str(branch["status"])
@@ -186,7 +189,11 @@ def summarize(directory: Path) -> JSONObject:
         "closed": closed,
         "unclosed_claims": claimed - closed,
         "unstarted": planned - claimed,
-        "actual_provider_calls": calls,
+        "closed_trial_provider_calls": closed_trial_calls,
+        "persisted_provider_requests": persisted_requests,
+        "persisted_provider_call_results": persisted_call_results,
+        "requests_without_call_result": persisted_requests - persisted_call_results,
+        "request_counter_basis": "persisted before send; unclosed delivery remains unknown",
         "branches": cast(JSONObject, counts),
         "semantic_correctness": "pending_blind_human_review",
         "success_rate": None,

@@ -326,6 +326,15 @@ def test_trial_missing_result_stays_unclosed_in_denominator(tmp_path: Path) -> N
     assert summary["planned"] == 12
     assert summary["unclosed_claims"] == 1
     assert summary["unstarted"] == 11
+    write_new(
+        suite / "trials/dev0-relocate-one-r1/calls/call-01/request.json",
+        {"persisted_before_send": True},
+    )
+    summary = summarize(suite)
+    assert summary["closed_trial_provider_calls"] == 0
+    assert summary["persisted_provider_requests"] == 1
+    assert summary["persisted_provider_call_results"] == 0
+    assert summary["requests_without_call_result"] == 1
 
 
 def test_missing_evidence_cannot_be_scored_as_a_correct_plan() -> None:
