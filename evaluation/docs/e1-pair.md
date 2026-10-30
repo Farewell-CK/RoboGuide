@@ -47,6 +47,13 @@ body archive 和结果目录。每臂复制冻结的三个 vendor 代码目录�
 | `runtime_modules` | 实际 runtime module 名称到冻结源文件路径；检查子进程解释器、origin 和 digest |
 
 必须 gate dataset、Python、Controller/Node binary、Runner、两类配置、B1 workload；
+还必须冻结代码视图内的
+`integrations/habitat-local-eaios/habitat_local_eaios/source_provenance.py`。
+在启动任何 arm 前，使用选定 worker Python 的 `-I -S -B` 模式执行其 `--describe`。
+独立进程只读描述两臂必然采集的模块名；5 秒和 64 KiB 上限约束此本机查询，不改模型等待。
+版本/结构/覆盖缺失、旧 helper 无输出或查询失败立即拒绝。`pair-manifest-input.json`
+保留 `runtime_source_preflight`；它不能替代最终子进程解释器、私有路径与摘要检查。
+参见 [ADR-0230](../../docs/decisions/0230-runtime-source-coverage-preflight.md)。
 发布者还应冻结全部 Python/Rust/Prompt/schema/部署配置及 vendor 依赖面。前三组
 identity 使用对应实际文件摘要映射的 canonical digest；Stage2 使用逐文件 digest。
 这些值必须与 Population Manifest 一致，不能把声明直接冒充运行观测。

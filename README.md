@@ -1722,6 +1722,11 @@ The same explicitly frozen configuration applies to both comparison arms; bounde
 pixel buffers and actual final counters distinguish performance evidence from official
 truth. Historical frozen sources and outcomes are never upgraded in place.
 
+[ADR-0230](docs/decisions/0230-runtime-source-coverage-preflight.md) shares the native/controlled
+source emission list and checks declared coverage using the frozen worker before paired execution.
+It records original reset sources on both arms without installing controlled policy on native EMOS.
+Declared coverage is separate from the still-required actual child module paths and byte identities.
+
 软件进程停止与本地执行结果是独立证据（[ADR-0110](docs/decisions/0110-execution-generation-and-process-stop-evidence.md)）。
 Habitat Local EAIOS 在原 worker 真实退出后发布 safe-state v0.3，完整绑定原 Group、attempt
 和 generation；Failed/Completed 不会被改写为 Cancelled。缺失证明保留 ownership；

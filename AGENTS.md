@@ -1978,6 +1978,14 @@ No vendor policy, threshold, world/skill budget, MI/Core or old result changes a
 Separate physical equivalence and archival gates precede an authorized queue.
 See `docs/decisions/0229-scoped-original-observation-read-cache.md`.
 
+ADR-0230 centralizes source emission in `source_provenance.runtime_source_modules`.
+Both arms record original reset sources without installing controlled native policy.
+Evaluation first queries the exact frozen stdlib producer with isolated worker Python;
+closed v0.1 coverage, byte/time bounds and complete configured names precede any SUT.
+The declaration never replaces actual child path/hash/interpreter checks. Original
+errors, historical manifests, Provider/world budgets and official truth remain.
+See `docs/decisions/0230-runtime-source-coverage-preflight.md`.
+
 The v0.13 acquisition tool `scan_for_object` is backed by an independently scoped local HRL
 skill and verified original base-yaw interfaces. Only a real guarded model selection invokes it;
 32-step/90-degree/1.5rad/s bounds clip to the original remaining acquisition budget. Zero

@@ -7,9 +7,11 @@ discloses the controlled local execution differences alongside pair validation.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
+import selectors
 import shutil
 import signal
 import socket
@@ -58,6 +60,61 @@ def endpoint_port_names(count: int) -> set[str]:
 
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}\Z")
 _VENDOR_CODE = ("habitat-lab", "habitat-baselines", "habitat-mas")
+_SOURCE_PROBE = Path("integrations/habitat-local-eaios/habitat_local_eaios/source_provenance.py")
+_COVERAGE_SCHEMA = "roboguide.local-eaios-source-coverage/v0.1"
+_COVERAGE_BASIS = "declared-emission-coverage-not-runtime-observation"
+_PROBE_SECONDS = 5.0
+_PROBE_BYTES = 64 * 1024
+
+
+def _source_coverage_output(python: Path, script: Path) -> bytes:
+    """Bound an isolated stdlib declaration query before any SUT or credentialed process.
+
+    Only the owned probe is killed on expiry/overflow. Its small declaration
+    cannot stand in for actual runtime origins, bytes or simulator observations.
+    """
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("OPENAI_", "EMOS_LLM_", "ROBOGUIDE_"))
+    }
+    deadline = time.monotonic() + _PROBE_SECONDS
+    with subprocess.Popen(
+        [str(python), "-I", "-S", "-B", str(script), "--describe"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        env=env,
+    ) as child:
+        assert child.stdout is not None
+        try:
+            raw = bytearray()
+            with selectors.DefaultSelector() as selector:
+                selector.register(child.stdout, selectors.EVENT_READ)
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or not selector.select(remaining):
+                        raise ValueError("runtime source coverage probe timed out")
+                    chunk = os.read(child.stdout.fileno(), min(4096, _PROBE_BYTES + 1 - len(raw)))
+                    if not chunk:
+                        break
+                    raw.extend(chunk)
+                    if len(raw) > _PROBE_BYTES:
+                        raise ValueError("runtime source coverage probe exceeds byte budget")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError("runtime source coverage probe timed out")
+            try:
+                status = child.wait(timeout=remaining)
+            except subprocess.TimeoutExpired as error:
+                raise ValueError("runtime source coverage probe timed out") from error
+            if status:
+                raise ValueError("runtime source coverage probe failed")
+            return bytes(raw)
+        finally:
+            if child.poll() is None:
+                child.kill()
+            child.wait()
 
 
 def writable_asset_paths(config: JSONObject) -> tuple[str, ...]:
@@ -137,6 +194,7 @@ class PairSpec:
     config: JSONObject
     sources: Mapping[Path, str]
     ports: Mapping[str, int]
+    runtime_source_preflight: JSONObject | None = None
 
     @classmethod
     def load(cls, population_path: Path, config_path: Path, pair_id: str) -> PairSpec:
@@ -207,6 +265,7 @@ class PairSpec:
             Path(required_text(config, "habitat_python")),
         ]
         code = Path(required_text(config, "code_root"))
+        mandatory.append(code / _SOURCE_PROBE)
         if "b1_deployment" in config:
             relative = Path(required_text(config, "b1_deployment"))
             if relative.is_absolute() or ".." in relative.parts:
@@ -268,6 +327,7 @@ class PairSpec:
         validate_wait_budgets(config, llm)
         spec = cls(population, row, ordinal, config, sources, ports)
         spec.verify_sources()
+        coverage = spec.verify_runtime_source_coverage()
         if "b1_deployment" in config:
             declaration = load_deployment(
                 code, declaration_path=code / required_text(config, "b1_deployment")
@@ -298,7 +358,53 @@ class PairSpec:
         elif set(ports) != set(_PORT_NAMES):
             raise ValueError("default B1 deployment requires two endpoint ports")
         spec.source_identities()
-        return spec
+        return cls(population, row, ordinal, config, sources, ports, coverage)
+
+    def verify_runtime_source_coverage(self) -> JSONObject:
+        """Refuse requirements neither frozen producer promises to emit before arm launch."""
+        probe = self.path("code_root") / _SOURCE_PROBE
+        raw = _source_coverage_output(self.path("habitat_python"), probe)
+        if file_digest(probe) != self.sources[probe]:
+            raise ValueError("runtime source coverage producer changed during probe")
+        try:
+            declaration = json.loads(raw)
+        except (ValueError, UnicodeDecodeError) as error:
+            raise ValueError("invalid runtime source coverage declaration") from error
+        if (
+            not isinstance(declaration, dict)
+            or set(declaration) != {"schema_version", "basis", "arms"}
+            or declaration["schema_version"] != _COVERAGE_SCHEMA
+            or declaration["basis"] != _COVERAGE_BASIS
+            or not isinstance(declaration["arms"], dict)
+            or set(declaration["arms"]) != {"emos", "roboguide"}
+        ):
+            raise ValueError("invalid runtime source coverage declaration")
+        required = set(object_value(self.config.get("runtime_modules")))
+        for arm, modules in declaration["arms"].items():
+            if (
+                not isinstance(modules, list)
+                or not 1 <= len(modules) <= 256
+                or any(
+                    not isinstance(name, str)
+                    or len(name) > 160
+                    or re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+", name) is None
+                    for name in modules
+                )
+                or len(set(modules)) != len(modules)
+            ):
+                raise ValueError("invalid runtime source coverage module list")
+            missing = sorted(required - set(modules))
+            if missing:
+                raise ValueError(
+                    "runtime source coverage missing for " + arm + ": " + ", ".join(missing)
+                )
+        return {
+            "state": "PASS",
+            "declaration": cast(JSONObject, declaration),
+            "producer_sha256": self.sources[probe],
+            "required_modules": cast(list[JSONValue], sorted(required)),
+            "actual_runtime_identity_still_required": True,
+        }
 
     def runtime_failures(self, manifest: JSONObject, vendor_view: Path) -> list[str]:
         """Check the actual interpreter/module origins against the exact frozen public files."""
@@ -1242,6 +1348,7 @@ def run_pair(population_path: Path, config_path: Path, pair_id: str, output: Pat
                 "code_sha": spec.config["code_sha"],
                 "outcome_retries": 0,
                 "protocol": spec.population.protocol,
+                "runtime_source_preflight": spec.runtime_source_preflight,
             },
         )
         for arm in spec.order():

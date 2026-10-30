@@ -10,6 +10,13 @@ Both native and production constructors record actual loaded sources and
 enable and freeze the same profile on both arms. See
 [ADR-0229](../../docs/decisions/0229-scoped-original-observation-read-cache.md).
 
+Native and controlled source manifests use one shared declaration, including the
+original action/reset/skill sources. Its isolated stdlib `source_provenance.py --describe`
+entrypoint reports only guaranteed names; it imports no vendor code and establishes
+no runtime identity. Pair preflight checks configured coverage before execution;
+actual child origins and bytes remain mandatory. See
+[ADR-0230](../../docs/decisions/0230-runtime-source-coverage-preflight.md).
+
 This deployment-owned bridge is the C1-S0 reference path from the generic
 `roboguide-node` Local Integration Engine into an existing EMOS/Habitat environment. It is not a
 RoboGuide Core module and does not add Habitat, EMOS, Gym, Torch, or simulator dependencies to the

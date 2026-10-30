@@ -160,8 +160,172 @@ def setup_pair(root: Path) -> tuple[Path, Path]:
         "runtime_modules": {"original.stage2": str(vendor / "stage2")},
     }
     config_path = root / "worker.json"
+    probe = code / "integrations/habitat-local-eaios/habitat_local_eaios/source_provenance.py"
+    probe.parent.mkdir(parents=True)
+    declaration = {
+        "schema_version": "roboguide.local-eaios-source-coverage/v0.1",
+        "basis": "declared-emission-coverage-not-runtime-observation",
+        "arms": {
+            arm: [
+                "original.stage2",
+                "habitat_sim._ext.habitat_sim_bindings",
+                "habitat.tasks.rearrange.actions.actions",
+                "habitat.tasks.rearrange.actions.reset_action",
+                "habitat_baselines.rl.hrl.skills.reset",
+            ]
+            for arm in ("emos", "roboguide")
+        },
+    }
+    probe.write_text("import json\nprint(json.dumps(" + repr(declaration) + "))\n")
+    sources[str(probe)] = file_digest(probe)
     write_json(config_path, config)
     return population_path, config_path
+
+
+def replace_source_probe(config_path: Path, program: str) -> Path:
+    """Freeze an isolated producer fixture without changing any original runtime sources."""
+    config = json.loads(config_path.read_text())
+    probe = (
+        Path(config["code_root"])
+        / "integrations/habitat-local-eaios/habitat_local_eaios/source_provenance.py"
+    )
+    probe.write_text(program)
+    config["source_sha256"][str(probe)] = file_digest(probe)
+    write_json(config_path, config)
+    return probe
+
+
+@pytest.mark.parametrize(
+    "problem", ["schema", "basis", "missing-arm", "duplicate", "type", "oversize-list"]
+)
+def test_bad_source_coverage_refuses_before_any_arm(tmp_path: Path, problem: str) -> None:
+    """A newly hashed but invalid declaration cannot defer failure until after physical work."""
+    population, config = setup_pair(tmp_path)
+    declaration: dict[str, object] = {
+        "schema_version": "roboguide.local-eaios-source-coverage/v0.1",
+        "basis": "declared-emission-coverage-not-runtime-observation",
+        "arms": {arm: ["original.stage2"] for arm in ("emos", "roboguide")},
+    }
+    arms = cast(dict[str, list[object]], declaration["arms"])
+    if problem == "schema":
+        declaration["schema_version"] = "unknown"
+    elif problem == "basis":
+        declaration["basis"] = "pretend-actual-runtime-observation"
+    elif problem == "missing-arm":
+        del arms["emos"]
+    elif problem == "duplicate":
+        arms["emos"] *= 2
+    elif problem == "type":
+        arms["emos"].append(None)
+    else:
+        arms["emos"] = [f"module.item_{n}" for n in range(257)]
+    replace_source_probe(config, "import json\nprint(json.dumps(" + repr(declaration) + "))\n")
+    output = tmp_path / "must-not-launch"
+    with pytest.raises(ValueError, match="runtime source coverage"):
+        run_pair(population, config, "pair-0", output)
+    assert not output.exists()
+
+
+def test_missing_producer_coverage_refuses_even_with_valid_source_hashes(tmp_path: Path) -> None:
+    """Reproduce the old one-arm-only declaration miss before creating a pair directory."""
+    population, config = setup_pair(tmp_path)
+    module = "habitat.tasks.rearrange.actions.reset_action"
+    document = json.loads(config.read_text())
+    document["runtime_modules"] = {module: document["runtime_modules"]["original.stage2"]}
+    write_json(config, document)
+    declaration = {
+        "schema_version": "roboguide.local-eaios-source-coverage/v0.1",
+        "basis": "declared-emission-coverage-not-runtime-observation",
+        "arms": {"emos": ["original.stage2"], "roboguide": [module]},
+    }
+    replace_source_probe(config, "import json\nprint(json.dumps(" + repr(declaration) + "))\n")
+    output = tmp_path / "must-not-launch"
+    with pytest.raises(ValueError, match="coverage missing for emos: " + module):
+        run_pair(population, config, "pair-0", output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("problem", ["empty", "bad-json", "nonzero", "oversize"])
+def test_failed_source_probe_never_launches_an_arm(tmp_path: Path, problem: str) -> None:
+    """Old helpers, bad responses, failed children and large output fail before execution."""
+    population, config = setup_pair(tmp_path)
+    program = {
+        "empty": "# Old source helper has no declaration entrypoint.\n",
+        "bad-json": "print('invalid response')\n",
+        "nonzero": "raise SystemExit(7)\n",
+        "oversize": "print('x' * 65537)\n",
+    }[problem]
+    replace_source_probe(config, program)
+    with pytest.raises(ValueError, match="runtime source coverage"):
+        run_pair(population, config, "pair-0", tmp_path / "must-not-launch")
+    assert not (tmp_path / "must-not-launch").exists()
+
+
+def test_source_probe_timeout_does_not_wait_for_or_start_the_sut(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The owned stdlib child has its own finite budget, separate from unchanged Provider waits."""
+    import roboguide_eval.e1_pair as pair
+
+    population, config = setup_pair(tmp_path)
+    replace_source_probe(config, "import time\ntime.sleep(60)\n")
+    monkeypatch.setattr(pair, "_PROBE_SECONDS", 0.05)
+    with pytest.raises(ValueError, match="coverage probe timed out"):
+        run_pair(population, config, "pair-0", tmp_path / "must-not-launch")
+    assert not (tmp_path / "must-not-launch").exists()
+
+
+def test_source_probe_requires_frozen_producer_bytes(tmp_path: Path) -> None:
+    """The emitter declaration cannot come from an unfrozen current checkout."""
+    population, config = setup_pair(tmp_path)
+    document = json.loads(config.read_text())
+    probe = (
+        Path(document["code_root"])
+        / "integrations/habitat-local-eaios/habitat_local_eaios/source_provenance.py"
+    )
+    del document["source_sha256"][str(probe)]
+    write_json(config, document)
+    with pytest.raises(ValueError, match="source gate missing"):
+        PairSpec.load(population, config, "pair-0")
+
+
+def test_source_preflight_cannot_replace_actual_reset_module_evidence(tmp_path: Path) -> None:
+    """A declared full reset-source list still refuses the old actual manifest missing it."""
+    population, config = setup_pair(tmp_path)
+    document = json.loads(config.read_text())
+    original = document["runtime_modules"]["original.stage2"]
+    modules = [
+        "habitat.tasks.rearrange.actions.actions",
+        "habitat.tasks.rearrange.actions.reset_action",
+        "habitat_baselines.rl.hrl.skills.reset",
+    ]
+    document["runtime_modules"] = {name: original for name in modules}
+    write_json(config, document)
+    spec = PairSpec.load(population, config, "pair-0")
+    assert spec.runtime_source_preflight is not None
+    assert spec.runtime_source_preflight["actual_runtime_identity_still_required"] is True
+    manifest: JSONObject = {"python_executable": sys.executable, "modules": {}}
+    assert spec.runtime_failures(manifest, tmp_path / "private-copy") == [
+        "runtime_module_identity_unconfirmed:" + name for name in modules
+    ]
+
+
+def test_source_probe_does_not_receive_credentials_or_experiment_switches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Read-only coverage collection cannot inherit credentialed execution authority."""
+    from roboguide_eval.e1_pair import _source_coverage_output
+
+    program = tmp_path / "probe.py"
+    program.write_text(
+        "import os\n"
+        "assert not any(k.startswith(('OPENAI_', 'EMOS_LLM_', 'ROBOGUIDE_')) for k in os.environ)\n"
+        "print('description-only')\n"
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "fixture-only-not-a-provider-credential")
+    monkeypatch.setenv("ROBOGUIDE_HABITAT_CAPTURE_VIDEO", "1")
+    monkeypatch.setenv("EMOS_LLM_MODEL", "fixture-only")
+    assert _source_coverage_output(Path(sys.executable), program) == b"description-only\n"
 
 
 @pytest.mark.parametrize(
