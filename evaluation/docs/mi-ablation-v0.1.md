@@ -1,6 +1,7 @@
 # MI 规划、审查与修复的配对组件消融 v0.1
 
 状态：实现与开发验证阶段；正式语义评分、独立盲审和论文结论尚未完成。
+可显式启用的调用数匹配 D 对照与新候选见 [v0.2](mi-ablation-v0.2.md)；旧 manifest 不变。
 本实验属于 Evaluation，不属于 E1/E2/E6，也不创建 Mission Request、Controller、Node
 或物理执行。生产 MI Prompt、MissionPlan 合同及决策实现不因本实验改变。
 

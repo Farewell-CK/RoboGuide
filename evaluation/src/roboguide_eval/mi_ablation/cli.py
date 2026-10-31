@@ -18,6 +18,7 @@ from mission.models import JSONObject, JSONValue
 
 from roboguide_eval.mi_ablation.blind import export_blind
 from roboguide_eval.mi_ablation.evidence import digest, read_object, write_new
+from roboguide_eval.mi_ablation.matched import POLICY, run_matched
 from roboguide_eval.mi_ablation.runner import run_trial
 from roboguide_eval.mi_ablation.scoring import object_value, objects
 
@@ -54,7 +55,13 @@ def configured_settings(repository: Path, manifest: JSONObject) -> MissionSettin
 
 
 def freeze(
-    repository: Path, cases_path: Path, directory: Path, split: str, repetitions: int
+    repository: Path,
+    cases_path: Path,
+    directory: Path,
+    split: str,
+    repetitions: int,
+    *,
+    matched_planner: bool = False,
 ) -> None:
     """Freeze source, private rubrics, provider settings and all planned slots before calls."""
     if split not in {"development", "evaluation"} or not 1 <= repetitions <= 3:
@@ -120,6 +127,9 @@ def freeze(
         "semantic_label_status": "private_rubric_requires_independent_blind_review",
         "no_controller_or_devices": True,
     }
+    if matched_planner:
+        manifest["matched_planner_policy"] = POLICY
+        object_value(manifest["budgets"])["max_calls_with_matched_planner"] = 21
     manifest["digest"] = digest(manifest)
     directory.mkdir(parents=True, exist_ok=False)
     write_new(directory / "cases.json", document)
@@ -132,6 +142,8 @@ def load_frozen(repository: Path, directory: Path) -> tuple[JSONObject, list[JSO
     payload = {k: v for k, v in manifest.items() if k != "digest"}
     if manifest.get("digest") != digest(payload):
         raise ValueError("manifest digest mismatch")
+    if manifest.get("matched_planner_policy") not in (None, POLICY):
+        raise ValueError("unsupported matched Planner policy")
     for relative, expected in object_value(manifest["source_sha256"]).items():
         path = Path(relative)
         if path.is_absolute() or ".." in path.parts or file_digest(repository / path) != expected:
@@ -152,7 +164,7 @@ def run_slot(repository: Path, directory: Path, slot_id: str) -> JSONObject:
     settings = configured_settings(repository, manifest)
     settings.provider.api_key(os.environ)
     catalog = CanonicalCapabilityCatalog.load(settings.capability_catalog_path)
-    return run_trial(
+    result = run_trial(
         case,
         cast(int, slot["replicate"]),
         directory / "trials" / slot_id,
@@ -160,17 +172,36 @@ def run_slot(repository: Path, directory: Path, slot_id: str) -> JSONObject:
         catalog,
         os.environ,
     )
+    if manifest.get("matched_planner_policy") == POLICY:
+        matched = run_matched(directory / "trials" / slot_id, settings, os.environ)
+        return {**result, "matched_planner": matched}
+    return result
 
 
 def summarize(directory: Path) -> JSONObject:
     """Retain all planned slots, unavailable outcomes and unreviewed semantics in totals."""
     manifest = read_object(directory / "manifest.json")
     counts: dict[str, JSONObject] = {name: {} for name in ("A", "B", "C")}
+    matched_enabled = manifest.get("matched_planner_policy") == POLICY
+    if matched_enabled:
+        counts["D"] = {}
+    matched_closed, matched_claimed, matched_calls = 0, 0, 0
     planned, closed, claimed, closed_trial_calls = 0, 0, 0, 0
     persisted_requests, persisted_call_results = 0, 0
     for slot in objects(manifest["slots"]):
         planned += 1
         trial = directory / "trials" / str(slot["id"])
+        if matched_enabled:
+            matched = trial / "matched-planner"
+            matched_claimed += int((matched / "claim.json").exists())
+            persisted_requests += len(list((matched / "calls").glob("call-*/request.json")))
+            persisted_call_results += len(list((matched / "calls").glob("call-*/metadata.json")))
+            if (matched / "result.json").exists():
+                record = read_object(matched / "result.json")
+                matched_closed += 1
+                matched_calls += int(cast(int, record["actual_provider_calls"]))
+                status = str(object_value(record["branch"])["status"])
+                counts["D"][status] = cast(int, counts["D"].get(status, 0)) + 1
         claimed += int((trial / "claim.json").exists())
         persisted_requests += len(list((trial / "calls").glob("call-*/request.json")))
         persisted_call_results += len(list((trial / "calls").glob("call-*/metadata.json")))
@@ -190,6 +221,12 @@ def summarize(directory: Path) -> JSONObject:
         "unclosed_claims": claimed - closed,
         "unstarted": planned - claimed,
         "closed_trial_provider_calls": closed_trial_calls,
+        "matched_planner_closed": matched_closed,
+        "matched_planner_claimed": matched_claimed,
+        "matched_planner_unclosed": matched_claimed - matched_closed,
+        "matched_planner_not_started": planned - matched_claimed if matched_enabled else 0,
+        "matched_planner_provider_calls": matched_calls,
+        "total_closed_provider_calls": closed_trial_calls + matched_calls,
         "persisted_provider_requests": persisted_requests,
         "persisted_provider_call_results": persisted_call_results,
         "requests_without_call_result": persisted_requests - persisted_call_results,
@@ -210,6 +247,7 @@ def main() -> None:
     prepare.add_argument("--output", type=Path, required=True)
     prepare.add_argument("--split", choices=["development", "evaluation"], required=True)
     prepare.add_argument("--repetitions", type=int, default=1)
+    prepare.add_argument("--matched-planner", action="store_true")
     run = sub.add_parser("run")
     run.add_argument("--repo", type=Path, required=True)
     run.add_argument("--directory", type=Path, required=True)
@@ -221,7 +259,14 @@ def main() -> None:
     summary.add_argument("--directory", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "freeze":
-        freeze(args.repo.resolve(), args.cases, args.output, args.split, args.repetitions)
+        freeze(
+            args.repo.resolve(),
+            args.cases,
+            args.output,
+            args.split,
+            args.repetitions,
+            matched_planner=args.matched_planner,
+        )
     elif args.command == "run":
         run_slot(args.repo.resolve(), args.directory, args.slot)
     elif args.command == "blind":

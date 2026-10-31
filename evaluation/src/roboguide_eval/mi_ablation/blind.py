@@ -10,6 +10,7 @@ from typing import cast
 from mission.models import JSONObject, JSONValue
 
 from roboguide_eval.mi_ablation.evidence import digest, read_object, write_new
+from roboguide_eval.mi_ablation.matched import POLICY
 from roboguide_eval.mi_ablation.scoring import object_value, objects
 
 
@@ -27,7 +28,17 @@ def export_blind(directory: Path, output: Path, seed: int = 20261030) -> JSONObj
         result, public_input = read_object(trial / "result.json"), read_object(trial / "input.json")
         if result["input_digest"] != digest(public_input):
             raise ValueError("trial public input digest mismatch")
-        for branch, raw in object_value(result["branches"]).items():
+        branches = dict(object_value(result["branches"]))
+        if manifest.get("matched_planner_policy") == POLICY:
+            matched_path = trial / "matched-planner/result.json"
+            if not matched_path.exists():
+                incomplete.append(str(slot["id"]) + ":D")
+            else:
+                matched = read_object(matched_path)
+                if matched.get("source_result_digest") != digest(result):
+                    raise ValueError("matched Planner belongs to another source result")
+                branches["D"] = matched["branch"]
+        for branch, raw in branches.items():
             record = object_value(raw)
             plan = record["plan"]
             if plan is None:

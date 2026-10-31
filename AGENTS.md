@@ -2095,6 +2095,11 @@ never enter Provider input; passing them remains pending independent semantic re
 original calls, so physical billing and logical per-branch costs stay distinct. Raw experiments
 remain local; no model score, physical success or formal E1/E2/E6 result follows from fake-transport
 tests or candidate acceptance. See `evaluation/docs/mi-ablation-v0.1.md`.
+Opted-in `matched.py` shares the complete A prefix and spends C's remaining call count
+on independent Planner samples, selecting the last structurally valid output without semantic
+scores or Review feedback. D has separate receipts, pending counts and blind-source checks;
+old manifests remain ABC-only. Candidate compositions are synthetic and require independent
+semantic assessment, never automatic gold labels. See `evaluation/docs/mi-ablation-v0.2.md`.
 
 For evaluation harness changes, run:
 

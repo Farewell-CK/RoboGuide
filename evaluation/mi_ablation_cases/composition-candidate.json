@@ -1,0 +1,1551 @@
+{
+  "schema_version": "roboguide.mi-ablation-cases/v0.1",
+  "design": "24 author-designed synthetic constraint compositions, six shared families; not externally held-out tasks or independent physical workloads",
+  "model_output_used_for_case_design": true,
+  "design_provenance": "Designed after reviewing the 12-case development and 8-pair Reviewer/Repairer diagnostics; no new Provider responses used. Known mechanism examples are not held-out.",
+  "label_status": "author candidate rubrics; independent task/semantic review pending",
+  "cases": [
+    {
+      "id": "composition-crossed-bindings",
+      "template_id": "crossed-bindings",
+      "family": "entities",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒从库A搬到台Y，把蓝盒从库B搬到台X。",
+        "constraints": [],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台Y"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台X"
+            }
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "不得按名称相似性或默认顺序交叉错配对象/目的地。"
+      ]
+    },
+    {
+      "id": "composition-same-destination",
+      "template_id": "same-destination",
+      "family": "entities",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒从库A和蓝盒从库B分别搬到共用台。",
+        "constraints": [],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "共用台"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "共用台"
+            }
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "目的地相同不能丢弃一个对象，也不自动需要持续协作。"
+      ]
+    },
+    {
+      "id": "composition-no-object-work",
+      "template_id": "no-object-work",
+      "family": "entities",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "到检查台并完成质检模型的推理，两件事互不依赖。",
+        "constraints": [
+          "不得搬运任何物体。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "mobility.move@v1",
+            "parameters": {
+              "destination": "检查台"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "independent"
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "move/navigate等价表达可人工接受；不能新增object.relocate。"
+      ]
+    },
+    {
+      "id": "composition-three-goal-coverage",
+      "template_id": "three-goal-coverage",
+      "family": "entities",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒送到台X、蓝盒送到台Y、绿盒送到台Z，分别从库A、库B、库C取件。",
+        "constraints": [],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台Y"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "绿盒",
+              "source": "库C",
+              "destination": "台Z"
+            }
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "保留三目标，不强制三个Actor或具体机器人。"
+      ]
+    },
+    {
+      "id": "composition-ordered-deliveries-and-infer",
+      "template_id": "ordered-deliveries-and-infer",
+      "family": "dependencies",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "先把赤盒从库A送到台X，完成后再把蓝盒从库B送到台Y；另外完成质检模型推理。",
+        "constraints": [
+          "推理与两次搬运没有执行期依赖或前后要求。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台Y"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        },
+        {
+          "id": "condition-4",
+          "kind": "precedence",
+          "before": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "after": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台Y"
+            }
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "必须有两搬运先后关系；不能给独立推理增加顺序或requires-active。"
+      ]
+    },
+    {
+      "id": "composition-prepare-infer-observe",
+      "template_id": "prepare-infer-observe",
+      "family": "dependencies",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "先准备质检准备，完成后运行质检模型；推理完成后检查“检查记录存在”。",
+        "constraints": [],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.prepare@v1",
+            "parameters": {
+              "plan": "质检准备"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "operation",
+          "selector": {
+            "operation": "observation.verify@v1",
+            "parameters": {
+              "expected": "检查记录存在"
+            }
+          }
+        },
+        {
+          "id": "condition-4",
+          "kind": "precedence",
+          "before": {
+            "operation": "compute.prepare@v1",
+            "parameters": {
+              "plan": "质检准备"
+            }
+          },
+          "after": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        },
+        {
+          "id": "condition-5",
+          "kind": "precedence",
+          "before": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          },
+          "after": {
+            "operation": "observation.verify@v1",
+            "parameters": {
+              "expected": "检查记录存在"
+            }
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "检查动作是读取状态，不是主动制造检查记录；允许传递DAG表达。"
+      ]
+    },
+    {
+      "id": "composition-join-two-deliveries",
+      "template_id": "join-two-deliveries",
+      "family": "dependencies",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒从库A送台X、蓝盒从库B送台Y，两次交付都完成后运行质检模型。",
+        "constraints": [
+          "两次交付之间无先后要求。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台Y"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        },
+        {
+          "id": "condition-4",
+          "kind": "precedence",
+          "before": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "after": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        },
+        {
+          "id": "condition-5",
+          "kind": "precedence",
+          "before": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台Y"
+            }
+          },
+          "after": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "汇合必须等待两前提，不引入两搬运之间依赖。"
+      ]
+    },
+    {
+      "id": "composition-fork-after-prepare",
+      "template_id": "fork-after-prepare",
+      "family": "dependencies",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "先准备质检准备，完成后分别运行甲模型和乙模型。",
+        "constraints": [
+          "两次推理互不依赖。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.prepare@v1",
+            "parameters": {
+              "plan": "质检准备"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "甲模型"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "乙模型"
+            }
+          }
+        },
+        {
+          "id": "condition-4",
+          "kind": "precedence",
+          "before": {
+            "operation": "compute.prepare@v1",
+            "parameters": {
+              "plan": "质检准备"
+            }
+          },
+          "after": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "甲模型"
+            }
+          }
+        },
+        {
+          "id": "condition-5",
+          "kind": "precedence",
+          "before": {
+            "operation": "compute.prepare@v1",
+            "parameters": {
+              "plan": "质检准备"
+            }
+          },
+          "after": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "乙模型"
+            }
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "共同前置不等于两推理必须持续协作。"
+      ]
+    },
+    {
+      "id": "composition-unequal-payloads",
+      "template_id": "unequal-payloads",
+      "family": "capability",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒从库A送台X、蓝盒从库B送台Y。",
+        "constraints": [
+          "赤盒要求搬运能力至少支持800克，蓝盒要求至少2400克。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台Y"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "capability_constraint",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "contract": "object.relocate@v1",
+          "constraint": {
+            "attribute": "max-payload-grams",
+            "operator": "at-least",
+            "value": 800
+          }
+        },
+        {
+          "id": "condition-4",
+          "kind": "capability_constraint",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台Y"
+            }
+          },
+          "contract": "object.relocate@v1",
+          "constraint": {
+            "attribute": "max-payload-grams",
+            "operator": "at-least",
+            "value": 2400
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "不要将较低载荷用于两者；过度提高赤盒门槛也需检查依据。"
+      ]
+    },
+    {
+      "id": "composition-explicit-floor-payload",
+      "template_id": "explicit-floor-payload",
+      "family": "capability",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒从一楼库A搬到二楼台X。",
+        "constraints": [
+          "完整搬运能力必须支持跨楼层，且至少支持1800克。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "capability_constraint",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "contract": "object.relocate@v1",
+          "constraint": {
+            "attribute": "supports-floor-transition",
+            "operator": "equals",
+            "value": true
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "capability_constraint",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "contract": "object.relocate@v1",
+          "constraint": {
+            "attribute": "max-payload-grams",
+            "operator": "at-least",
+            "value": 1800
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "楼层需求由任务明确给出，不需猜测机器起点。"
+      ]
+    },
+    {
+      "id": "composition-one-role-floor",
+      "template_id": "one-role-floor",
+      "family": "capability",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒从库A送台X，把蓝盒从库B送台Y。",
+        "constraints": [
+          "仅赤盒搬运必须支持跨楼层；蓝盒至少需支持600克载荷，未要求其跨楼层。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台Y"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "capability_constraint",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "contract": "object.relocate@v1",
+          "constraint": {
+            "attribute": "supports-floor-transition",
+            "operator": "equals",
+            "value": true
+          }
+        },
+        {
+          "id": "condition-4",
+          "kind": "capability_constraint",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台Y"
+            }
+          },
+          "contract": "object.relocate@v1",
+          "constraint": {
+            "attribute": "max-payload-grams",
+            "operator": "at-least",
+            "value": 600
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "不得把一项工作的能力要求机械扩展到另一项。"
+      ]
+    },
+    {
+      "id": "composition-capability-and-order",
+      "template_id": "capability-and-order",
+      "family": "capability",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒从库A送台X，再把蓝盒从库B送台Y。",
+        "constraints": [
+          "赤盒要求至少1600克载荷；第二次交付必须在第一次完成后开始。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台Y"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "capability_constraint",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "contract": "object.relocate@v1",
+          "constraint": {
+            "attribute": "max-payload-grams",
+            "operator": "at-least",
+            "value": 1600
+          }
+        },
+        {
+          "id": "condition-4",
+          "kind": "precedence",
+          "before": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "after": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台Y"
+            }
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "不能为简化依赖删除任一目标或载荷。"
+      ]
+    },
+    {
+      "id": "composition-parallel-compute-delivery",
+      "template_id": "parallel-compute-delivery",
+      "family": "coordination",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒从库A搬到台X，同时完成质检模型推理。",
+        "constraints": [
+          "两项工作各自完成目标，不要求另一execution持续Active。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "independent"
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "同时可执行不等于必须维持requires-active；资源竞争由Control协调。"
+      ]
+    },
+    {
+      "id": "composition-observer-and-independent-delivery",
+      "template_id": "observer-and-independent-delivery",
+      "family": "coordination",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "执行质检模型推理，并以continuous模式观察安全；另将赤盒从库A搬到台X。",
+        "constraints": [
+          "推理期间安全观察execution必须保持Active，只需共享逻辑执行状态。",
+          "赤盒搬运与该协作没有执行期依赖。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "safety.observe@v1",
+            "parameters": {
+              "mode": "continuous"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          }
+        },
+        {
+          "id": "condition-4",
+          "kind": "requires_active",
+          "source": {
+            "operation": "safety.observe@v1",
+            "parameters": {
+              "mode": "continuous"
+            }
+          },
+          "target": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "搬运不能被无依据加入协作依赖；不能将实际协作整体降级。"
+      ]
+    },
+    {
+      "id": "composition-observer-two-inferences",
+      "template_id": "observer-two-inferences",
+      "family": "coordination",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "运行甲模型和乙模型，并提供continuous安全观察。",
+        "constraints": [
+          "两次推理各自运行期间，安全观察execution都必须保持Active，只共享逻辑执行状态。",
+          "两次推理彼此没有执行依赖。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "safety.observe@v1",
+            "parameters": {
+              "mode": "continuous"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "甲模型"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "乙模型"
+            }
+          }
+        },
+        {
+          "id": "condition-4",
+          "kind": "requires_active",
+          "source": {
+            "operation": "safety.observe@v1",
+            "parameters": {
+              "mode": "continuous"
+            }
+          },
+          "target": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "甲模型"
+            }
+          }
+        },
+        {
+          "id": "condition-5",
+          "kind": "requires_active",
+          "source": {
+            "operation": "safety.observe@v1",
+            "parameters": {
+              "mode": "continuous"
+            }
+          },
+          "target": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "乙模型"
+            }
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "依赖方向为观察到每个推理；不要在推理之间添加Active关系。"
+      ]
+    },
+    {
+      "id": "composition-prepare-then-real-cooperation",
+      "template_id": "prepare-then-real-cooperation",
+      "family": "coordination",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "先准备质检准备，准备完成后运行质检模型，并提供continuous安全观察。",
+        "constraints": [
+          "推理运行期间安全观察execution必须保持Active；仅共享执行状态。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.prepare@v1",
+            "parameters": {
+              "plan": "质检准备"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "operation",
+          "selector": {
+            "operation": "safety.observe@v1",
+            "parameters": {
+              "mode": "continuous"
+            }
+          }
+        },
+        {
+          "id": "condition-4",
+          "kind": "precedence",
+          "before": {
+            "operation": "compute.prepare@v1",
+            "parameters": {
+              "plan": "质检准备"
+            }
+          },
+          "after": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        },
+        {
+          "id": "condition-5",
+          "kind": "requires_active",
+          "source": {
+            "operation": "safety.observe@v1",
+            "parameters": {
+              "mode": "continuous"
+            }
+          },
+          "target": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "区分先后前提与持续依赖；不要给DAG有序端点添加并发relation。"
+      ]
+    },
+    {
+      "id": "composition-release-and-deadline",
+      "template_id": "release-and-deadline",
+      "family": "resources-time",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒从库A搬到台X。",
+        "constraints": [
+          "搬运最早在Mission接受后10000毫秒开始，必须在接受后90000毫秒内完成。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "timing",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "field": "earliest_start_offset_ms",
+          "value": 10000
+        },
+        {
+          "id": "condition-3",
+          "kind": "timing",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "field": "completion_deadline_offset_ms",
+          "value": 90000
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "时间锚定Mission接受，不是前一任务完成；等价更严限制需人工判断。"
+      ]
+    },
+    {
+      "id": "composition-different-deadlines",
+      "template_id": "different-deadlines",
+      "family": "resources-time",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒从库A送台X、蓝盒从库B送台Y。",
+        "constraints": [
+          "赤盒必须在Mission接受后60000毫秒内完成，蓝盒在180000毫秒内完成。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台Y"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "timing",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "field": "completion_deadline_offset_ms",
+          "value": 60000
+        },
+        {
+          "id": "condition-4",
+          "kind": "timing",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "蓝盒",
+              "source": "库B",
+              "destination": "台Y"
+            }
+          },
+          "field": "completion_deadline_offset_ms",
+          "value": 180000
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "不能交换期限，不能把较短期限无依据扩展至蓝盒。"
+      ]
+    },
+    {
+      "id": "composition-compute-units-with-order",
+      "template_id": "compute-units-with-order",
+      "family": "resources-time",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "先准备质检准备，再运行质检模型。",
+        "constraints": [
+          "推理必须在准备完成后进行，并声明至少2单位compute资源需求。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.prepare@v1",
+            "parameters": {
+              "plan": "质检准备"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "operation",
+          "selector": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        },
+        {
+          "id": "condition-3",
+          "kind": "precedence",
+          "before": {
+            "operation": "compute.prepare@v1",
+            "parameters": {
+              "plan": "质检准备"
+            }
+          },
+          "after": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          }
+        },
+        {
+          "id": "condition-4",
+          "kind": "resource",
+          "selector": {
+            "operation": "compute.infer@v1",
+            "parameters": {
+              "model": "质检模型"
+            }
+          },
+          "resource_kind": "compute",
+          "units": 2
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "资源数量是明确任务要求；不等于选择ResourceId或具体Node。"
+      ]
+    },
+    {
+      "id": "composition-space-with-capability",
+      "template_id": "space-with-capability",
+      "family": "resources-time",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒从库A搬到台X。",
+        "constraints": [
+          "声明1单位space资源；搬运能力至少支持1200克载荷；Mission接受后120000毫秒内完成。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "operation",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          }
+        },
+        {
+          "id": "condition-2",
+          "kind": "resource",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "resource_kind": "space",
+          "units": 1
+        },
+        {
+          "id": "condition-3",
+          "kind": "capability_constraint",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "contract": "object.relocate@v1",
+          "constraint": {
+            "attribute": "max-payload-grams",
+            "operator": "at-least",
+            "value": 1200
+          }
+        },
+        {
+          "id": "condition-4",
+          "kind": "timing",
+          "selector": {
+            "operation": "object.relocate@v1",
+            "parameters": {
+              "object": "赤盒",
+              "source": "库A",
+              "destination": "台X"
+            }
+          },
+          "field": "completion_deadline_offset_ms",
+          "value": 120000
+        }
+      ],
+      "expected_disposition": "ready",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "三种要求必须同时保留；精确数量检查只是提示，语义等价需人工。"
+      ]
+    },
+    {
+      "id": "composition-unknown-second-destination",
+      "template_id": "unknown-second-destination",
+      "family": "missing-evidence",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒从库A送到台X；还需把蓝盒从库B送走，但蓝盒的目的地尚未确定。",
+        "constraints": [],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "requires_missing_evidence"
+        }
+      ],
+      "expected_disposition": "clarification",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "不能复制赤盒目的地或删掉蓝盒；暴露用户语义缺口。"
+      ]
+    },
+    {
+      "id": "composition-missing-pose-contract",
+      "template_id": "missing-pose-contract",
+      "family": "missing-evidence",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "两项移动工作分别到检查台和充电台，并在执行期间持续共享彼此位姿。",
+        "constraints": [
+          "任务确实需要位姿共享；没有提供State export ID或payload schema。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "requires_missing_evidence"
+        }
+      ],
+      "expected_disposition": "reject",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "保持真实共享需求并拒绝缺少部署合同；不能用execution view替代或编造ID。"
+      ]
+    },
+    {
+      "id": "composition-contradictory-time-window",
+      "template_id": "contradictory-time-window",
+      "family": "missing-evidence",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "把赤盒从库A搬到台X。",
+        "constraints": [
+          "不得早于Mission接受后120000毫秒开始，但必须在60000毫秒内完成。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "requires_missing_evidence"
+        }
+      ],
+      "expected_disposition": "clarification",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "不能悄悄修改任一时间或生成不可执行窗口；保留矛盾。"
+      ]
+    },
+    {
+      "id": "composition-unsupported-release-operation",
+      "template_id": "unsupported-release-operation",
+      "family": "missing-evidence",
+      "variant": 1,
+      "split": "evaluation",
+      "grounded_intent": {
+        "objective": "抓住并释放样品，以确认夹爪松开动作。",
+        "constraints": [
+          "必须执行独立的释放动作；当前目录没有发布release操作。"
+        ],
+        "assumptions": []
+      },
+      "checks": [
+        {
+          "id": "condition-1",
+          "kind": "requires_missing_evidence"
+        }
+      ],
+      "expected_disposition": "reject",
+      "human_review_required": [
+        "覆盖全部目标、限制和禁止的副作用；不要把必要条件通过当完整正确",
+        "允许合法等价操作和组织；不以Task/Actor数量匹配唯一参考计划",
+        "检查额外操作、无依据约束、证据编造、满足策略和执行/终态区别",
+        "不能假造release或把任务偷换成object.relocate；说明catalog缺口。"
+      ]
+    }
+  ]
+}

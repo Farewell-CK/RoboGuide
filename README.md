@@ -1614,6 +1614,8 @@ uv run pytest -q
 MI 的 [Reviewer/Repairer 配对组件消融](evaluation/docs/mi-ablation-v0.1.md)复用生产
 Responses 适配器，共享初始草案与 Review，保留私有评分和盲审包。它不提交 Controller，
 不启动 Node/模拟器；必要条件通过不等于语义正确或物理成功，原始结果保持独立本地归档。
+[v0.2 调用数匹配对照](evaluation/docs/mi-ablation-v0.2.md)显式启用 D：共享完整初稿成本，
+按 C 后续调用数独立重新规划，固定取最后一份结构合法计划，禁止按语义评分挑结果。
 
 仓库进入实验驱动阶段后，[`evaluation/`](evaluation/) 提供独立的 Eval Harness：
 
