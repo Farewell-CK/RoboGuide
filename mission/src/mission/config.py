@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from mission.provider_mission_plan import ECHO_OBJECTIVE_PROFILE, PROVIDER_PLAN_PROFILES
 from mission.satisfaction_policy import MissionSatisfactionPolicy, MissionSatisfactionPolicyError
 
 
@@ -72,6 +73,7 @@ class PromptSettings:
     planner_path: Path
     reviewer_path: Path
     repairer_path: Path
+    host_objective_path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +91,12 @@ class MissionSettings:
     llm: LlmSettings
     provider: ProviderSettings
     satisfaction_policy: MissionSatisfactionPolicy | None = None
+    provider_plan_profile: str = ECHO_OBJECTIVE_PROFILE
+
+    def __post_init__(self) -> None:
+        """Refuse unknown output profiles before any Provider call or plan assembly."""
+        if self.provider_plan_profile not in PROVIDER_PLAN_PROFILES:
+            raise MissionConfigError("unsupported mission.provider_plan_profile")
 
 
 def _table(value: object, path: str) -> dict[str, object]:
@@ -160,6 +168,11 @@ def load_settings(
     except MissionSatisfactionPolicyError as error:
         raise MissionConfigError(str(error)) from error
     return MissionSettings(
+        provider_plan_profile=_string(
+            {"provider_plan_profile": mission.get("provider_plan_profile", ECHO_OBJECTIVE_PROFILE)},
+            "provider_plan_profile",
+            "mission",
+        ),
         satisfaction_policy=satisfaction_policy,
         planner=_string(mission, "planner", "mission"),
         contract_version=_string(mission, "contract_version", "mission"),
@@ -178,6 +191,16 @@ def load_settings(
             planner_path=root / _string(prompts, "planner_path", "mission.prompts"),
             reviewer_path=root / _string(prompts, "reviewer_path", "mission.prompts"),
             repairer_path=root / _string(prompts, "repairer_path", "mission.prompts"),
+            host_objective_path=root
+            / _string(
+                {
+                    "host_objective_path": prompts.get(
+                        "host_objective_path", "mission/prompts/v0/host-objective.md"
+                    )
+                },
+                "host_objective_path",
+                "mission.prompts",
+            ),
         ),
         llm=LlmSettings(
             model_provider=provider_name,

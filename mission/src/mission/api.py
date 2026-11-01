@@ -138,6 +138,7 @@ def build_engine(
         max_deployment_recovery_attempts=service_settings.max_deployment_recovery_attempts,
         deployment_recovery_timeout_ms=service_settings.deployment_recovery_timeout_ms,
         provider_identity={
+            "provider_plan_profile": planner_settings.provider_plan_profile,
             "mission_configuration_digest": _file_digest(mission_config),
             "service_configuration_digest": _file_digest(service_config),
             "catalog_source_digest": _file_digest(planner_settings.capability_catalog_path),
@@ -150,6 +151,12 @@ def build_engine(
                 "planner": _file_digest(planner_settings.prompts.planner_path),
                 "reviewer": _file_digest(planner_settings.prompts.reviewer_path),
                 "repairer": _file_digest(planner_settings.prompts.repairer_path),
+                **(
+                    {"provider_profile": _file_digest(planner_settings.prompts.host_objective_path)}
+                    if planner_settings.provider_plan_profile == "host-objective-v1"
+                    and planner_settings.prompts.host_objective_path is not None
+                    else {}
+                ),
             },
             "satisfaction_policy_digest": planner_settings.satisfaction_policy.to_json()[
                 "policy_digest"

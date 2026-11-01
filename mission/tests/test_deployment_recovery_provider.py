@@ -18,6 +18,7 @@ from mission.deployment_recovery import (
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.provider_errors import MissionIdentityError, MissionProviderError
+from mission.provider_mission_plan import ECHO_OBJECTIVE_PROFILE
 from mission.rejected_draft import RejectedPlanError
 from mission.responses import ResponsesMissionRepairer
 from mission.submission_evidence import canonical_plan_digest
@@ -42,7 +43,10 @@ def frozen_provider_clock(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def invoke_decision(
-    transport: FakeTransport, document: JSONObject | None = None
+    transport: FakeTransport,
+    document: JSONObject | None = None,
+    *,
+    profile: str = ECHO_OBJECTIVE_PROFILE,
 ) -> tuple[DeploymentRecoveryDecision, JSONObject]:
     """Call the real port with one attributed negative assessment and a durable pending attempt."""
     document = document or _v0_8_plan()
@@ -82,7 +86,9 @@ def invoke_decision(
         ),
     )
     repairer = ResponsesMissionRepairer(
-        _local_settings(), {"OPENAI_API_KEY": "test-only-key"}, transport
+        replace(_local_settings(), provider_plan_profile=profile),
+        {"OPENAI_API_KEY": "test-only-key"},
+        transport,
     )
     return repairer.reconsider_deployment(
         plan.mission.mission_id,

@@ -1,4 +1,6 @@
 [mission]
+# Optional ADR-0231 Provider draft profile; omission keeps strict legacy echo.
+# provider_plan_profile = "host-objective-v1"
 planner = "llm"
 contract_version = "roboguide.mission-plan/v0.8"
 schema_path = "contracts/mission/v0.8/mission-plan.schema.json"

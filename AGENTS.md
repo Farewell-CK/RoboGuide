@@ -1,3 +1,12 @@
+ADR-0231 adds opt-in `mission.provider_plan_profile = "host-objective-v1"`.
+The Provider draft must carry its exact profile and omit mission.objective; MI assembles that
+field only from this invocation's frozen GroundedIntent. All model writers share the same
+boundary and full canonical/Catalog/goal/Review/Control gates. Legacy echo remains default;
+model-supplied goals are never overwritten. Bounded raw/assembled/intent provenance retains
+explicit truncation. The versioned profile Prompt is `mission/prompts/v0/host-objective.md`;
+`tools/e2-generic/mission-dag-host-objective-gpt-6.1-sol.toml` is the opt-in example.
+See `docs/development/mi-host-objective-v0.1.md` for branch validation.
+
 ADR-0221 verifies retired local Controller projections against exact completed private Archive
 packages in the same uniquely paired parent/member Root when protected/tail coverage has moved.
 Original authority, qualified owner/hash/size, complete package checks, conflicting-prefix refusal
