@@ -392,3 +392,138 @@ def test_opt_in_example_changes_only_the_provider_profile() -> None:
     base = load_settings(Path("tools/e2-generic/mission-dag-gpt-6.1-sol.toml"))
     selected = load_settings(Path("tools/e2-generic/mission-dag-host-objective-gpt-6.1-sol.toml"))
     assert selected == replace(base, provider_plan_profile=HOST_OBJECTIVE_PROFILE)
+
+
+@pytest.mark.parametrize("route", ["offline", "路" * 256])
+def test_optional_assembly_never_reduces_original_provider_call_budget(route: str) -> None:
+    """Optional raw observations yield space before original admission, including UTF-8 routes."""
+    from mission.provenance import (
+        MAX_PROVIDER_CALLS,
+        MAX_TRACE_BYTES,
+        ensure_provider_budget,
+        provider_call,
+        record_plan_assembly,
+        snapshot,
+        validate_snapshot,
+    )
+
+    def exercise(enrich: bool) -> list[JSONObject]:
+        """Spend the real admission guard until its original count or byte bound refuses."""
+        with trace_deliberation("request", "input"):
+            retained = None
+            retained_digest = None
+            for index in range(MAX_PROVIDER_CALLS):
+                try:
+                    ensure_provider_budget()
+                except ValueError:
+                    break
+                provider_call(
+                    {"model": route}, {"model": route, "id": route}, None, index, index + 1
+                )
+                if enrich:
+                    record_plan_assembly(
+                        {"draft": "x" * 7000}, {"plan": True}, {"objective": "original"}
+                    )
+                trace = current_trace("request")
+                assert trace is not None
+                assert sum(len(item.encode()) for item in trace.calls) <= MAX_TRACE_BYTES
+                if index == 1:
+                    retained = snapshot("{}", "request", "input", "request", None, 1, "drafted")
+                    retained_digest = canonical_plan_digest(retained)
+            with pytest.raises(ValueError, match="before dispatch"):
+                ensure_provider_budget()
+            assert retained is not None
+            assert canonical_plan_digest(retained) == retained_digest
+            validate_snapshot(retained)
+            trace = current_trace("request")
+            assert trace is not None
+            calls = [cast(JSONObject, json.loads(item)) for item in trace.calls]
+            for call in calls:
+                call.pop("call_id")
+                call.pop("plan_assembly", None)
+            return calls
+
+    plain, enriched = exercise(False), exercise(True)
+    assert enriched == plain
+    if route == "offline":
+        assert len(enriched) == MAX_PROVIDER_CALLS
+
+
+def test_profile_prompt_scope_preserves_role_execution_objectives() -> None:
+    """Only the Mission header is host-owned; missing action meaning must still be rejected."""
+    prompt = Path("mission/prompts/v0/host-objective.md").read_text()
+    assert "Retain every required Role execution_intent.objective" in prompt
+    assert "Never emit an objective field" not in prompt
+    raw = _draft()
+    mission_id = cast(str, cast(JSONObject, raw["mission"])["id"])
+    role = cast(list[JSONObject], cast(list[JSONObject], raw["tasks"])[0]["roles"])[0]
+    del cast(JSONObject, role["execution_intent"])["objective"]
+    settings = replace(_local_settings(), provider_plan_profile=HOST_OBJECTIVE_PROFILE)
+    with pytest.raises(RejectedPlanError, match="objective"):
+        ResponsesMissionPlanner(
+            settings, {"OPENAI_API_KEY": "offline-only"}, FakeTransport([_response(raw)])
+        ).plan(mission_id, GroundedIntent("original", (), ()), _current_catalog(), _grounding())
+
+
+def test_actual_runtime_composition_fences_profile_prompt_drift_on_sql_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Actual compose/TLS/SQL retains original work when only the new Prompt changes on restart."""
+    import shutil
+
+    from mission.runtime_replanning_cli import compose
+    from mission.runtime_work_store import RuntimeWorkError
+    from test_http_security import _pki
+
+    for relative in ("mission/prompts/v0", "contracts/mission/v0.8", "contracts/capability/v0.3"):
+        shutil.copytree(relative, tmp_path / relative)
+    shutil.copyfile("uv.lock", tmp_path / "uv.lock")
+    config = tmp_path / "config/mission.toml"
+    config.parent.mkdir()
+    settings = _local_settings()
+    source = Path("config/mission.toml").read_text()
+    source = source.replace("[mission]\n", '[mission]\nprovider_plan_profile="host-objective-v1"\n')
+    original_endpoint = load_settings(Path("config/mission.toml")).provider.base_url
+    config.write_text(source.replace(original_endpoint, settings.provider.base_url))
+    _pki(tmp_path / "pki")
+    profile = tmp_path / "worker.toml"
+    profile.write_text("""schema_version = "roboguide.runtime-mi-worker/v0.1"
+state_db = "work.sqlite3"
+mission_config = "config/mission.toml"
+request_ids = []
+[service]
+endpoint = "https://localhost:65535"
+tenant = "test-tenant"
+principal = "service"
+certificate = "pki/tenant-a.crt"
+key = "pki/tenant-a.key"
+ca = "pki/ca.crt"
+[proposer]
+endpoint = "https://localhost:65535"
+tenant = "test-tenant"
+principal = "proposer"
+certificate = "pki/tenant-a.crt"
+key = "pki/tenant-a.key"
+ca = "pki/ca.crt"
+""")
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-only")
+    store, worker, _, _ = compose(profile, tmp_path)
+    original_identity = deepcopy(worker.identity)
+    try:
+        store.admit("original-work", {"source": "original"}, original_identity, 10000)
+        assert store.effects("original-work") == []
+    finally:
+        store.close()
+    prompt = tmp_path / "mission/prompts/v0/host-objective.md"
+    prompt.write_text(prompt.read_text() + "\nChanged profile instruction.\n")
+    restored, next_worker, _, _ = compose(profile, tmp_path)
+    try:
+        assert next_worker.identity["config_digest"] == original_identity["config_digest"]
+        assert next_worker.identity["code_digest"] == original_identity["code_digest"]
+        assert next_worker.identity["prompt_digest"] != original_identity["prompt_digest"]
+        with pytest.raises(RuntimeWorkError, match="configuration drift"):
+            restored.original("original-work", next_worker.identity)
+        assert restored.original("original-work", original_identity) == {"source": "original"}
+        assert restored.effects("original-work") == []
+    finally:
+        restored.close()

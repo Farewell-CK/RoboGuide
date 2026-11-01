@@ -83,11 +83,37 @@ def current_trace(request_id: str) -> ProviderTrace | None:
 def ensure_provider_budget() -> None:
     """Refuse an additional provider side effect before bounded evidence storage is exhausted."""
     trace = _TRACE.get()
-    if trace is not None and (
-        len(trace.calls) >= MAX_PROVIDER_CALLS
-        or sum(len(call.encode()) for call in trace.calls) + MAX_CALL_BYTES > MAX_TRACE_BYTES
-    ):
-        raise ValueError("provider provenance call limit exhausted before dispatch")
+    if trace is not None:
+        original_bytes = 0
+        for encoded in trace.calls:
+            call = json.loads(encoded)
+            call.pop("plan_assembly", None)
+            original_bytes += len(json.dumps(call, sort_keys=True, separators=(",", ":")).encode())
+        if (
+            len(trace.calls) >= MAX_PROVIDER_CALLS
+            or original_bytes + MAX_CALL_BYTES > MAX_TRACE_BYTES
+        ):
+            raise ValueError("provider provenance call limit exhausted before dispatch")
+        _trim_optional_assemblies(trace, MAX_CALL_BYTES)
+
+
+def _trim_optional_assemblies(trace: ProviderTrace, reserve_bytes: int) -> None:
+    """Spend only spare trace bytes on optional assembly observations, never original call slots.
+
+    Future snapshots may omit older optional observations; previously persisted
+    snapshots and original request/response metadata remain immutable.
+    """
+    total = sum(len(call.encode()) for call in trace.calls)
+    for index, encoded in enumerate(trace.calls):
+        if total + reserve_bytes <= MAX_TRACE_BYTES:
+            return
+        call = json.loads(encoded)
+        if "plan_assembly" not in call:
+            continue
+        del call["plan_assembly"]
+        compact = json.dumps(call, sort_keys=True, separators=(",", ":"))
+        total += len(compact.encode()) - len(encoded.encode())
+        trace.calls[index] = compact
 
 
 def provider_call(
@@ -144,9 +170,9 @@ def record_plan_assembly(
         else {"truncated": True, "byte_length": raw_bytes},
     }
     encoded = json.dumps(call, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    if len(encoded.encode("utf-8")) > MAX_CALL_BYTES:
-        raise ValueError("provider plan assembly exceeds the original evidence byte budget")
-    trace.calls[-1] = encoded
+    if len(encoded.encode("utf-8")) <= MAX_CALL_BYTES:
+        trace.calls[-1] = encoded
+        _trim_optional_assemblies(trace, 0)
 
 
 def snapshot(

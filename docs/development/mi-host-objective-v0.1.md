@@ -64,7 +64,9 @@ PY
 3. 组装后的 draft/mission-plan.json 必须保留完整原 objective，不能只留摘要或重写内容。
    Reviewer 请求必须含该完整计划和原始 grounded_intent、同一份 grounding。
 4. 若用了标准 Mission Service，provider provenance 的 plan_assembly 关联 raw/assembled/intent
-   摘要。大草案可明确标 truncated；E2 recorder 的原始 request/response 文件另行保留。
+   摘要。大草案可明确标 truncated；原 trace 空间紧张时可省略可选组装观察，
+   不减少原有模型调用额度，也不删除已持久化历史。缺失观察保持不可用。E2 recorder
+   的原始 request/response 文件另行保留。
 5. schema、未知操作、错误对象/目标条件、来源漂移和执行失败仍须原校验处理。
    有明确 authoritative semantic evidence 的部署按原精确目标门禁检查；纯自然语言的动作
    语义仍依赖独立 Review 和执行验证，不能从目标字段正确推断动作正确。
@@ -77,3 +79,9 @@ PY
 `objective` 应只放已确认目标，用户约束放 constraints。动作知识走 Catalog/部署声明，场景事实
 走有来源的 grounding，执行反馈走有原权限和预算的 runtime replanning context。
 本次宿主组装解决目标复述负担，不会自动把混装长文本解析成可信的结构化上下文。
+
+## 重启身份与提示词范围
+
+运行期 worker 的原 prompt identity 包含启用的 host-objective 附加资产。该资产改变后，
+旧 work 必须被原 identity drift 门禁拒绝；不能用新 Prompt 继续旧调用或重置旧预算。
+附加 Prompt 仅禁止 mission.objective；Role execution_intent.objective 仍是必要的动作语义。

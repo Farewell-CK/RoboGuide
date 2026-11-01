@@ -40,6 +40,8 @@ V2/ADR-0037 已将目标与带来源的上下文分开。通用 MI 仍要求模�
    超出原 per-call byte budget 的原始内容明确标为 truncated 并保留完整摘要；摘要不
    冒充已留存内容。拒绝草案沿用原 raw/normalized 证据及预算；实际运行期 transport 和
    E2 recorder 继续各自保留原响应。组装观察不提供提交或目标满足权限。
+   原调用准入仍按原 metadata 的计数/字节预算判断；可选组装观察只使用剩余空间。
+   空间紧张时，后续快照可省略较早的可选观察，原调用元数据及已持久化历史不改写。
 
 ## 兼容性与验证
 
@@ -53,3 +55,17 @@ Canonical MissionPlan、Controller、Node 和物理执行格式沿用选定版�
 真实模型输出质量、token/耗时和物理任务结果须在保留原批次的新目录中独立观测。
 
 接入说明：[MI 宿主目标验证指南](../development/mi-host-objective-v0.1.md)。
+
+## 提交后复核修正
+
+对首版 `200e7a4e` 的复核发现并修复三个问题：
+
+- 7,000 字符原始草案内联到 trace 会把原 64 次调用上限提前压到 15 次。可选观察现在
+  在准入前让出空间；相同原 metadata 的 ASCII/Unicode 调用序列保留原计数与字节拒绝点。
+- runtime worker 原 prompt identity 没有纳入新增的 host-objective 资产。现在该文件参与
+  原身份摘要；仅改变它后重启，真实 composition/SQLite 的原 work 即因 drift 拒绝，
+  原 work、预算和 effect 表保留。
+- 附加 Prompt 中不限定范围的 objective 禁止语句可能误导模型省略 Role 的必要字段。
+  现在明确只省略 mission.objective，保留 Role execution_intent.objective。
+
+专项回归通过不代表真实模型会稳定遵循 Prompt，物理批次仍须独立验证。
