@@ -12,7 +12,7 @@ from http.client import HTTPException
 from pathlib import Path
 from typing import Protocol, cast
 
-from mission.capability_catalog import CanonicalCapabilityCatalog
+from mission.capability_catalog import CanonicalCapabilityCatalog, CapabilityCatalogError
 from mission.config import MissionSettings
 from mission.contract_values import MissionPlanError
 from mission.controller import MissionControllerError
@@ -170,7 +170,12 @@ def _validate_plan_output(
             issues.append({"code": code, "path": "/", "message": str(error)})
     if issues:
         raise PlanValidationError(issues)
-    capability_catalog.validate_plan(plan)
+    try:
+        capability_catalog.validate_plan(plan)
+    except CapabilityCatalogError as error:
+        raise PlanValidationError(
+            [{"code": "plan.capability_catalog_invalid", "path": "/", "message": str(error)}]
+        ) from error
     validate_satisfaction_policy(plan, satisfaction_policy, grounding_context.semantic_evidence)
     return plan
 
@@ -549,9 +554,9 @@ class ResponsesMissionPlanner:
         """Run one provider attempt, attaching raw outputs to structure failures.
 
         Provider transport/identity failures stay ``MissionProviderError``
-        and never carry draft payloads; only model-draft structure failures
-        (``MissionPlanError``) are wrapped into ``RejectedPlanError`` with
-        the raw and normalized outputs for evidence and recovery.
+        and never carry draft payloads; model-draft structure and Catalog
+        violations become ``RejectedPlanError`` with the raw and normalized
+        outputs for evidence and recovery.
         """
         _validate_planning_world(self._execution_planning_evidence, grounding_context)
         canonical_schema = self._client._load_schema()

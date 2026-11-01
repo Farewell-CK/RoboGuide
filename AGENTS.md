@@ -2104,6 +2104,10 @@ Current MI requests omit output-token caps across every Responses role and recov
 Active configs/probes follow the same policy; historical evidence and accounting fields remain.
 MI-ablation manifest v0.2 records the omission; capped/v0.1 runs require their original source,
 not silent migration. See `evaluation/docs/mi-ablation-v0.3.md`.
+Responses adapters classify only generated-plan Catalog violations as
+`plan.capability_catalog_invalid` rejected drafts, retaining raw/normalized evidence for the
+existing bounded Planner/Repairer recovery. Catalog loading, Provider, identity and deployment
+configuration failures retain their independent refusal paths; no requirements are auto-filled.
 
 For evaluation harness changes, run:
 

@@ -201,6 +201,44 @@ def test_structural_budget_exhaustion_never_reaches_reviewer(tmp_path: Path) -> 
     )
 
 
+def test_catalog_draft_uses_existing_recovery_without_input_change(tmp_path: Path) -> None:
+    """A model Catalog error stays a preserved draft and receives bounded regeneration."""
+    invalid = _plan(_case())
+    role = objects(objects(invalid["tasks"])[0]["roles"])[0]
+    intent = object_value(role["execution_intent"])
+    intent["operation"] = {"namespace": "compute", "name": "noop", "version": "v1"}
+    intent["parameters"] = {}
+    raw = _provider(invalid)
+    result, transport = _run(tmp_path, [raw, _provider(_plan(_case())), _review()])
+    assert result["error"] is None and result["actual_provider_calls"] == 3
+    payload = json.loads(str(transport.requests[1]["input"]))
+    feedback = payload.pop("prevalidation_recovery_feedback")
+    assert feedback["previous_rejected_provider_output"] == raw
+    assert feedback["validation_errors"][0]["code"] == "plan.capability_catalog_invalid"
+    assert payload == json.loads(str(transport.requests[0]["input"]))
+    saved = read_object(tmp_path / "trial/planner/attempt-0.json")
+    assert saved["provider_output"] == raw and saved["valid"] is False
+
+
+def test_catalog_draft_exhaustion_is_rejection_not_infrastructure_failure(tmp_path: Path) -> None:
+    """Invalid operation requirements exhaust three draft attempts without calling Reviewer."""
+    invalid = _plan(_case())
+    role = objects(objects(invalid["tasks"])[0]["roles"])[0]
+    intent = object_value(role["execution_intent"])
+    intent["operation"] = {"namespace": "compute", "name": "noop", "version": "v1"}
+    intent["parameters"] = {}
+    result, transport = _run(tmp_path, [_provider(invalid)] * 3)
+    assert len(transport.requests) == 3
+    assert object_value(result["error"])["type"] == "RejectedPlanError"
+    assert all(
+        object_value(branch)["status"] == "structure_rejected"
+        for branch in object_value(result["branches"]).values()
+    )
+    for index in range(3):
+        saved = read_object(tmp_path / f"trial/planner/attempt-{index}.json")
+        assert objects(saved["validation_errors"])[0]["code"] == "plan.capability_catalog_invalid"
+
+
 def test_provider_failure_no_retry_and_credentials_redacted(tmp_path: Path) -> None:
     """Infrastructure errors remain unavailable and cannot leak the authorized credential."""
     result, transport = _run(tmp_path, [MissionProviderError(SECRET, status_code=502)])

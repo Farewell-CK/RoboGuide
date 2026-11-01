@@ -726,6 +726,9 @@ requirements；integrated operation 不会把内部 Local How 展开为全局 re
 定义 embodiment taxonomy、结构化 entity schema 或动态 Catalog negotiation，见
 [`ADR-0031`](docs/decisions/0031-canonical-capability-catalog.md) 与
 [`ADR-0034`](docs/decisions/0034-mission-semantic-contract-normalization.md)。
+生成的 Planner/Repairer 草案若违反已加载 Catalog，适配器保留原始和归一化输出，按
+`plan.capability_catalog_invalid` 接入既有有界草案恢复；不会补写能力或接纳非法计划。
+Catalog 文件加载错误、Provider 故障和身份篡改仍保持各自的系统失败边界。
 
 部署可额外提供启动时冻结的抽象能力类别摘要和带 episode/dataset 身份的环境静态事实。
 MI 在同一不可变 Grounding Context 中保留已知事实和未知缺口；尚未 reset 才能确定的机器人

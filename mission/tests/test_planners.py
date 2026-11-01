@@ -30,6 +30,7 @@ from mission.provider_mission_plan import (
     ProviderMissionPlanError,
     normalize_mission_plan_provider_output,
 )
+from mission.rejected_draft import RejectedPlanError
 from mission.request_record import DialogueSpeaker, DialogueTurn, DialogueTurnKind
 from mission.responses import (
     ResponsesMissionInterpreter,
@@ -888,7 +889,7 @@ def test_responses_planner_rejects_unknown_contract_before_review() -> None:
     )
 
     mission = cast(JSONObject, plan_json["mission"])
-    with pytest.raises(CapabilityCatalogError, match="delivery.magic_move@v1"):
+    with pytest.raises(RejectedPlanError, match="delivery.magic_move@v1") as rejected:
         planner.plan(
             cast(str, mission["id"]),
             GroundedIntent(cast(str, mission["objective"]), (), ()),
@@ -897,6 +898,8 @@ def test_responses_planner_rejects_unknown_contract_before_review() -> None:
         )
 
     assert len(transport.requests) == 1
+    assert rejected.value.provider_output == _provider_plan(plan_json)
+    assert rejected.value.validation_errors[0]["code"] == "plan.capability_catalog_invalid"
 
 
 def test_responses_interpreter_preserves_open_questions_before_planning() -> None:
