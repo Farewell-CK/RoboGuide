@@ -2064,17 +2064,7 @@ Native checks freeze successfully built binaries and source files. Use short fre
 sockets, and check the required source case, retained lineage and certificate validity before reusing
 historical process evidence. Commit verified functional changes promptly on the authorized branch.
 
-Do not run the full repository test suite after every small or localized edit. Start with the
-narrowest relevant formatter, linter, type, unit, contract, or process check, and do not repeat an
-unchanged full check after each incremental edit. Expand to cross-package or full-workspace tests
-only when a check fails, the change crosses module boundaries, changes shared/public contracts,
-schemas, codecs, recovery generations, build/deployment behavior, or when a release/merge gate
-requires it. The full `uv run pytest -q` commands below are expanded gates, not the default for
-every edit; record any broader check that was intentionally deferred.
-
-For Mission changes, run the checks that cover the affected package by default. Use the full
-command set below for cross-package changes, failures that require expansion, or release/merge
-validation:
+For Mission changes, run:
 
 ```bash
 uv run ruff format --check mission apps/mission-service tools/quality integrations/robonix-map-service \
@@ -2115,8 +2105,7 @@ Active configs/probes follow the same policy; historical evidence and accounting
 MI-ablation manifest v0.2 records the omission; capped/v0.1 runs require their original source,
 not silent migration. See `evaluation/docs/mi-ablation-v0.3.md`.
 
-For evaluation harness changes, run the affected checks by default. Use the full command set below
-for cross-package changes, failures that require expansion, or release/merge validation:
+For evaluation harness changes, run:
 
 ```bash
 uv run ruff format --check evaluation
