@@ -7,7 +7,13 @@ import pytest
 from mission.config import MissionSettings, load_settings
 from mission.provider_errors import MissionProviderError
 from roboguide_eval.mi_ablation.blind import export_blind
-from roboguide_eval.mi_ablation.cli import freeze, run_slot, summarize
+from roboguide_eval.mi_ablation.cli import (
+    configured_settings,
+    freeze,
+    load_frozen,
+    run_slot,
+    summarize,
+)
 from roboguide_eval.mi_ablation.evidence import digest, read_object, write_new
 from roboguide_eval.mi_ablation.matched import POLICY, run_matched
 from roboguide_eval.mi_ablation.scoring import object_value, objects
@@ -253,3 +259,22 @@ def test_opted_in_slot_runs_d_and_exposes_its_original_failure(
     assert "matched_planner" not in read_object(
         suite / "trials" / f"{_case()['id']}-r1/result.json"
     )
+
+
+def test_new_manifest_omits_output_limits_and_refuses_capped_history(tmp_path: Path) -> None:
+    """Keep capped historical experiments bound to their original code."""
+    suite = tmp_path / "suite"
+    freeze(ROOT, ROOT / "evaluation/mi_ablation_cases/development.json", suite, "development", 1)
+    manifest = read_object(suite / "manifest.json")
+    provider = object_value(manifest["provider"])
+    assert manifest["schema_version"] == "roboguide.mi-ablation-manifest/v0.2"
+    assert provider["output_token_limit_policy"] == "omitted"
+    assert not {"max_tokens", "max_completion_tokens", "max_output_tokens"} & provider.keys()
+    provider["max_output_tokens"] = 16384
+    with pytest.raises(ValueError, match="historical manifest"):
+        configured_settings(ROOT, manifest)
+    manifest["schema_version"] = "roboguide.mi-ablation-manifest/v0.1"
+    manifest["digest"] = digest({k: v for k, v in manifest.items() if k != "digest"})
+    (suite / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="historical manifest"):
+        load_frozen(ROOT, suite)

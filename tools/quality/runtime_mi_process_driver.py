@@ -112,7 +112,6 @@ review_model = "explicit-protocol-fixture-no-inference"
 model_reasoning_effort = "low"
 disable_response_storage = true
 network_access = "enabled"
-max_output_tokens = 4096
 timeout_seconds = 20
 [model_providers.ProtocolFixture]
 name = "Explicit conformance fixture, not model inference"

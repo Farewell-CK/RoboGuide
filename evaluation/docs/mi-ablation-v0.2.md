@@ -2,6 +2,7 @@
 
 状态：工具已实现；任务集为待审候选，尚无正式语义成绩。边界沿用
 [v0.1](mi-ablation-v0.1.md)，不修改生产 Prompt、MissionPlan、Control 或物理协议。
+当前输出token参数策略及manifest版本迁移见 [v0.3](mi-ablation-v0.3.md)。
 
 ## A/B/C/D 比较
 

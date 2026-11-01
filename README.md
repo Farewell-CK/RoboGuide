@@ -1616,6 +1616,8 @@ Responses 适配器，共享初始草案与 Review，保留私有评分和盲审
 不启动 Node/模拟器；必要条件通过不等于语义正确或物理成功，原始结果保持独立本地归档。
 [v0.2 调用数匹配对照](evaluation/docs/mi-ablation-v0.2.md)显式启用 D：共享完整初稿成本，
 按 C 后续调用数独立重新规划，固定取最后一份结构合法计划，禁止按语义评分挑结果。
+[当前 MI 请求策略](evaluation/docs/mi-ablation-v0.3.md)不发送输出 token 上限参数；
+旧预算实验保留原始身份，后续试验使用新 manifest 分列归档。
 
 仓库进入实验驱动阶段后，[`evaluation/`](evaluation/) 提供独立的 Eval Harness：
 

@@ -59,7 +59,6 @@ class LlmSettings:
     reasoning_effort: str
     disable_response_storage: bool
     network_access: str
-    max_output_tokens: int
     timeout_seconds: float
 
 
@@ -147,9 +146,6 @@ def load_settings(
     providers = _table(raw.get("model_providers"), "model_providers")
     provider = _table(providers.get(provider_name), f"model_providers.{provider_name}")
     root = repository_root if repository_root is not None else path.parent.parent
-    max_tokens = _positive_number(llm, "max_output_tokens", "mission.llm")
-    if not max_tokens.is_integer():
-        raise MissionConfigError("mission.llm.max_output_tokens must be an integer")
     wire_api = _string(provider, "wire_api", f"model_providers.{provider_name}")
     if wire_api != "responses":
         raise MissionConfigError(f"unsupported provider wire_api: {wire_api}")
@@ -186,7 +182,6 @@ def load_settings(
             reasoning_effort=_string(llm, "model_reasoning_effort", "mission.llm"),
             disable_response_storage=_boolean(llm, "disable_response_storage", "mission.llm"),
             network_access=_string(llm, "network_access", "mission.llm"),
-            max_output_tokens=int(max_tokens),
             timeout_seconds=_positive_number(llm, "timeout_seconds", "mission.llm"),
         ),
         provider=ProviderSettings(

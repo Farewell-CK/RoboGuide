@@ -29,7 +29,6 @@ def main() -> int:
         "input": "Reply with exactly: MODEL_OK",
         "store": False,
         "reasoning": {"effort": "low"},
-        "max_output_tokens": 64,
     }
     (output / "request.json").write_text(
         json.dumps(

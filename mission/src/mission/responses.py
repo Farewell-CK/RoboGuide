@@ -414,7 +414,6 @@ class _ResponsesClient:
             "input": input_text,
             "store": not self._settings.llm.disable_response_storage,
             "reasoning": {"effort": self._settings.llm.reasoning_effort},
-            "max_output_tokens": self._settings.llm.max_output_tokens,
             "text": {
                 "format": {
                     "type": "json_schema",

@@ -32,6 +32,13 @@ def configured_settings(repository: Path, manifest: JSONObject) -> MissionSettin
     """Apply the common frozen model and budgets without editing production configuration."""
     base = load_settings(repository / "config/mission.toml", repository_root=repository)
     provider = object_value(manifest["provider"])
+    if any(
+        name in provider
+        for name in ("max_output_tokens", "max_tokens", "max_completion_tokens", "max_token")
+    ):
+        raise ValueError(
+            "capped historical manifest requires its original code; freeze a new study"
+        )
     return dataclasses.replace(
         base,
         review_enabled=True,
@@ -42,7 +49,6 @@ def configured_settings(repository: Path, manifest: JSONObject) -> MissionSettin
             model=str(provider["model"]),
             review_model=str(provider["model"]),
             reasoning_effort=str(provider["reasoning_effort"]),
-            max_output_tokens=int(cast(int, provider["max_output_tokens"])),
             timeout_seconds=float(cast(float, provider["timeout_seconds"])),
             disable_response_storage=True,
         ),
@@ -99,7 +105,7 @@ def freeze(
     ]
     random.Random(20261030).shuffle(slots)
     manifest: JSONObject = {
-        "schema_version": "roboguide.mi-ablation-manifest/v0.1",
+        "schema_version": "roboguide.mi-ablation-manifest/v0.2",
         "code_sha": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=repository, text=True
         ).strip(),
@@ -114,7 +120,7 @@ def freeze(
             "base_url": "http://101.43.45.215:8080",
             "responses_path": "/responses",
             "reasoning_effort": "xhigh",
-            "max_output_tokens": 16384,
+            "output_token_limit_policy": "omitted",
             "timeout_seconds": 1200,
         },
         "budgets": {
@@ -142,6 +148,8 @@ def load_frozen(repository: Path, directory: Path) -> tuple[JSONObject, list[JSO
     payload = {k: v for k, v in manifest.items() if k != "digest"}
     if manifest.get("digest") != digest(payload):
         raise ValueError("manifest digest mismatch")
+    if manifest.get("schema_version") != "roboguide.mi-ablation-manifest/v0.2":
+        raise ValueError("historical manifest requires its original code; freeze a new study")
     if manifest.get("matched_planner_policy") not in (None, POLICY):
         raise ValueError("unsupported matched Planner policy")
     for relative, expected in object_value(manifest["source_sha256"]).items():
