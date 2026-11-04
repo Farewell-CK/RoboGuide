@@ -152,6 +152,106 @@ fn no_effects_requires_complete_timely_original_evidence() {
     }
 }
 
+/// Only terminal ingress before the exclusive deadline may settle, even when reduction is later.
+#[test]
+fn no_effects_terminal_receive_time_preserves_exclusive_deadline() {
+    for (terminal_at, may_settle) in [(105, true), (106, false), (107, false)] {
+        let mut fixture = fixture_with_schema(domain::TASK_EFFECT_OBSERVATION_SCHEMA, "no-effects");
+        admit(&mut fixture);
+        receipt(&mut fixture);
+        request_cancel(&mut fixture);
+        let payload = observation(&fixture);
+        observe(
+            &mut fixture,
+            "s1",
+            105,
+            serde_json::json!({"observations":[payload]}),
+            None,
+        );
+        fixture.fact(2, ExecutionPhase::Cancelled, terminal_at);
+        safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(108))
+            .expect("late terminal is an ordinary retained outcome");
+        let id = fixture.attempt.execution_id();
+        let purpose = serde_json::to_value(&fixture.controller.safety_stops).unwrap()[id].clone();
+        assert_eq!(purpose["record"]["requested_at"], 6);
+        assert_eq!(purpose["record"]["deadline"], 106);
+        assert_eq!(purpose["record"]["confirmed_at"], serde_json::Value::Null);
+        assert_eq!(
+            purpose.get("settlement").is_some(),
+            may_settle,
+            "{terminal_at}"
+        );
+        assert_eq!(
+            safety_stop::blocks_cancellation_release(
+                &fixture.controller,
+                fixture.attempt.command().mission_id()
+            ),
+            !may_settle,
+            "{terminal_at}"
+        );
+        if !may_settle {
+            assert_eq!(purpose["record"]["phase"], "manual_escalation");
+            assert!(!fixture.allocations().allocations().is_empty());
+        }
+        assert_eq!(
+            fixture.controller.bridge.terminal_received_at(id),
+            Some(domain::TimestampMs::new(terminal_at))
+        );
+    }
+}
+
+/// The production timer persists the original late result and hold without disabling global writes.
+#[test]
+fn no_effects_late_terminal_keeps_controller_writes_available() {
+    let mut fixture = fixture_with_schema(domain::TASK_EFFECT_OBSERVATION_SCHEMA, "no-effects");
+    admit(&mut fixture);
+    receipt(&mut fixture);
+    request_cancel(&mut fixture);
+    let payload = observation(&fixture);
+    observe(
+        &mut fixture,
+        "s1",
+        105,
+        serde_json::json!({"observations":[payload]}),
+        None,
+    );
+    fixture.fact(2, ExecutionPhase::Cancelled, 106);
+    fixture.events = fixture
+        .events
+        .clone()
+        .with_write_failure_fence("late-cancel-controller")
+        .unwrap();
+    let controller = Arc::new(Mutex::new(fixture.controller.clone()));
+    let gate = Arc::new(application::ApplicationWriter::default());
+    application::drive_application_timer(
+        &controller,
+        &fixture.events,
+        &gate,
+        domain::TimestampMs::new(107),
+        None,
+    )
+    .expect("normal deadline expiry must not isolate the shared Controller");
+    let status = fixture.events.write_status().unwrap();
+    assert!(status.write_enabled, "{status:?}");
+    assert!(status.failure.is_none());
+    fixture.controller = controller.lock().unwrap().clone();
+    assert!(!fixture.allocations().allocations().is_empty());
+    assert!(safety_stop::validate_restored(&fixture.controller).is_ok());
+    let saved: serde_json::Value = serde_json::from_str(
+        &fixture
+            .events
+            .load_checkpoint()
+            .unwrap()
+            .unwrap()
+            .checkpoint_json,
+    )
+    .unwrap();
+    let purpose = &saved["safety_stops"][fixture.attempt.execution_id()];
+    assert_eq!(purpose["record"]["phase"], "manual_escalation");
+    assert_eq!(purpose["record"]["deadline"], 106);
+    assert!(purpose.get("settlement").is_none());
+}
+
 /// An authenticated manual decision preserves expired physical history and is exact-command idempotent.
 #[test]
 fn manual_settlement_preserves_original_record_and_refuses_conflicts() {

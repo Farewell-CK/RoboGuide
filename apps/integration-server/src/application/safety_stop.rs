@@ -868,8 +868,10 @@ pub(crate) fn tick(controller: &mut ControllerState, now: TimestampMs) -> Result
         if let Some(ref proof) = proof
             && settlement::is_no_effects(proof)
         {
-            if let Some(terminal) = terminal
-                && purpose.accepted_at.is_some()
+            // Late terminal ingress is retained normally; only the original window may settle.
+            if let Some(terminal) = terminal.filter(|time| {
+                *time >= purpose.record.requested_at && *time < purpose.record.deadline
+            }) && purpose.accepted_at.is_some()
                 && cancellation_closure
             {
                 settlement::settle_no_effects(purpose, proof.clone(), terminal)?;

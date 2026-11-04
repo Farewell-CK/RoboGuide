@@ -61,3 +61,27 @@ Workspace all-targets/all-features Clippy、Ruff、格式、函数文档及生�
 Node、Connector 与声明，并准备有实际身份的管理员认证。新增声明只作用于后续取消，
 不能补写原任务；原任务应按原身份、摘要和现场证据进行正式对账。
 随后先进行无动作取消验证，再进入低速导航和实际运动取消验收。
+
+## 独立审阅后的迟到终态修复
+
+`2a2fe596` 的独立本地审阅发现一个边界缺陷。原 no-effects State 在停止期限内到达，
+但 Cancelled 终态恰好在截止时间或之后到达时，tick 直接调用结案校验并返回错误。
+生产 timer/Node fact driver 会把它作为共享权威故障，关闭 Controller 写入并要求重启。
+三项新增回归在未修复代码上复现该错误，包含启用实际 write-failure fence 的生产 timer
+和两个真实 gRPC 参与者的同批事实处理。
+
+修复在 no-effects 自动结案入口检查终态的原 receive time，只接受
+`requested_at <= terminal_received_at < deadline`。迟到终态继续保存在 Runtime，
+原停止目的沿既有 expire 路径转为 ManualEscalation，保留原期限与资源占用。
+窗口内到达的证据即使稍后归约，仍按原接收时间判断。严格结案校验保持原义。
+
+新增三项回归分别覆盖原截止时间边界、生产 timer 写入可用性，以及两个真实 gRPC
+参与者的同批事实处理。后者核对迟到取消的原接收时间保留、另一任务完成且收到 ACK、
+仅迟到任务保留占用，以及全局写入仍可用。夹具明确协商 Node safety contract。
+本次修改没有连接或部署现场设备。
+
+修复后在独立构建目录通过 Domain 62 项、Integration Server 314 项、Node Service
+140 项，共 516 项 Rust 测试。Windows 的 31 项协议测试及生产模块 strict mypy 通过。
+更新后的 Controller 二进制再次通过自动取消、管理员结案、冷重启和旧 writer 拒绝的
+实际软件进程门禁。原始结果与源码摘要保存在工作区实验目录
+`lab/rg-task-cancellation-late-terminal-fix-20261104/`。
