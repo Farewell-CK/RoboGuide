@@ -6,7 +6,9 @@
 
 真机接入的专题设计见 [ADR-0231 两类接入与本机任务委派](docs/decisions/0231-local-eaios-and-device-integration.md)。
 该提案以验证 RG 的任务、调度、执行与恢复为目标，区分已有具身操作系统的参与者和
-设备参与者。统一任务委派的协议与实现仍待完成，真机验收按文档中的阶段单独记录。
+设备参与者。[Robonix 本机任务模块](integrations/robonix-task/README.md)与显式部署目录
+已完成一次狗2站立闭环，原始身份、失败修复与后续验证见
+[真机验收记录](docs/development/acceptance/2026-11-04-robonix-task-delegation.md)。
 
 ## 当前整改状态 · 2026-10-26
 

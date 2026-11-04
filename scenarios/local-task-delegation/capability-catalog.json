@@ -1,0 +1,45 @@
+{
+  "schema_version": "roboguide.capability-catalog/v0.3",
+  "capabilities": [
+    {
+      "contract": {
+        "namespace": "task",
+        "name": "delegate",
+        "version": "v1"
+      },
+      "description": "Delegate one local goal to a task runtime that admits supported work under its deployment profile.",
+      "attributes": [
+        {
+          "name": "task-profile",
+          "type": "string",
+          "description": "Deployment profile of the receiving local task runtime."
+        }
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "operation": {
+        "namespace": "task",
+        "name": "delegate",
+        "version": "v1"
+      },
+      "description": "Submit the intact objective to a local task runtime and track its attributed result.",
+      "parameters": [
+        {
+          "name": "profile",
+          "type": "string",
+          "required": true,
+          "description": "Exact deployed task profile admitted by the receiving runtime."
+        }
+      ],
+      "required_capabilities": [
+        {
+          "namespace": "task",
+          "name": "delegate",
+          "version": "v1"
+        }
+      ]
+    }
+  ]
+}

@@ -1,8 +1,13 @@
-ADR-0231 is a proposed integration design for Local EAIOS task delegation and device providers.
+ADR-0231 defines opt-in Local EAIOS task delegation and device-provider integration.
 Physical trials validate RG's task, resource, execution and recovery behavior. Both integration
 forms use the existing Node authority boundaries; local primitives remain Local EAIOS owned.
-The common delegation contract, Robonix lifecycle mapping and hardware acceptance are pending.
-Use its implementation and acceptance sequence when developing this integration.
+`integrations/robonix-task` owns the Robonix-side protocol facade and its durable native identities.
+An opt-in deployment catalog and ordinary Node workflow completed one real dog2 stand task.
+Keep local motion/result decisions in Robonix and preserve unknown execution ownership.
+Motion cancellation, native restart lookup and multi-participant acceptance remain pending.
+Run its real-loopback unittest suite, Ruff and function-doc checks; run Catalog tests on Linux.
+The rejected-dispatch maintenance example uses the existing locked journal and exact operator
+attestation after independently established no-dispatch evidence. Run its Rust tests and Clippy.
 
 ADR-0221 verifies retired local Controller projections against exact completed private Archive
 packages in the same uniquely paired parent/member Root when protected/tail coverage has moved.
