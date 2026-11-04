@@ -64,3 +64,5 @@ checkout 后继续验证协议摘要。
 
 部署复用 `rg-dog2-node.service` 和 `rg-dog2-connector.service`，沿用已启用的自启动配置。
 切换前的 unit 保存在新部署目录的 `previous-units`。本次完成后未做整机断电重启验收。
+
+后续用例与阶段进入条件见 [真机接入验证计划](../physical-integration-validation-plan-2026-11-04.md)。
