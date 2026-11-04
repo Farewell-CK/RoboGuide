@@ -5,6 +5,10 @@ forms use the existing Node authority boundaries; local primitives remain Local 
 An opt-in deployment catalog and ordinary Node workflow completed one real dog2 stand task.
 Keep local motion/result decisions in Robonix and preserve unknown execution ownership.
 Motion cancellation, native restart lookup and multi-participant acceptance remain pending.
+The P0-P3 dog2 trial found missing operation-owned safety exports: native cancellation can be
+terminal while Controller retains the original ManualEscalation hold. Preserve that hold and
+original clocks; declaration updates cannot retroactively prove stopping. See its acceptance note.
+Known-handle status reads continue with bounded backoff after the Unknown fence, never Execute.
 Run its real-loopback unittest suite, Ruff and function-doc checks; run Catalog tests on Linux.
 The rejected-dispatch maintenance example uses the existing locked journal and exact operator
 attestation after independently established no-dispatch evidence. Run its Rust tests and Clippy.

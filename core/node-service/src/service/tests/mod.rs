@@ -132,6 +132,8 @@ fn habitat_mobility_profiles_reach_registration_with_distinct_floor_support() {
 /// Proves the relocation deployment projects exact capability, capacity and readiness facts.
 #[test]
 fn habitat_relocation_registration_retains_exclusive_resources_and_unknown_limits() {
+    use integration::grpc::v0_4::scalar_value::Value as Scalar;
+
     for suffix in ["a", "b"] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
             "../../scenarios/e1-shared-world-relocation/node-{suffix}.toml"
@@ -171,8 +173,22 @@ fn habitat_relocation_registration_retains_exclusive_resources_and_unknown_limit
             assert_eq!(profile.kind, "transport");
             assert_eq!(profile.ready, ready);
             assert!(
-                profile.attributes.is_empty(),
+                !profile.attributes.contains_key("max-payload-grams"),
                 "payload limits remain unknown"
+            );
+            assert_eq!(
+                profile
+                    .attributes
+                    .get("location-access")
+                    .and_then(|value| value.value.as_ref()),
+                Some(&Scalar::StringValue("base-floor".to_string()))
+            );
+            assert_eq!(
+                profile
+                    .attributes
+                    .get("supports-floor-transition")
+                    .and_then(|value| value.value.as_ref()),
+                Some(&Scalar::BoolValue(false))
             );
             assert!(registration.operation_support.iter().any(|support| {
                 support.operation.as_ref().is_some_and(|operation| {

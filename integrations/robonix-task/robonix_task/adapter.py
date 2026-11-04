@@ -131,9 +131,13 @@ class Adapter:
                 deadline=deadline,
             ):
                 self.journal.append(handle, "task", raw, event, provider)
+                if self.task_results and self.journal.finish_unscheduled_cancel(handle):
+                    return
                 if self.journal.get(handle)["cancel_requested"]:
                     self.cancel(handle)
             if self.task_results and self.journal.finish_task(handle):
+                return
+            if self.task_results and self.journal.finish_unscheduled_cancel(handle):
                 return
             self.journal.mark_unknown(
                 handle,
@@ -143,13 +147,14 @@ class Adapter:
             if (
                 isinstance(exc, grpc.RpcError)
                 and exc.code() == grpc.StatusCode.INTERNAL
-                and exc.details() == "truncated JSON response"
+                and "truncated JSON response" in (exc.details() or "")
             ):
                 self.journal.record_planning_error(
                     handle,
                     {
                         "source": "native-rpc",
-                        "error": exc.details(),
+                        "error": "truncated JSON response",
+                        "rpc_details": exc.details(),
                         "session_id": self.journal.get(handle)["session_id"],
                     },
                 )

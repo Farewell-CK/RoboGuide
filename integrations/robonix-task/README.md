@@ -68,8 +68,16 @@ FinalText 的文字内容单独不能产生成功。
 execution-report 依据判定满足。姿态和硬件效果由 Robonix 确认，本包记录其结果。
 
 取消受理保留原含义。现有原生 abort 的“正在取消”回复只使任务继续待对账。
-在尚无计划事件的明确规划错误后，收到原会话的“无活动 turn 或 plan”回复才可归约
-为 FAILED。真实运动期间的取消及停止证明仍待专门验收。
+原任务已确认 turn_id、没有产生任何计划且原任务流报告 interrupted 时，本机结果可归约
+为 CANCELED。计划已经发出时，同一 interrupted 事件继续保留 UNKNOWN。
+明确规划错误加原会话的“无活动 turn 或 plan”回复可以结束为 FAILED，但之前出现的
+每项计划还必须有根节点成功证据。失败、取消、跳过或缺失的根结果均保留 UNKNOWN。
+这种原生任务结果不替代 Controller 的独立安全状态证明。
+
+[P0–P3 实测记录](../../docs/development/acceptance/2026-11-04-dog2-p0-p3-validation.md)
+记录了一项接入缺口。当前 task.delegate 部署尚未声明 execution-safety 和对应状态导出，
+因此取消后的本机 CANCELED 与 RG execution Cancelled 仍可能留下 Mission Cancelling
+及资源占用。真实运动取消、停止证明和人工对账解除接口尚未完成，P3 导航暂未执行。
 
 `python3 -m robonix_task.reconcile DIRECTORY HANDLE --digest DIGEST --sequence SEQUENCE`
 在服务停止后，仅对原始已保存的完整任务结果重新归约。它不发送原生请求。

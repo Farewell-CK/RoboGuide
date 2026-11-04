@@ -9,6 +9,9 @@
 设备参与者。[Robonix 本机任务模块](integrations/robonix-task/README.md)与显式部署目录
 已完成一次狗2站立闭环，原始身份、失败修复与后续验证见
 [真机验收记录](docs/development/acceptance/2026-11-04-robonix-task-delegation.md)。
+后续 [P0–P3 实测](docs/development/acceptance/2026-11-04-dog2-p0-p3-validation.md)
+已确认部署重启、幂等与原任务取消回传，并发现安全状态证据和人工对账解除的接入缺口。
+当前全局取消仍保留原资源占用，导航尚未执行。
 
 ## 当前整改状态 · 2026-10-26
 

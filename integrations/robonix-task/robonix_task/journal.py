@@ -210,7 +210,7 @@ class Journal:
             )
 
     def record_planning_error(self, handle: str, evidence: dict[str, Any]) -> None:
-        """Retain a native pre-plan error receipt without inferring that work has stopped."""
+        """Retain an attributed native planning error without inferring that work has stopped."""
         if evidence.get("error") != "truncated JSON response" or evidence.get("source") not in {
             "native-rpc",
             "native-pilot-log",
@@ -228,30 +228,38 @@ class Journal:
             )
 
     def finish_idle_planning_failure(self, handle: str) -> bool:
-        """Close an evidenced pre-plan parser failure only after native scoped idle confirmation."""
+        """Close a parser failure after successful prior plans and scoped native idle evidence."""
         with self.lock, self.db:
             row = self.get(handle)
             progress = row["progress"]
             error = progress.get("planning_error")
-            if row["state"] != "UNKNOWN" or not error or progress.get("plan_ids"):
+            if row["state"] != "UNKNOWN" or not error:
                 return False
             if progress.get("turn_id") != row["task_id"]:
                 return False
             events = self.events(handle)
             idle = False
+            roots: dict[str, int] = {}
+            states: dict[tuple[str, int], int] = {}
             for record in events:
                 event = json.loads(record["decoded"])
                 if event.get("session_id") != row["session_id"] or (
                     json.loads(record["provider"]) != progress.get("provider")
                 ):
                     return False
-                if record["source"] == "task" and event["kind"] in {
-                    "plan",
-                    "batch_result",
-                    "node_state",
-                    "final_text",
-                }:
-                    return False
+                if record["source"] == "task":
+                    if event["kind"] == "final_text":
+                        return False
+                    plan = event.get("plan", {})
+                    if plan.get("plan_id"):
+                        roots[plan["plan_id"]] = plan.get("root_index", 0)
+                    observations = [event.get("node_state", {})]
+                    observations.extend(event.get("batch_result", {}).get("results", []))
+                    for observation in observations:
+                        if observation.get("plan_id"):
+                            states[(observation["plan_id"], observation.get("node_index", 0))] = (
+                                observation.get("state", 0)
+                            )
                 status = event.get("status", {})
                 if record["source"] == "abort":
                     idle = (
@@ -260,7 +268,11 @@ class Journal:
                         and status.get("message")
                         == "no active turn or running plan exists for this session"
                     )
-            if not idle:
+            if (
+                not idle
+                or set(roots) != set(progress.get("plan_ids", []))
+                or any(states.get((plan_id, index)) != 2 for plan_id, index in roots.items())
+            ):
                 return False
             detail = canonical(
                 {
@@ -268,6 +280,7 @@ class Journal:
                     "error": error,
                     "previous_detail": row["detail"],
                     "native_idle_confirmed": True,
+                    "completed_plan_ids": sorted(roots),
                     "session_id": row["session_id"],
                     "request_task_id": row["task_id"],
                 }
@@ -275,6 +288,50 @@ class Journal:
             self.db.execute(
                 "UPDATE runs SET state='FAILED',detail=?,sequence=sequence+1 WHERE handle=?",
                 (detail, handle),
+            )
+            return True
+
+    def finish_unscheduled_cancel(self, handle: str) -> bool:
+        """Close an interrupted original Pilot turn that emitted no execution plans."""
+        with self.lock, self.db:
+            row = self.get(handle)
+            progress = row["progress"]
+            if row["state"] in TERMINAL or not row["cancel_requested"] or progress.get("plan_ids"):
+                return False
+            if progress.get("turn_id") != row["task_id"]:
+                return False
+            interrupted = False
+            for record in self.events(handle):
+                event = json.loads(record["decoded"])
+                if event.get("session_id") != row["session_id"] or json.loads(
+                    record["provider"]
+                ) != progress.get("provider"):
+                    return False
+                if record["source"] != "task":
+                    continue
+                if event["kind"] in {"plan", "batch_result", "node_state", "final_text"}:
+                    return False
+                status = event.get("status", {})
+                if (
+                    status.get("session_id") == row["session_id"]
+                    and status.get("state") == 2
+                    and status.get("message") == "interrupted"
+                ):
+                    interrupted = True
+            if not interrupted:
+                return False
+            self.db.execute(
+                "UPDATE runs SET state='CANCELED',detail=?,sequence=sequence+1 WHERE handle=?",
+                (
+                    canonical(
+                        {
+                            "basis": "native-original-turn-interrupted-before-plan/v1",
+                            "session_id": row["session_id"],
+                            "request_task_id": row["task_id"],
+                        }
+                    ),
+                    handle,
+                ),
             )
             return True
 

@@ -2,6 +2,7 @@
 
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -18,7 +19,14 @@ class TaskFixture(NativeFixture):
         """Emit a real protobuf turn receipt and task result without robot operations."""
         if json.loads(req.context_json).get("abort_turn"):
             for raw in super().submit(req, context):
-                if self.mode == "planning-error":
+                if self.mode in {
+                    "planning-error",
+                    "finished-plan-error",
+                    "running-plan-error",
+                    "failed-plan-error",
+                    "canceled-plan-error",
+                    "skipped-plan-error",
+                }:
                     yield self.encode(
                         message(
                             "robonix.pilot.PilotEvent",
@@ -37,9 +45,55 @@ class TaskFixture(NativeFixture):
         if self.mode == "planning-error":
             yield next(super().submit(req, context))
             context.abort(grpc.StatusCode.INTERNAL, "truncated JSON response")
+        if self.mode in {"planning-cancel", "planning-cancel-with-plan"}:
+            yield next(super().submit(req, context))
+            if self.mode == "planning-cancel-with-plan":
+                yield self.encode(
+                    message(
+                        "robonix.pilot.PilotEvent",
+                        event_kind=1,
+                        session_id=req.session_id,
+                        plan={"plan_id": "running-plan", "session_id": req.session_id},
+                    )
+                )
+            while not self.aborts and context.is_active():
+                time.sleep(0.01)
+            yield self.encode(
+                message(
+                    "robonix.pilot.PilotEvent",
+                    event_kind=3,
+                    session_id=req.session_id,
+                    status={"session_id": req.session_id, "state": 2, "message": "interrupted"},
+                )
+            )
+            return
         for raw in super().submit(req, context):
             if event_dict(raw)["kind"] != "final_text":
                 yield raw
+        if self.mode in {
+            "finished-plan-error",
+            "failed-plan-error",
+            "canceled-plan-error",
+            "skipped-plan-error",
+        }:
+            root_state = {
+                "finished-plan-error": 2,
+                "failed-plan-error": 3,
+                "canceled-plan-error": 4,
+                "skipped-plan-error": 5,
+            }[self.mode]
+            for plan_id in ("plan-1", "plan-2"):
+                yield self.encode(
+                    message(
+                        "robonix.pilot.PilotEvent",
+                        event_kind=5,
+                        session_id=req.session_id,
+                        node_state={"plan_id": plan_id, "node_index": 0, "state": root_state},
+                    )
+                )
+            context.abort(grpc.StatusCode.INTERNAL, "pilot stream error: truncated JSON response")
+        if self.mode == "running-plan-error":
+            context.abort(grpc.StatusCode.INTERNAL, "pilot stream error: truncated JSON response")
         task_state = {
             "task_id": "T1",
             "status": "done",
@@ -155,6 +209,56 @@ class TaskResults(unittest.TestCase):
         detail = json.loads(result["detail"])
         self.assertEqual(detail["basis"], "robonix-preplan-failure-and-idle/v1")
         self.assertTrue(detail["native_idle_confirmed"])
+
+    def test_cancel_original_turn_before_plan(self):
+        """Original interruption closes only a canceled turn with no possible emitted plan."""
+        for mode, expected in (
+            ("planning-cancel", "CANCELED"),
+            ("planning-cancel-with-plan", "UNKNOWN"),
+        ):
+            with self.subTest(mode=mode):
+                self.check_canceled_turn(mode, expected)
+
+    def check_canceled_turn(self, mode, expected):
+        """Cancel through the real RPC and preserve uncertain plan-bearing work."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = TaskFixture(tmp, mode=mode)
+            app = Adapter(
+                Path(tmp) / "journal",
+                Liaison(fixture.endpoint, "rg/test", "local:test"),
+                allowed_operations=("lab.protocol-probe@v1",),
+                enabled=True,
+                task_results=True,
+            )
+            try:
+                row = app.submit(request())
+                wait_for(lambda: app.status(row["handle"])["progress"].get("turn_id"))
+                if mode == "planning-cancel-with-plan":
+                    wait_for(lambda: app.status(row["handle"])["progress"].get("plan_ids"))
+                app.cancel(row["handle"])
+                wait_for(lambda: app.status(row["handle"])["state"] == expected)
+                self.assertEqual(len(fixture.tasks), 1)
+                self.assertEqual(len(fixture.aborts), 1)
+                if expected == "CANCELED":
+                    self.assertEqual(app.status(row["handle"])["progress"]["plan_ids"], [])
+            finally:
+                app.close()
+                fixture.close()
+
+    def test_postplan_failure_requires_all_plan_roots_succeeded(self):
+        """Idle and a model error cannot close failed, canceled or unresolved native plans."""
+        completed = self.run_case("finished-plan-error", "FAILED")
+        self.assertEqual(
+            json.loads(completed["detail"])["completed_plan_ids"], ["plan-1", "plan-2"]
+        )
+        for mode in (
+            "running-plan-error",
+            "failed-plan-error",
+            "canceled-plan-error",
+            "skipped-plan-error",
+        ):
+            with self.subTest(mode=mode):
+                self.run_case(mode, "UNKNOWN")
 
     def test_profile_rejected_before_native_send(self):
         """A deployment profile mismatch cannot become an accepted local execution."""

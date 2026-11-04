@@ -554,6 +554,54 @@ async fn status_transport_failure_reacquires_completed_without_redispatch() {
     assert_eq!(driver.status_calls.load(Ordering::SeqCst), 5);
 }
 
+/// A later original-handle result closes an Unknown fence without a Node restart or new Execute.
+#[tokio::test]
+async fn status_observation_continues_after_unknown_fence() {
+    let state_dir = tempfile::tempdir().expect("state directory exists");
+    let driver = Arc::new(FlakyStatusDriver::new(
+        6,
+        StatusFault::Transport,
+        "COMPLETED",
+    ));
+    let engine = crate::LocalIntegrationEngine::new(
+        semantic_gated_catalog(
+            "http://127.0.0.1:50051".to_string(),
+            state_dir.path().to_path_buf(),
+        ),
+        vec![Arc::clone(&driver) as Arc<dyn LocalDriver>],
+    )
+    .expect("engine initializes");
+    let mut events = engine.subscribe();
+    engine
+        .execute(
+            "execution-after-fence".to_string(),
+            flaky_status_invocation(),
+            vec!["base".to_string()],
+        )
+        .expect("Execute starts");
+    tokio::time::timeout(std::time::Duration::from_secs(6), async {
+        loop {
+            if events.recv().await.expect("fact arrives").phase
+                == integration::grpc::v0_4::ExecutionPhase::Unknown
+            {
+                break;
+            }
+        }
+        assert_eq!(driver.dispatch_calls.load(Ordering::SeqCst), 1);
+        loop {
+            if events.recv().await.expect("terminal fact arrives").phase
+                == integration::grpc::v0_4::ExecutionPhase::Completed
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("original handle becomes terminal");
+    assert_eq!(driver.dispatch_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(driver.status_calls.load(Ordering::SeqCst), 8);
+}
+
 /// Malformed status payloads are reacquired and preserve a true Failed terminal fact.
 #[tokio::test]
 async fn malformed_status_reacquires_true_failed_terminal() {
