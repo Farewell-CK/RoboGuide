@@ -12,6 +12,19 @@ fn fixture() -> stop_recovery::Fixture {
 
 /// Builds either explicit v0.2 legacy or v0.3 original-process observation policy.
 fn fixture_with_process_exit(process: bool) -> stop_recovery::Fixture {
+    fixture_with_schema(
+        if process {
+            domain::PROCESS_EXIT_OBSERVATION_SCHEMA
+        } else {
+            domain::SAFE_STATE_OBSERVATION_SCHEMA
+        },
+        "software-process",
+    )
+}
+
+/// Uses actual registration with a versioned source contract, independently of producer text.
+pub(super) fn fixture_with_schema(schema: &str, assurance: &str) -> stop_recovery::Fixture {
+    let process = schema == domain::PROCESS_EXIT_OBSERVATION_SCHEMA;
     let mut fixture = stop_recovery::Fixture::new();
     let node = fixture.attempt.command().node_id().clone();
     let registration = fixture
@@ -27,10 +40,10 @@ fn fixture_with_process_exit(process: bool) -> stop_recovery::Fixture {
         .clone();
     let mut encoded = serde_json::to_value(registration).unwrap();
     encoded["local_systems"][0]["metadata"][domain::EXECUTION_SAFETY_METADATA_KEY] = serde_json::Value::String(serde_json::json!({
-        "schema": "roboguide.execution-safety/v0.1", "operations": [{
+        "schema": if assurance == "no-effects" { "roboguide.execution-safety/v0.2" } else { "roboguide.execution-safety/v0.1" }, "operations": [{
             "operation": fixture.attempt.command().intent().operation(), "safe_state_export_id": "safe-process",
-            "max_evidence_age_ms": 10, "stop_deadline_ms": 100, "min_confidence_millionths": if process { None } else { Some(800000) },
-            "assurance": "software-process"
+            "max_evidence_age_ms": 10, "stop_deadline_ms": 100, "min_confidence_millionths": if process || assurance == "no-effects" { None } else { Some(800000) },
+            "assurance": assurance
         }]
     }).to_string());
     let registration: domain::NodeRegistration = serde_json::from_value(encoded).unwrap();
@@ -44,11 +57,7 @@ fn fixture_with_process_exit(process: bool) -> stop_recovery::Fixture {
         )
         .unwrap(),
         domain::StateSemantic::Observed,
-        if process {
-            domain::PROCESS_EXIT_OBSERVATION_SCHEMA
-        } else {
-            domain::SAFE_STATE_OBSERVATION_SCHEMA
-        },
+        schema,
         10,
     )
     .unwrap();
@@ -80,7 +89,7 @@ fn fixture_with_process_exit(process: bool) -> stop_recovery::Fixture {
 }
 
 /// Starts the actual application hold and durable Runtime Cancel intent, without executing a device.
-fn admit(fixture: &mut stop_recovery::Fixture) {
+pub(super) fn admit(fixture: &mut stop_recovery::Fixture) {
     let command = fixture.attempt.command().clone();
     safety_stop::admit(
         &mut fixture.controller,
@@ -94,7 +103,7 @@ fn admit(fixture: &mut stop_recovery::Fixture) {
 }
 
 /// Supplies the already-admitted durable receipt to its exact application reducer.
-fn receipt(fixture: &mut stop_recovery::Fixture) {
+pub(super) fn receipt(fixture: &mut stop_recovery::Fixture) {
     let id = fixture.attempt.execution_id();
     safety_stop::receipt(
         &mut fixture.controller,
@@ -127,7 +136,7 @@ fn observation(fixture: &stop_recovery::Fixture) -> serde_json::Value {
 }
 
 /// Ingests the declared State batch through the maintained Node Protocol projection, with original time.
-fn observe(
+pub(super) fn observe(
     fixture: &mut stop_recovery::Fixture,
     session: &str,
     received: u64,

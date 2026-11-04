@@ -290,6 +290,11 @@ fn authorize_operator_request(
             | "/v1/maintenance/coordinated-archive/abort",
         ) => 2,
         ("POST", "/v1/authority/recover") => 2,
+        ("POST", path)
+            if path.starts_with("/v1/executions/") && path.ends_with("/safety-stop/reconcile") =>
+        {
+            2
+        }
         ("POST", "/v1/memory/imports") => 2,
         ("POST", "/v1/memory/import-queries") => 2,
         ("POST", "/v1/memory/use-queries") => 2,
@@ -1748,7 +1753,8 @@ where
                 Some(purpose) => (
                     "200 OK",
                     serde_json::json!({
-                        "schema_version": "roboguide.safety-stop-view/v0.1", "purpose": purpose,
+                        "schema_version": "roboguide.safety-stop-view/v0.2", "purpose": purpose,
+                        "record_digest": purpose.record_digest()?,
                         "command_receipt_is_stop_proof": false,
                         "physical_device_validation": "HardwareEvidencePending",
                     }),
@@ -1757,6 +1763,111 @@ where
                     "404 Not Found",
                     serde_json::json!({"error": "stop purpose unavailable"}),
                 ),
+            }
+        }
+        ("POST", path)
+            if path.starts_with("/v1/executions/") && path.ends_with("/safety-stop/reconcile") =>
+        {
+            let execution_id = path
+                .trim_start_matches("/v1/executions/")
+                .trim_end_matches("/safety-stop/reconcile");
+            let command = match application::safety_stop::ReconciliationRequest::parse(
+                request_body.as_bytes(),
+            ) {
+                Ok(command) => command,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error":error}),
+                    )
+                    .await;
+                }
+            };
+            let Some(subject) = principal.subject.as_deref() else {
+                return write_http_response(
+                    stream,
+                    "403 Forbidden",
+                    serde_json::json!({"error":"authenticated administrator identity required"}),
+                )
+                .await;
+            };
+            let _write_guard = event_write_gate.lock()?;
+            event_log.begin_batch()?;
+            let result: Result<(ControllerState, Option<String>, serde_json::Value), String> =
+                (|| {
+                    let live = controller
+                        .lock()
+                        .map_err(|_| "controller lock is poisoned")?;
+                    authorize_tenant_path(&live, tenant.as_deref(), path)?;
+                    let mut candidate = live.clone();
+                    let replay = candidate
+                        .safety_stops
+                        .get(execution_id)
+                        .is_some_and(|purpose| purpose.is_settled());
+                    let now = clock.now();
+                    let receipt = application::safety_stop::reconcile_manual(
+                        &mut candidate,
+                        execution_id,
+                        command,
+                        subject,
+                        now,
+                    )?;
+                    if replay {
+                        return Ok((candidate, None, receipt));
+                    }
+                    let mission = candidate
+                        .bridge
+                        .attempt_history()
+                        .into_iter()
+                        .find(|attempt| attempt.execution_id() == execution_id)
+                        .ok_or("original reconciliation attempt is absent")?
+                        .command()
+                        .mission_id()
+                        .clone();
+                    application::apply_pending_cancellation(
+                        &mut candidate,
+                        &mission,
+                        now,
+                        domain::CorrelationId::new("manual-stop-settlement")
+                            .as_ref()
+                            .map_err(|error| error.to_string())?,
+                        &mut event_log.clone(),
+                    )
+                    .map_err(|error| error.to_string())?;
+                    let checkpoint = crate::diagnostics::http_checkpoint(&candidate)
+                        .map_err(|error| error.to_string())?;
+                    Ok((candidate, Some(checkpoint), receipt))
+                })();
+            match result {
+                Ok((candidate, checkpoint, receipt)) => {
+                    if let Some(checkpoint) = checkpoint {
+                        if let Err(error) =
+                            crate::diagnostics::http_save(event_log, &checkpoint, &diagnostics)
+                        {
+                            event_log.rollback_batch()?;
+                            return Err(error.into());
+                        }
+                        if let Err(error) = crate::diagnostics::http_commit(event_log, &diagnostics)
+                        {
+                            let _ = event_log.rollback_batch();
+                            return Err(error.into());
+                        }
+                        *controller
+                            .lock()
+                            .map_err(|_| "controller lock is poisoned")? = candidate;
+                    } else {
+                        event_log.rollback_batch()?;
+                    }
+                    (
+                        "200 OK",
+                        serde_json::json!({"schema_version":"roboguide.stop-reconciliation-receipt/v0.1","execution_id":execution_id,"settlement":receipt,"physical_stop_confirmed":false,"automatic_continuation_authorized":false}),
+                    )
+                }
+                Err(error) => {
+                    event_log.rollback_batch()?;
+                    ("409 Conflict", serde_json::json!({"error":error}))
+                }
             }
         }
         ("GET", "/v1/inventory") => {

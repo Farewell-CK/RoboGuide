@@ -171,6 +171,7 @@ class Adapter:
         """Pin the provider and suppress work if cancellation arrived during discovery."""
         self.journal.bind_provider(handle, identity)
         if self.journal.get(handle)["cancel_requested"]:
+            self.journal.record_withheld_cancel(handle)
             raise ValueError("cancel requested before native Task; dispatch withheld")
 
     @contextmanager
@@ -178,6 +179,7 @@ class Adapter:
         """Serialize final cancellation validation and native call initiation against Cancel."""
         with self.lock:
             if self.closed or self.journal.get(handle)["cancel_requested"]:
+                self.journal.record_withheld_cancel(handle)
                 raise ValueError("native Task suppressed by shutdown or pre-send cancellation")
             yield
 
@@ -337,6 +339,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif self.path == "/v1/readiness":
             self.reply(200, self.server.adapter.readiness())
+        elif self.path == "/v1/executions/safe-state":
+            self.reply(200, self.server.adapter.journal.no_effects_observations())
         else:
             self.reply(404, {"error": "route not found"})
 

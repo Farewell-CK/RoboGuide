@@ -1,5 +1,11 @@
 # RoboGuide
 
+[ADR-0232 取消结案候选](docs/decisions/0232-task-cancellation-settlement.md)在独立分支实现
+未产生副作用的自动取消收尾及管理员对账。实现复用现有 Node/State 和 Connector，
+不授予物理停止、恢复或交接权限。现场部署与运动取消另行验证。
+软件进程、旧 writer 拒绝和检查结果见
+[取消结案验收](docs/development/acceptance/2026-11-04-task-cancellation-settlement.md)。
+
 当前代码维护和 E1 待办以[统一基线与进度对账（2026-10-30）](docs/development/code-and-e1-baseline-2026-10-30.md)
 为入口：main 保存已验证基线，dev 用于日常开发；实验始终冻结各自代码与配置。
 下文整改验收和历史开发分支按其原时点阅读，不代表另有一份待合并的最新实现。

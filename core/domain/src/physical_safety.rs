@@ -19,10 +19,15 @@ pub const SAFE_STATE_OBSERVATION_SCHEMA: &str = "roboguide.safe-state-observatio
 /// Version explicitly carrying original process-exit coverage.
 pub const PROCESS_EXIT_OBSERVATION_SCHEMA: &str = "roboguide.safe-state-observation/v0.3";
 
+/// Explicit task-owned no-effects evidence; it never establishes a physical stop.
+pub const TASK_EFFECT_OBSERVATION_SCHEMA: &str = "roboguide.safe-state-observation/v0.4";
+
 /// Evidence assurance declared by a LocalSystem; a software process never proves device stopping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SafetyAssurance {
+    /// The original task never dispatched an effect, independently of device posture.
+    NoEffects,
     /// The provider observes its real operating-system process lifecycle.
     SoftwareProcess,
     /// The provider observes device state; physical accuracy requires separate hardware validation.
@@ -66,8 +71,10 @@ impl ExecutionSafetyProfile {
         }
         let profile: Self = serde_json::from_str(raw)
             .map_err(|_| SafetyStopError::InvalidField("safety profile codec"))?;
-        if profile.schema != "roboguide.execution-safety/v0.1"
-            || profile.operations.is_empty()
+        if !matches!(
+            profile.schema.as_str(),
+            "roboguide.execution-safety/v0.1" | "roboguide.execution-safety/v0.2"
+        ) || profile.operations.is_empty()
             || profile.operations.len() > 32
         {
             return Err(SafetyStopError::InvalidField(
@@ -76,7 +83,9 @@ impl ExecutionSafetyProfile {
         }
         let mut operations = std::collections::BTreeSet::new();
         for support in &profile.operations {
-            if !operations.insert(support.operation.clone())
+            if (support.assurance == SafetyAssurance::NoEffects
+                && profile.schema != "roboguide.execution-safety/v0.2")
+                || !operations.insert(support.operation.clone())
                 || support.safe_state_export_id.trim().is_empty()
                 || support.safe_state_export_id.len() > 128
                 || support.max_evidence_age_ms == 0

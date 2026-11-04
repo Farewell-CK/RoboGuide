@@ -3,6 +3,9 @@ id = "dog2-pilot"
 runtime_name = "robonix-pilot-adapter"
 runtime_version = "task-delegation-v1"
 
+[local_systems.metadata]
+"roboguide.execution-safety" = '''{"schema":"roboguide.execution-safety/v0.2","operations":[{"operation":{"namespace":"task","name":"delegate","version":"v1"},"safe_state_export_id":"pilot-task-effects","max_evidence_age_ms":1500,"stop_deadline_ms":10000,"min_confidence_millionths":null,"assurance":"no-effects"}]}'''
+
 [local_systems.health]
 state_pointer = "/state"
 detail_pointer = "/detail"
@@ -45,6 +48,27 @@ kind = "http"
 method = "GET"
 path = "/v1/pilot/readiness"
 [capability_profiles.readiness.step.request]
+base = {}
+
+[[state_exports]]
+id = "pilot-task-effects"
+owner = "dog2-pilot"
+object_class = "node"
+object_type = "local-task-effects"
+object_id = "lite3-dog2"
+semantic = "observed"
+payload_schema = "roboguide.safe-state-observation/v0.4"
+valid_for_ms = 1500
+interval_ms = 500
+value_pointer = ""
+[state_exports.step]
+id = "pilot-task-effects-observer"
+connection = "pilot-http"
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/pilot/executions/safe-state"
+[state_exports.step.request]
 base = {}
 
 [[resources]]

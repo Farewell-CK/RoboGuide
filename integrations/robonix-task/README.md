@@ -43,6 +43,7 @@ Node 的固定连接配置指向本机服务。可用接口如下。
 | --- | --- |
 | GET /v1/health | 本机协议进程健康 |
 | GET /v1/readiness | 当前 Liaison 发现与本机任务槽可用性 |
+| GET /v1/executions/safe-state | 原取消任务的 no-effects 证据，不能作为设备停止证明 |
 | POST /v1/executions | 原 attempt 的完整 invocation 和执行预算 |
 | POST /v1/executions/status | 按 handle 查询持久任务状态 |
 | POST /v1/executions/find | 按原 attempt 找回本机 handle |
@@ -75,9 +76,22 @@ execution-report 依据判定满足。姿态和硬件效果由 Robonix 确认，
 这种原生任务结果不替代 Controller 的独立安全状态证明。
 
 [P0–P3 实测记录](../../docs/development/acceptance/2026-11-04-dog2-p0-p3-validation.md)
-记录了一项接入缺口。当前 task.delegate 部署尚未声明 execution-safety 和对应状态导出，
+记录了一项接入缺口。当时 task.delegate 部署尚未声明 execution-safety 和对应状态导出，
 因此取消后的本机 CANCELED 与 RG execution Cancelled 仍可能留下 Mission Cancelling
-及资源占用。真实运动取消、停止证明和人工对账解除接口尚未完成，P3 导航暂未执行。
+及资源占用。本分支按 [ADR-0232](../../docs/decisions/0232-task-cancellation-settlement.md)
+补齐了无副作用取消和管理员结案的软件路径，尚未部署到现场。真实运动取消、停止证明
+及 P3 导航继续待验收。新片段声明 no-effects 支持，不声明设备停止能力。
+
+safe-state 只报告明确未发送的原任务，或原 turn interrupted 且完整流中没有任何计划的
+取消。缺 generation、未知、计划已发出、来源不匹配或缺终止事件时不报告。
+RPC 最终发送检查明确阻止请求时记录取消，保留之前保守的派发标志和原身份。
+
+管理员结案使用 Controller 的 `POST /v1/executions/{id}/safety-stop/reconcile`，请求格式见
+[命令 schema](../../contracts/operator/stop-reconciliation-v0.1/command.schema.json)。
+须有实际认证的 recovery-admin principal，身份从认证取得；仅设置 loopback 开发管理员
+开关而没有可审计 subject 不能结案。原 Mission 必须已经显式进入 Cancelling。
+单独取消 execution 不会隐式取消整个 Mission。结案保留原记录和 deadline，只供正常
+Mission 取消释放使用，不解除恢复、续跑或物理交接的停止证据门槛。
 
 `python3 -m robonix_task.reconcile DIRECTORY HANDLE --digest DIGEST --sequence SEQUENCE`
 在服务停止后，仅对原始已保存的完整任务结果重新归约。它不发送原生请求。
@@ -104,3 +118,9 @@ uv run --with grpcio==1.71.0 --with protobuf==5.29.4 \
 
 静态类型检查覆盖生产协议模块。原生 gRPC 与 protobuf 动态描述符作为外部协议边界，
 第三方类型存根可用性通过上述选项处理。
+
+`tests/real_process_gate.py` 使用实际 Controller/Node 二进制、独立 Fake Atlas/Pilot、
+持久 journal 和真实 mTLS 管理员验证自动/人工取消收尾、资源释放和冷重启。
+显式传入 `--controller`、`--node`、`--output` 新目录及可选 `--old-controller`。
+旧 Controller 必须在新结案 SQL 上以 unknown field settlement 拒绝启动且不改动原 SQL。
+该检查不连接真实设备。所有派发只到夹具的 loopback gRPC，不能作为硬件验收。

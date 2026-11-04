@@ -192,6 +192,11 @@ impl Fixture {
             .expect("allocation invariants")
     }
 
+    /// Exposes only this isolated fixture's database for an actual transactional fault test.
+    pub(super) fn event_path(&self) -> std::path::PathBuf {
+        self._directory.path().join("events.sqlite3")
+    }
+
     /// Replaces current registration evidence while preserving the already-dispatched attempt.
     fn update_support(&mut self, support: Option<(&str, &str)>, now: u64) {
         let mut state = self.controller.bridge.state().clone();

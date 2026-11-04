@@ -1,4 +1,11 @@
 ADR-0231 defines opt-in Local EAIOS task delegation and device-provider integration.
+ADR-0232 adds cancel-only task settlement in application/safety_stop/settlement and the existing
+Robonix facade. Explicit no-effects State v0.4 and execution-safety v0.2 never grant physical stop,
+resume or handoff authority. Administrator reconciliation retains original history and clocks.
+New nested closed settlement fields fence prior writers; historical wrapper downgrades refuse.
+Run task-settlement/Node/Domain tests, workspace Clippy and the real-process gate with a frozen
+prior Controller. The gate owns only isolated loopback software processes and private test SQL.
+Motion cancellation and actual field deployment remain independently unverified.
 Physical trials validate RG's task, resource, execution and recovery behavior. Both integration
 forms use the existing Node authority boundaries; local primitives remain Local EAIOS owned.
 `integrations/robonix-task` owns the Robonix-side protocol facade and its durable native identities.

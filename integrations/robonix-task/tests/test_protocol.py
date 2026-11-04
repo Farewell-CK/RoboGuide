@@ -426,11 +426,15 @@ class Acceptance(unittest.TestCase):
         """A cancellation arriving before endpoint resolution cannot leave a task queued to send."""
         self.fixture.query_delay = 0.2
         app = self.create()
-        row = app.submit(request())
+        body = request()
+        body["invocation"]["execution_generation"] = 1
+        row = app.submit(body)
         wait_for(lambda: app.status(row["handle"])["dispatched"])
         app.cancel(row["handle"])
-        self.settled(row["handle"])
+        wait_for(lambda: app.status(row["handle"])["state"] == "CANCELED")
         self.assertEqual(self.fixture.tasks, [])
+        self.assertEqual(self.fixture.aborts, [])
+        self.assertEqual(len(app.journal.no_effects_observations()["observations"]), 1)
 
     def test_cancel_waits_for_original_task_observation_before_abort(self):
         """A separate abort stream must not overtake an original task still awaiting acceptance."""

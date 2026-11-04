@@ -43,6 +43,7 @@ class Journal:
         self.root = Path(directory).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
+        self.effect_cache: dict[str, tuple[int, dict[str, Any]]] = {}
         self.owner = (self.root / "owner.lock").open("a+b")
         try:
             if sys.platform == "win32":
@@ -373,6 +374,30 @@ class Journal:
             )
             return True
 
+    def record_withheld_cancel(self, handle: str) -> bool:
+        """Record positive suppression before original RPC initiation, retaining history."""
+        with self.lock, self.db:
+            row = self.get(handle)
+            if (
+                row["state"] != "DISPATCHING"
+                or not row["cancel_requested"]
+                or row["abort_sent"]
+                or self.events(handle)
+            ):
+                return False
+            progress = row["progress"]
+            progress["native_send_withheld"] = True
+            self.db.execute(
+                "UPDATE runs SET state='CANCELED',detail=?,progress=?,"
+                "sequence=sequence+1 WHERE handle=?",
+                (
+                    "original RPC withheld by final pre-send cancellation guard",
+                    canonical(progress),
+                    handle,
+                ),
+            )
+            return True
+
     def append(
         self, handle: str, source: str, raw: bytes, event: dict[str, Any], provider: dict[str, Any]
     ) -> None:
@@ -561,3 +586,97 @@ class Journal:
                     "SELECT * FROM events WHERE handle=? ORDER BY seq", (handle,)
                 )
             ]
+
+    def no_effects_observations(self) -> dict[str, Any]:
+        """Export original canceled attempts with positive no-dispatch evidence."""
+        observations = []
+        encoded_bytes = 32
+        with self.lock:
+            records = self.db.execute(
+                "SELECT * FROM runs WHERE state='CANCELED' ORDER BY created_ns DESC LIMIT 256"
+            ).fetchall()
+            for record in records:
+                row = self.decode(record)
+                invocation = row["request"].get("invocation", {})
+                generation = invocation.get("execution_generation")
+                if (
+                    isinstance(generation, bool)
+                    or not isinstance(generation, int)
+                    or generation <= 0
+                ):
+                    continue
+                cached = self.effect_cache.get(row["handle"])
+                if cached and cached[0] == row["sequence"]:
+                    addition = len(canonical(cached[1]).encode()) + 1
+                    if encoded_bytes + addition > 32768:
+                        break
+                    encoded_bytes += addition
+                    observations.append(cached[1])
+                    continue
+                if not row["cancel_requested"] or row["progress"].get("plan_ids"):
+                    continue
+                events = self.events(row["handle"])
+                if row["dispatched"] and not row["progress"].get("native_send_withheld"):
+                    if row["progress"].get("turn_id") != row["task_id"]:
+                        continue
+                    interrupted = False
+                    valid = True
+                    for event_row in events:
+                        event = json.loads(event_row["decoded"])
+                        if event.get("session_id") != row["session_id"] or json.loads(
+                            event_row["provider"]
+                        ) != row["progress"].get("provider"):
+                            valid = False
+                            break
+                        if event_row["source"] != "task":
+                            continue
+                        if event["kind"] in {"plan", "batch_result", "node_state", "final_text"}:
+                            valid = False
+                            break
+                        status = event.get("status", {})
+                        interrupted |= (
+                            status.get("session_id") == row["session_id"]
+                            and status.get("state") == 2
+                            and status.get("message") == "interrupted"
+                        )
+                    if not valid or not interrupted:
+                        continue
+                elif events:
+                    continue
+                evidence = {
+                    "request_digest": row["digest"],
+                    "handle": row["handle"],
+                    "dispatched": row["dispatched"],
+                    "sequence": row["sequence"],
+                    "events": [
+                        {
+                            "source": event["source"],
+                            "raw_sha256": hashlib.sha256(event["raw"]).hexdigest(),
+                            "decoded": event["decoded"],
+                            "provider": event["provider"],
+                        }
+                        for event in events
+                    ],
+                }
+                observation = {
+                    "execution_id": row["attempt"],
+                    "execution_generation": generation,
+                    "command_id": "cancel-" + row["attempt"],
+                    "terminal_state": "CANCELLED",
+                    "safe_state": True,
+                    "assurance": "no-effects",
+                    "task_effects": {
+                        "native_session_id": row["session_id"],
+                        "native_task_id": row["task_id"],
+                        "disposition": "no-effects",
+                        "evidence_digest": "sha256:"
+                        + hashlib.sha256(canonical(evidence).encode()).hexdigest(),
+                    },
+                }
+                self.effect_cache[row["handle"]] = (row["sequence"], observation)
+                addition = len(canonical(observation).encode()) + 1
+                if encoded_bytes + addition > 32768:
+                    break
+                encoded_bytes += addition
+                observations.append(observation)
+        return {"observations": observations}

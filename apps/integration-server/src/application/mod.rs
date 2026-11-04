@@ -69,7 +69,8 @@ pub(crate) use deployment_feasibility::DeploymentFeasibility;
 pub(crate) use dispatch::{deferred_dispatch, node_accepts_execution_session};
 pub(crate) use dispatch::{drive_ready_tasks, drive_rebound_attempts};
 pub(crate) use outcomes::{
-    apply_pending_cancellations, apply_runtime_outcomes, close_terminal_mission_coordination,
+    apply_pending_cancellation, apply_pending_cancellations, apply_runtime_outcomes,
+    close_terminal_mission_coordination,
 };
 pub(crate) use persistence::{
     open_controller_event_log, server_checkpoint_json, validate_replication_checkpoint,

@@ -82,6 +82,7 @@ impl ExecutionCoordinationRequest {
     /// Refuses ambiguous beneficiaries, unbounded operations and software-only physical transitions.
     pub fn validate(&self) -> Result<(), String> {
         if self.schema != "roboguide.execution-coordination/v0.1"
+            || self.stop_assurance == SafetyAssurance::NoEffects
             || self.reason.trim().is_empty()
             || self.reason.len() > 1024
             || self.continuation_operations.is_empty()
@@ -150,6 +151,9 @@ mod tests {
         assert!(value.validate().is_err());
         value = request();
         value.schema = "roboguide.execution-coordination/v0.0".into();
+        assert!(value.validate().is_err());
+        value = request();
+        value.stop_assurance = SafetyAssurance::NoEffects;
         assert!(value.validate().is_err());
     }
 

@@ -376,11 +376,15 @@ impl CompiledLocalCatalog {
                     require(
                         export.is_some_and(|export| {
                             export.owner() == system.id()
+                                && ((support.assurance == domain::SafetyAssurance::NoEffects)
+                                    == (export.payload_schema()
+                                        == domain::TASK_EFFECT_OBSERVATION_SCHEMA))
                                 && export.semantic() == "observed"
                                 && matches!(
                                     export.payload_schema(),
                                     domain::SAFE_STATE_OBSERVATION_SCHEMA
                                         | domain::PROCESS_EXIT_OBSERVATION_SCHEMA
+                                        | domain::TASK_EFFECT_OBSERVATION_SCHEMA
                                 )
                         }),
                         "local_systems.metadata.execution-safety",

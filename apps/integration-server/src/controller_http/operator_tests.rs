@@ -237,6 +237,7 @@ async fn viewer_cannot_mutate_and_headers_cannot_elevate_authority() {
         "/v1/groups/a/recover",
         "/v1/executions/a/recover",
         "/v1/executions/a/cancel",
+        "/v1/executions/a/safety-stop/reconcile",
         "/v1/maintenance/archive",
     ] {
         let response = route(
@@ -310,6 +311,21 @@ async fn viewer_cannot_mutate_and_headers_cannot_elevate_authority() {
         role: Some(RECOVERY_ADMIN_ROLE.into()),
         mtls: false,
     };
+    assert!(
+        route(
+            &controller,
+            &log,
+            &operator,
+            &request(
+                "POST",
+                "/v1/executions/a/safety-stop/reconcile",
+                b"{}",
+                None
+            )
+        )
+        .await
+        .starts_with("HTTP/1.1 403")
+    );
     assert!(
         route(
             &controller,

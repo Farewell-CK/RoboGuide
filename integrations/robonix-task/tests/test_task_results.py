@@ -2,14 +2,15 @@
 
 import json
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
 
 import grpc
-from robonix_task.adapter import Adapter
+from robonix_task.adapter import Adapter, Server
 from robonix_task.protocol import Liaison, event_dict, message, task
-from test_protocol import NativeFixture, request, wait_for
+from test_protocol import NativeFixture, http, request, wait_for
 
 
 class TaskFixture(NativeFixture):
@@ -231,19 +232,92 @@ class TaskResults(unittest.TestCase):
                 task_results=True,
             )
             try:
-                row = app.submit(request())
+                body = request()
+                body["invocation"]["execution_generation"] = 7
+                row = app.submit(body)
                 wait_for(lambda: app.status(row["handle"])["progress"].get("turn_id"))
                 if mode == "planning-cancel-with-plan":
                     wait_for(lambda: app.status(row["handle"])["progress"].get("plan_ids"))
                 app.cancel(row["handle"])
                 wait_for(lambda: app.status(row["handle"])["state"] == expected)
+                wait_for(lambda: not app.jobs)
                 self.assertEqual(len(fixture.tasks), 1)
                 self.assertEqual(len(fixture.aborts), 1)
                 if expected == "CANCELED":
                     self.assertEqual(app.status(row["handle"])["progress"]["plan_ids"], [])
+                    proof = app.journal.no_effects_observations()["observations"]
+                    self.assertEqual(len(proof), 1)
+                    self.assertEqual(proof[0]["execution_generation"], 7)
+                    self.assertEqual(proof[0]["execution_id"], body["attempt_id"])
+                    self.assertEqual(proof[0]["assurance"], "no-effects")
+                    self.assertEqual(proof, app.journal.no_effects_observations()["observations"])
+                    server = Server(0, app)
+                    worker = threading.Thread(target=server.serve_forever)
+                    worker.start()
+                    try:
+                        code, observed = http(server.server_address[1], "/v1/executions/safe-state")
+                        self.assertEqual(code, 200)
+                        self.assertEqual(observed, {"observations": proof})
+                    finally:
+                        server.shutdown()
+                        server.server_close()
+                        worker.join()
+                else:
+                    self.assertEqual(app.journal.no_effects_observations(), {"observations": []})
             finally:
                 app.close()
                 fixture.close()
+
+    def test_unsent_no_effects_export_preserves_identity_on_restart(self):
+        """An unsent cancellation survives reopen, requires a real generation and is query-only."""
+        from robonix_task.journal import Journal
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "journal"
+            journal = Journal(root, {})
+            try:
+                body = request()
+                body["invocation"]["execution_generation"] = 3
+                row, _ = journal.admit(body, lambda _: None)
+                journal.cancel(row["handle"])
+                proof = journal.no_effects_observations()
+                self.assertEqual(len(proof["observations"]), 1)
+                self.assertEqual(
+                    proof["observations"][0]["task_effects"]["native_task_id"], row["task_id"]
+                )
+                sequence = journal.get(row["handle"])["sequence"]
+            finally:
+                journal.close()
+            reopened = Journal(root, {})
+            try:
+                self.assertEqual(reopened.no_effects_observations(), proof)
+                self.assertEqual(reopened.get(row["handle"])["sequence"], sequence)
+                missing = request("legacy-no-generation")
+                legacy, _ = reopened.admit(missing, lambda _: None)
+                reopened.cancel(legacy["handle"])
+                self.assertEqual(reopened.no_effects_observations(), proof)
+            finally:
+                reopened.close()
+
+    def test_no_effects_export_stays_within_node_payload_bound(self):
+        """Retain newest original cancellations without overflowing a single State export."""
+        from robonix_task.journal import Journal, canonical
+
+        with tempfile.TemporaryDirectory() as tmp:
+            journal = Journal(tmp, {})
+            try:
+                for index in range(32):
+                    body = request(f"{index:03}-" + "测" * 500)
+                    body["invocation"]["execution_generation"] = 1
+                    row, _ = journal.admit(body, lambda _: None)
+                    journal.cancel(row["handle"])
+                proof = journal.no_effects_observations()
+                self.assertLessEqual(len(canonical(proof).encode()), 32768)
+                self.assertLess(len(proof["observations"]), 32)
+                self.assertEqual(proof["observations"][0]["execution_id"], body["attempt_id"])
+                self.assertEqual(proof, journal.no_effects_observations())
+            finally:
+                journal.close()
 
     def test_postplan_failure_requires_all_plan_roots_succeeded(self):
         """Idle and a model error cannot close failed, canceled or unresolved native plans."""
