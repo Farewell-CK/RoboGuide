@@ -148,6 +148,13 @@ Global coordination handles `What / Who / When / Shared Where`. Local EAIOS owns
 planning, perception, navigation, motion, hardware control and immediate safety. Node, PhysicalEntity, Host
 and LocalSystem remain distinct identities even when they share a process or machine.
 
+The physical integration proposal distinguishes Local EAIOS task delegation from device integration.
+The former delegates a complete goal to the local operating system; the latter exposes implemented
+device capabilities through an existing runtime or local execution adapter. Both use RG task, resource,
+state and recovery mechanisms. Internal primitives remain locally owned. The common delegation
+contract and implementation are pending; [ADR-0231](../../decisions/0231-local-eaios-and-device-integration.md)
+records responsibilities, implementation gaps and acceptance steps.
+
 ## 2. Logical architecture
 
 | Responsibility | Authority | Implementation |

@@ -1,3 +1,9 @@
+ADR-0231 is a proposed integration design for Local EAIOS task delegation and device providers.
+Physical trials validate RG's task, resource, execution and recovery behavior. Both integration
+forms use the existing Node authority boundaries; local primitives remain Local EAIOS owned.
+The common delegation contract, Robonix lifecycle mapping and hardware acceptance are pending.
+Use its implementation and acceptance sequence when developing this integration.
+
 ADR-0221 verifies retired local Controller projections against exact completed private Archive
 packages in the same uniquely paired parent/member Root when protected/tail coverage has moved.
 Original authority, qualified owner/hash/size, complete package checks, conflicting-prefix refusal
