@@ -57,7 +57,7 @@ Workspace all-targets/all-features Clippy、Ruff、格式、函数文档及生�
 运动任务仍需要 Robonix 的原导航实例最终终止、设备状态及本机交接判断。
 已有 Executor root Canceled 和取消 ACK 不能替代该依据，未知场景继续保留占用。
 
-当前现场旧任务的 ManualEscalation 未解除。部署前需要在同一受检版本上更新 Controller、
+本次未对现场旧任务执行结案，也未重新查询现场现状。部署前需要在同一受检版本上更新 Controller、
 Node、Connector 与声明，并准备有实际身份的管理员认证。新增声明只作用于后续取消，
 不能补写原任务；原任务应按原身份、摘要和现场证据进行正式对账。
 随后先进行无动作取消验证，再进入低速导航和实际运动取消验收。
