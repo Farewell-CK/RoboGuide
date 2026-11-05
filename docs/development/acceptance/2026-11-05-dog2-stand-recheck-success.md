@@ -3,6 +3,7 @@
 用户明确要求“你再试一次，找到原因了”。沿用已确认的现场观察与原地站立范围，
 经 RG 正常 Mission、Node 和 Robonix Liaison/Pilot 下发一个新的独立任务。
 本机执行结果与后续实时状态均确认 standing，RG Mission 正常 Completed、资源归零。
+用户随后在本会话确认“已站稳”，本次原生结果、实时状态与现场观察一致。
 
 ## 原始身份
 
@@ -17,6 +18,7 @@
 | 原生 Task | T1，归属 m1，最终 done |
 | 原生完整事件 | 25 项，本机终态 SUCCEEDED，序列 29 |
 | RG Mission / attempt | Completed / Completed |
+| 现场独立确认 | 用户回复“已站稳” |
 
 开始前原生无活动计划、适配器无未决 run，RG 在线、零占用、unknown_attempts=0。
 底盘实时姿态 down，电量 36%、age_ms=3、stale=false。
@@ -49,8 +51,8 @@ boot ID 为 `e4e61ef5-3ff4-467e-bbe8-33db3f382c83`，Liaison registration 为
 `e85f597d-7a38-4ced-892c-09276495e916`。
 
 用户表示已找到此前原因，但具体原因及处理方式尚未提供；本轮没有据此推定控制模式、
-遥控器或硬件保护中的任何一种原因。已请求现场独立反馈是否站稳，当前文档以原生
-执行结果和实时状态为依据，尚未取得本次现场反馈。
+遥控器或硬件保护中的任何一种原因。对于本次复测，用户已在“请确认狗2现场是否已经
+站稳”的确认项中回复“已站稳”；该现场确认对应本篇原 Mission，不覆盖此前失败。
 
 15:08:07 左右一次 `/readyz` 返回 503，正文为 authority storage or quorum unavailable。
 随后 15:08:42、15:08:57 的查询均为 200，Controller 主 PID 1414757 未变，磁盘尚有

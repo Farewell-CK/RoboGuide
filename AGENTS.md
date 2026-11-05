@@ -24,8 +24,8 @@ Failed and released resources normally, without cancellation or manual settlemen
 retry is implicit. See the separate model-restored stand acceptance; device cause is unconfirmed.
 The separately authorized 15:07 stand recheck completed: one native stand, fresh standing state,
 original Task done, RG Completed and zero allocations/Unknown. No RG code changed for that recheck.
-Keep the earlier failures and a transient readiness 503; exact device cause and onsite feedback
-remain unprovided. See the stand-recheck-success acceptance before describing verified scope.
+The user subsequently confirmed stable standing onsite. Keep the earlier failures and a transient
+readiness 503; the exact device cause remains unprovided. See the stand-recheck-success acceptance.
 Late cancellation terminals retain their original ingress time and stop deadline. Expire only the
 affected purpose to manual handling; ordinary late results must not disable the shared writer.
 Physical trials validate RG's task, resource, execution and recovery behavior. Both integration
