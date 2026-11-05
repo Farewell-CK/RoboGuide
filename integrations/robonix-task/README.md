@@ -82,7 +82,9 @@ execution-report 依据判定满足。姿态和硬件效果由 Robonix 确认，
 补齐了无副作用取消和管理员结案的路径。2026-11-05 已部署到狗2及 ThinkPad，
 旧任务正式结案、3 次原生规划期取消和一项只读任务通过，重启保持原结果。
 详见[现场验收](../../docs/development/acceptance/2026-11-05-dog2-cancellation-field-validation.md)。
-真实运动取消、停止证明及 P3 导航继续待验收。新片段声明 no-effects 支持，不声明设备停止能力。
+真实运动取消和停止证明继续待验收；随后单独授权的
+[公司门口导航到达](../../docs/development/acceptance/2026-11-05-dog2-company-entrance-navigation.md)
+已完成并获现场确认。新片段声明 no-effects 支持，不声明设备停止能力。
 
 safe-state 只报告明确未发送的原任务，或原 turn interrupted 且完整流中没有任何计划的
 取消。缺 generation、未知、计划已发出、来源不匹配或缺终止事件时不报告。

@@ -3,7 +3,10 @@
 2026-11-05 的[本轮 P1 真机验收](docs/development/acceptance/2026-11-05-dog2-p1-posture-and-admission.md)
 完成了狗2站立→趴下、Mission 重传/冲突和同槽只读竞争。另修复
 [Controller readiness 写入竞态](docs/development/acceptance/2026-11-05-controller-readiness-writer.md)。
-运动取消与导航仍需[本机停止接口](docs/development/robonix-motion-stop-integration-gap-2026-11-05.md)
+修复已部署并保留历史；随后完成现场监护的[公司门口导航到达](docs/development/acceptance/2026-11-05-dog2-company-entrance-navigation.md)。
+后续[返程与换电记录](docs/development/acceptance/2026-11-05-dog2-return-after-battery.md)
+保留断电取消及新任务规划超时，当前返程未确认完成。
+运动取消、失联和自动恢复仍需[本机停止接口](docs/development/robonix-motion-stop-integration-gap-2026-11-05.md)
 提供原任务终止及停止观察，当前 no-effects 声明不授予运动停止能力。
 
 [ADR-0233 本机取消人工结案](docs/decisions/0233-local-administrator-cancel-settlement.md)
