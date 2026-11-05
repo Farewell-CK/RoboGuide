@@ -15,6 +15,10 @@ ADR-0233 adds explicit offline Local EAIOS administrator cancellation closure un
 lock, exact original row/event digest and actual local principal. Keep native bytes and old state;
 v2 fences old writers and validates all receipts on restore. Never export no-effects or device-stop
 proof from this decision. Controller cancellation settlement remains independent and authenticated.
+On the afternoon dog2 boot, both exact attempts were formally settled with this local tool and
+the existing Controller mTLS administrator route. Original events/clocks remain; allocations and
+Unknown are zero. The one new stand retry produced zero plans because native VLM returned HTTP
+401 API_KEY_DISABLED. Restore native credentials before further tasks; no actuator retry is implicit.
 Late cancellation terminals retain their original ingress time and stop deadline. Expire only the
 affected purpose to manual handling; ordinary late results must not disable the shared writer.
 Physical trials validate RG's task, resource, execution and recovery behavior. Both integration

@@ -116,6 +116,10 @@ attestation 和非空 evidence。完整摘要由 `manual_settlement.audit_digest
 之后仍须 Controller 的正式管理员取消结案，不授予自动续跑；新任务另行授权。
 新 journal profile v2 拒绝旧 writer，冷恢复逐项核对原始证据和人工回执。
 
+2026-11-05 下午已在狗2实际应用上述两级结案，原历史保持、占用归零；随后一次正式
+站立重试在 Robonix 模型阶段收到 API_KEY_DISABLED，零原生计划、零动作，已取消收尾。
+当前结果及凭据恢复条件见[重试验收](../../docs/development/acceptance/2026-11-05-dog2-stand-retry.md)。
+
 ## 检查
 
 从仓库根目录执行以下命令。依赖按独立集成模块加载。
