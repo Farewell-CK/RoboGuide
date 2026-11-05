@@ -27,6 +27,10 @@ Node Protocol、狗2 Connector 和 Robonix Liaison/Pilot 进入。没有下发�
 运动取消、物理停止、原生 Robonix 重启查回、执行中断链和多参与者验收尚未完成。
 P3 导航本轮未执行。
 
+同日随后另行授权的站立复验未通过，新增了需要保留的未知执行占用。
+当前现场状态应同时参考[站立复验记录](2026-11-05-dog2-stand-field-validation.md)，
+不得把本轮无动作验收的零占用状态当作该次动作后的状态。
+
 ## 部署身份与保存的数据
 
 Controller 位于 `duchaoke@192.168.2.20`，Operator 入口为本机

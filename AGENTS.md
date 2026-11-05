@@ -8,6 +8,9 @@ prior Controller. The gate owns only isolated loopback software processes and pr
 The 2026-11-05 field trial deployed 8fd00c4d, formally settled the original no-effects hold,
 and passed three native planning cancellations, a read-only task and service restart retention.
 See its acceptance note. Motion cancellation and physical stopping remain unverified.
+The same-day authorized stand recheck failed: the user observed stand then down; native stand
+returned standing/unknown and Pilot left its task in progress. RG retains the original Unknown,
+ManualEscalation and resource ownership. See the separate stand acceptance; never replay or clear it.
 Late cancellation terminals retain their original ingress time and stop deadline. Expire only the
 affected purpose to manual handling; ordinary late results must not disable the shared writer.
 Physical trials validate RG's task, resource, execution and recovery behavior. Both integration
