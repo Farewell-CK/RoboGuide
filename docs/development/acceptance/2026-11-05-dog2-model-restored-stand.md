@@ -4,6 +4,10 @@
 RG Controller → 正式 Node → 同进程 Connector → Robonix Liaison/Pilot → Executor
 发起一次站立。现场反馈为“完全没有起身”，本次持续站立验证未通过。
 
+后续用户表示已找到原因并另行授权一次站立复测，新任务原生 standing、T1 done，RG
+正常 Completed。详情见[后续成功记录](2026-11-05-dog2-stand-recheck-success.md)，
+本篇保留前次未起身的原始事实。
+
 ## 实际结果
 
 | 项目 | 结果 |

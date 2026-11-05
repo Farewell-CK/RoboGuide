@@ -124,6 +124,11 @@ attestation 和非空 evidence。完整摘要由 `manual_settlement.audit_digest
 现场确认完全未起身。本轮原生任务明确 failed，正常回传并释放占用，不需要人工结案。
 详见[模型恢复后验证](../../docs/development/acceptance/2026-11-05-dog2-model-restored-stand.md)。
 
+15:07 用户再次授权后，新的站立任务经 RG 正常完成：一次 stand、动作后实时 standing、
+原生 T1 done，RG Completed 并释放资源；独立只读复查仍 standing。本轮没有代码修改。
+[成功记录](../../docs/development/acceptance/2026-11-05-dog2-stand-recheck-success.md)
+另保留一次短暂 readiness 503 及尚待提供的具体现场原因，不覆盖前次失败。
+
 ## 检查
 
 从仓库根目录执行以下命令。依赖按独立集成模块加载。
