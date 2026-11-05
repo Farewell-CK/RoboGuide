@@ -120,6 +120,10 @@ attestation 和非空 evidence。完整摘要由 `manual_settlement.audit_digest
 站立重试在 Robonix 模型阶段收到 API_KEY_DISABLED，零原生计划、零动作，已取消收尾。
 当前结果及凭据恢复条件见[重试验收](../../docs/development/acceptance/2026-11-05-dog2-stand-retry.md)。
 
+随后用户恢复凭据，RG 只读任务 Completed，站立任务因动作后姿态仍 down 而 Failed；
+现场确认完全未起身。本轮原生任务明确 failed，正常回传并释放占用，不需要人工结案。
+详见[模型恢复后验证](../../docs/development/acceptance/2026-11-05-dog2-model-restored-stand.md)。
+
 ## 检查
 
 从仓库根目录执行以下命令。依赖按独立集成模块加载。

@@ -3,6 +3,10 @@
 用户再次要求继续尝试站立。本轮只通过正式 RG Mission 委派 Robonix，没有直接调用
 底盘动作。此前的现场站立结果见[上午记录](2026-11-05-dog2-stand-field-validation.md)。
 
+后续：用户恢复模型凭据后，14:45 的 RG 只读任务完成；新站立任务仍未起身，但已正常
+报告 Failed 并释放资源。当前结果见[模型恢复后验证](2026-11-05-dog2-model-restored-stand.md)。
+下文 API_KEY_DISABLED 和恢复条件描述的是本轮原始中断时刻。
+
 ## 旧任务结案与部署
 
 狗2本次 boot ID 为 `e4e61ef5-3ff4-467e-bbe8-33db3f382c83`，此前为
