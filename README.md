@@ -1,5 +1,9 @@
 # RoboGuide
 
+[狗2真实任务执行流水](docs/development/dog2-real-task-pipeline-2026-11-05.md)
+逐步核对实际 HTTPS 入口、Match/Commit/Bind、Node workflow、Robonix 事件回传和协作模式。
+本轮固定计划由外部操作端构造，站立/返程/趴下为三个 independent Mission 的外部串接。
+
 2026-11-05 的[本轮 P1 真机验收](docs/development/acceptance/2026-11-05-dog2-p1-posture-and-admission.md)
 完成了狗2站立→趴下、Mission 重传/冲突和同槽只读竞争。另修复
 [Controller readiness 写入竞态](docs/development/acceptance/2026-11-05-controller-readiness-writer.md)。
