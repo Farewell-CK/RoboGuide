@@ -39,8 +39,13 @@ task goals and tracks results; local navigation and safety remain Robonix owned.
 The subsequent return was interrupted by battery loss. Its exact cancelled Unknown was formally
 closed after the user reported battery replacement and separately authorized a new return. That
 new Mission dog2-return-after-battery-20261105T090824Z timed out while native planning; its scoped
-abort only reported stop requested. Retain Cancelling/Unknown and the original slot, never replay
-or clear it as a successful return. See the return-after-battery acceptance for exact identities.
+abort only reported stop requested. That hold was retained until the next explicit stand/return
+authorization and formal exact cancellation closure after an actual zero-active-plans observation.
+The new stand, return and separately authorized down Missions completed, with onsite return
+confirmation, fresh standing/down and zero remaining allocations/Unknown. Preserve the return's
+three native navigation calls and its done-versus-arrival result discrepancy: Native Task done and
+RG Completed do not independently prove the delegated physical goal. See the stand-then-return
+acceptance. Never replay or relabel the earlier failed/cancelled returns as successes.
 Late cancellation terminals retain their original ingress time and stop deadline. Expire only the
 affected purpose to manual handling; ordinary late results must not disable the shared writer.
 Physical trials validate RG's task, resource, execution and recovery behavior. Both integration

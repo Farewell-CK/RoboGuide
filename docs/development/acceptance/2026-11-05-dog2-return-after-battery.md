@@ -40,8 +40,9 @@ Controller 通过原 mTLS 管理员结案接口处理同一 attempt。原 Missio
   `-0.237019`；目标要求沿用此前低速上限 `0.16 m/s`。
 
 验证通过后只发布一次，Controller 返回 202，原 Node 与同一 Connector 受理。
-本机回执只有计划 `432e-1`：读取导航能力文档和当前速度限制，然后保持
-“Planning the next step”。换电重启后只读限速报告实际为 60% 即 `0.48 m/s`；
+保留的原生 Plan 正文只有 `432e-1`：读取导航能力文档和当前速度限制，然后保持
+“Planning the next step”。后续任务状态还引用 `432e-2`，但原流没有收到其 Plan 正文；
+不能由缺回执推断不存在后续副作用。换电重启后只读限速报告为 60% 即 `0.48 m/s`；
 尚未收到设置低速或导航调用的回执，不能宣称本轮低速约束已落实或已经返程。
 
 约 300 秒原预算结束后，执行进入 Unknown；适配器对原 session 发出一次 scoped abort，
@@ -49,6 +50,13 @@ Controller 通过原 mTLS 管理员结案接口处理同一 attempt。原 Missio
 最后已保存的状态为 Mission Cancelling、attempt Unknown，原占用继续保留。
 这不是成功、设备停止确认或管理员再次结案。观察位置仍约 `(7.493128, -2.971106)`，
 未确认回到原起点；没有为绕过未决占用再次下发任务。
+
+## 后续单独授权
+
+用户随后明确要求先站立再返程。实际读取当前 Executor 活动计划为零后，通过同一
+离线管理员工具及 Controller 认证结案接口结束上述原 Unknown，原记录、事件和
+deadline 均保留，不生成 no-effects 或物理 StopConfirmed。新的站立、返程及后续
+趴下另见[本轮记录](2026-11-05-dog2-stand-then-return.md)，不覆盖本次超时。
 
 ## 证据
 

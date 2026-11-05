@@ -5,7 +5,9 @@
 [Controller readiness 写入竞态](docs/development/acceptance/2026-11-05-controller-readiness-writer.md)。
 修复已部署并保留历史；随后完成现场监护的[公司门口导航到达](docs/development/acceptance/2026-11-05-dog2-company-entrance-navigation.md)。
 后续[返程与换电记录](docs/development/acceptance/2026-11-05-dog2-return-after-battery.md)
-保留断电取消及新任务规划超时，当前返程未确认完成。
+保留断电取消及新任务规划超时；再次授权后完成了
+[站立、返程及趴下](docs/development/acceptance/2026-11-05-dog2-stand-then-return.md)，
+现场确认已返回停稳。原生任务结束与目标达成的结果语义仍有差异，记录中分别保留。
 运动取消、失联和自动恢复仍需[本机停止接口](docs/development/robonix-motion-stop-integration-gap-2026-11-05.md)
 提供原任务终止及停止观察，当前 no-effects 声明不授予运动停止能力。
 
