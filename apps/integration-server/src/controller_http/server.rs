@@ -873,6 +873,7 @@ where
     } else {
         domain::TimestampMs::new(0)
     };
+    let readiness_write_gate = event_write_gate.clone();
     let authorized_write_gate = Arc::new(AuthorizedRequestGate::new(
         event_write_gate.clone(),
         controller.clone(),
@@ -1552,22 +1553,34 @@ where
     }
     let (status, body) = match (method, path) {
         ("GET", "/healthz") => ("200 OK", serde_json::json!({"status": "ok"})),
-        ("GET", "/readyz") => match event_log.readiness() {
-            Ok(()) => {
+        ("GET", "/readyz") => {
+            // Probe the original committed store in its normal writer turn, so an in-flight
+            // application batch is not mistaken for failed storage. This grants no mutation.
+            let ready = application::run_synchronous_transaction(|| {
+                let _turn = readiness_write_gate.lock()?;
+                event_log.readiness().map_err(|error| error.to_string())?;
                 let live = controller
                     .lock()
-                    .map_err(|_| "controller lock is poisoned")?;
-                let unknown = live.bridge.current_unknown_attempts().len();
-                (
+                    .map_err(|_| "controller lock is poisoned".to_string())?;
+                Ok::<_, String>(live.bridge.current_unknown_attempts().len())
+            });
+            match ready {
+                Ok(unknown) => (
                     "200 OK",
                     serde_json::json!({"ready":true,"degraded":unknown>0,"unknown_attempts":unknown}),
-                )
+                ),
+                Err(error) => {
+                    eprintln!(
+                        "Controller readiness authority check failed: {}",
+                        error.chars().take(512).collect::<String>()
+                    );
+                    (
+                        "503 Service Unavailable",
+                        serde_json::json!({"ready":false,"reason":"authority storage or quorum unavailable"}),
+                    )
+                }
             }
-            Err(_) => (
-                "503 Service Unavailable",
-                serde_json::json!({"ready":false,"reason":"authority storage or quorum unavailable"}),
-            ),
-        },
+        }
         ("GET", "/v1/memory/use-leases") => {
             let live = controller
                 .lock()

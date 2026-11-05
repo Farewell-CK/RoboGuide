@@ -9,6 +9,9 @@ mod plan_validation_tests;
 #[path = "write_recovery_tests.rs"]
 mod write_recovery_tests;
 
+#[path = "readiness_tests.rs"]
+mod readiness_tests;
+
 /// Metrics-only identity is explicitly global yet cannot read business projections or any mutation.
 #[tokio::test]
 async fn metrics_reader_cannot_read_business_or_acquire_mutation_authority() {
