@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 TERMINAL = {"SUCCEEDED", "FAILED", "CANCELED"}
+MANUAL_SETTLEMENT_SCHEMA = "lab-pilot-journal/2"
 
 
 class Conflict(ValueError):
@@ -90,8 +91,23 @@ class Journal:
                 }
             )
             previous = self.db.execute("SELECT value FROM meta WHERE key='profile'").fetchone()
-            if previous and previous[0] != encoded_profile:
+            manual_profile = json.loads(encoded_profile)
+            manual_profile["schema"] = MANUAL_SETTLEMENT_SCHEMA
+            if previous and previous[0] not in {encoded_profile, canonical(manual_profile)}:
                 raise Conflict("journal belongs to a different immutable deployment profile")
+            has_settlements = self.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='operator_settlements'"
+            ).fetchone()
+            if (
+                has_settlements
+                and self.db.execute("SELECT 1 FROM operator_settlements LIMIT 1").fetchone()
+                and (not previous or previous[0] != canonical(manual_profile))
+            ):
+                raise Conflict("operator settlement journal cannot downgrade its profile")
+            if previous and previous[0] == canonical(manual_profile):
+                from .manual_settlement import validate_restored
+
+                validate_restored(self)
             self.db.execute("INSERT OR IGNORE INTO meta VALUES('profile',?)", (encoded_profile,))
             self.db.execute(
                 """UPDATE runs SET state='UNKNOWN',detail=?,sequence=sequence+1
@@ -613,7 +629,11 @@ class Journal:
                     encoded_bytes += addition
                     observations.append(cached[1])
                     continue
-                if not row["cancel_requested"] or row["progress"].get("plan_ids"):
+                if (
+                    not row["cancel_requested"]
+                    or row["progress"].get("plan_ids")
+                    or row["progress"].get("manual_cancel_settlement")
+                ):
                     continue
                 events = self.events(row["handle"])
                 if row["dispatched"] and not row["progress"].get("native_send_withheld"):

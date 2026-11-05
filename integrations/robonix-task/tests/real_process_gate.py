@@ -18,6 +18,8 @@ from pathlib import Path
 
 import jsonschema
 from robonix_task.adapter import Adapter, Server
+from robonix_task.journal import Journal
+from robonix_task.manual_settlement import audit_digest
 from robonix_task.protocol import Liaison
 from test_task_results import TaskFixture
 
@@ -58,13 +60,15 @@ def stop(child):
             child.wait(timeout=5)
 
 
-def run_case(args, manual):
+def run_case(args, manual, local_operator=False):
     """Submit once, cancel through RG, check allocations, restart, and reject a prior writer."""
-    root = args.output / ("manual" if manual else "automatic")
+    root = args.output / (
+        "local-operator" if local_operator else "manual" if manual else "automatic"
+    )
     root.mkdir(parents=True, exist_ok=False)
     package = Path(__file__).resolve().parents[1]
     repository = package.parents[1]
-    fixture = TaskFixture(root, mode="planning-cancel")
+    fixture = TaskFixture(root, mode="still-running" if local_operator else "planning-cancel")
     app = Adapter(
         root / "pilot-journal",
         Liaison(fixture.endpoint, "rg/fixture", "local:test"),
@@ -213,6 +217,63 @@ def run_case(args, manual):
             children,
         )
         exchange(f"/v1/missions/{mid}/cancel", {})
+        if local_operator:
+            await_read(lambda: not app.jobs, bool, children)
+            row = app.journal.find(eid)
+            assert row["state"] == "UNKNOWN" and row["progress"]["plan_ids"]
+            native_events = app.journal.events(row["handle"])
+            server.shutdown()
+            worker.join()
+            local_port = server.server_address[1]
+            server.server_close()
+            profile = json.loads(
+                app.journal.db.execute("SELECT value FROM meta WHERE key='profile'").fetchone()[0]
+            )["profile"]
+            app.close()
+            journal = Journal(root / "pilot-journal", profile)
+            row = journal.get(row["handle"])
+            command = {
+                "schema_version": "robonix.local-cancel-settlement/v0.1",
+                "command_id": "synthetic-local-operator",
+                "handle": row["handle"],
+                "request_digest": row["digest"],
+                "expected_sequence": row["sequence"],
+                "expected_audit_sha256": audit_digest(journal, row["handle"]),
+                "confirmed": True,
+                "disposition": "stopped",
+                "attestation": "Synthetic operator reviewed complete fixture plans and idle state.",
+                "evidence": {"scope": "isolated fake-native software process; no physical device"},
+            }
+            journal.close()
+            command_path = root / "local-command.json"
+            command_path.write_text(json.dumps(command))
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "robonix_task.manual_settlement",
+                    str(root / "pilot-journal"),
+                    "--command",
+                    str(command_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            (root / "local-receipt.json").write_text(completed.stdout)
+            app = Adapter(
+                root / "pilot-journal",
+                Liaison(fixture.endpoint, "rg/fixture", "local:test"),
+                allowed_operations=("task.delegate@v1",),
+                enabled=True,
+                task_results=True,
+                task_profile="local-task-v1",
+            )
+            assert app.journal.events(row["handle"]) == native_events
+            assert app.journal.no_effects_observations() == {"observations": []}
+            server = Server(local_port, app)
+            worker = threading.Thread(target=server.serve_forever)
+            worker.start()
         if manual:
             await_read(
                 lambda: exchange(f"/v1/executions/{eid}"),
@@ -230,9 +291,13 @@ def run_case(args, manual):
                     "execution_generation"
                 ],
                 "confirmed": True,
-                "disposition": "no-effects",
-                "attestation": "Synthetic operator verified original interruption and zero plans.",
-                "evidence": app.journal.no_effects_observations(),
+                "disposition": "stopped" if local_operator else "no-effects",
+                "attestation": "Synthetic operator verified the original software cancellation.",
+                "evidence": (
+                    {"local_receipt": json.loads((root / "local-receipt.json").read_text())}
+                    if local_operator
+                    else app.journal.no_effects_observations()
+                ),
             }
             jsonschema.validate(
                 body,
@@ -292,7 +357,7 @@ def run_case(args, manual):
             assert "\n".join(db.iterdump()) == before, "prior writer changed original SQL authority"
             db.close()
         result = {
-            "case": "manual" if manual else "automatic",
+            "case": "local-operator" if local_operator else "manual" if manual else "automatic",
             "mission_id": mid,
             "execution_id": eid,
             "native_submissions": len(fixture.tasks),
@@ -324,6 +389,7 @@ def main():
     parser.add_argument("--node", type=Path, required=True)
     parser.add_argument("--old-controller", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--local-operator", action="store_true")
     args = parser.parse_args()
     args.output = args.output.resolve()
     for binary in [args.controller, args.node, args.old_controller]:
@@ -338,6 +404,8 @@ def main():
     (args.output / "binaries.json").write_text(json.dumps(manifest, indent=2))
     for manual in [False, True]:
         run_case(args, manual)
+    if args.local_operator:
+        run_case(args, True, local_operator=True)
 
 
 if __name__ == "__main__":

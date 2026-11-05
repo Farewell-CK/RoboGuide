@@ -1,5 +1,9 @@
 # RoboGuide V2 现行架构
 
+[ADR-0233](../../decisions/0233-local-administrator-cancel-settlement.md)将缺少原生终态的
+本机取消人工结案归于 Local EAIOS 适配模块的离线运维入口，保留原证据并拒绝旧 writer。
+RG Controller 继续独立处理原取消及认证管理员结案；两者都不产生物理停止或自动续跑权限。
+
 [ADR-0214](../../decisions/0214-replicated-federation-deployment.md)将复制部署的 Federation
 配置归于 supervisor 的显式进程输入：原 domain、authorization 和可选 root peer 文件进入
 共同 policy identity，并传给唯一 owned child。它接线既有 v60 权威，不创建额外账本、

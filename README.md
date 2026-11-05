@@ -1,5 +1,9 @@
 # RoboGuide
 
+[ADR-0233 本机取消人工结案](docs/decisions/0233-local-administrator-cancel-settlement.md)
+补齐原生进程重启后 UNKNOWN 的离线运维路径，保留原任务及审计；Controller 仍通过
+原认证接口独立结案，不把管理员决定解释为设备停止证明。
+
 [ADR-0232 取消结案候选](docs/decisions/0232-task-cancellation-settlement.md)在独立分支实现
 未产生副作用的自动取消收尾及管理员对账。实现复用现有 Node/State 和 Connector，
 不授予物理停止、恢复或交接权限。

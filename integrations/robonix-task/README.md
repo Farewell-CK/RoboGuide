@@ -100,6 +100,22 @@ Mission 取消释放使用，不解除恢复、续跑或物理交接的停止证
 源身份变化、缺计划结果或取消仍未结束时继续保留 UNKNOWN。旧任务的 deadline
 继续由 Controller 判断，迟到的本机成功不能补写成按时完成。
 
+原生进程重启后确实无法取得原任务终态时，管理员可按
+[ADR-0233](../../docs/decisions/0233-local-administrator-cancel-settlement.md)在 Connector
+停止期间使用离线工具：
+
+```bash
+python3 -m robonix_task.manual_settlement DIRECTORY --command REVIEWED_COMMAND.json
+```
+
+命令 schema 为 `robonix.local-cancel-settlement/v0.1`，必须提供原 handle、request_digest、
+expected_sequence、expected_audit_sha256、command_id、confirmed=true、disposition=stopped、
+attestation 和非空 evidence。完整摘要由 `manual_settlement.audit_digest` 在原 OS 锁下计算。
+本机登录主体由工具取得。需先独立核验原任务停止和当前设备状态，不能用此命令制造
+原生终态。工具只产生人工 CANCELED 与原回执，保留全部原生事件、旧状态及时间。
+之后仍须 Controller 的正式管理员取消结案，不授予自动续跑；新任务另行授权。
+新 journal profile v2 拒绝旧 writer，冷恢复逐项核对原始证据和人工回执。
+
 ## 检查
 
 从仓库根目录执行以下命令。依赖按独立集成模块加载。
