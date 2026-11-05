@@ -5,7 +5,9 @@ resume or handoff authority. Administrator reconciliation retains original histo
 New nested closed settlement fields fence prior writers; historical wrapper downgrades refuse.
 Run task-settlement/Node/Domain tests, workspace Clippy and the real-process gate with a frozen
 prior Controller. The gate owns only isolated loopback software processes and private test SQL.
-Motion cancellation and actual field deployment remain independently unverified.
+The 2026-11-05 field trial deployed 8fd00c4d, formally settled the original no-effects hold,
+and passed three native planning cancellations, a read-only task and service restart retention.
+See its acceptance note. Motion cancellation and physical stopping remain unverified.
 Late cancellation terminals retain their original ingress time and stop deadline. Expire only the
 affected purpose to manual handling; ordinary late results must not disable the shared writer.
 Physical trials validate RG's task, resource, execution and recovery behavior. Both integration
@@ -15,8 +17,8 @@ An opt-in deployment catalog and ordinary Node workflow completed one real dog2 
 Keep local motion/result decisions in Robonix and preserve unknown execution ownership.
 Motion cancellation, native restart lookup and multi-participant acceptance remain pending.
 The P0-P3 dog2 trial found missing operation-owned safety exports: native cancellation can be
-terminal while Controller retains the original ManualEscalation hold. Preserve that hold and
-original clocks; declaration updates cannot retroactively prove stopping. See its acceptance note.
+terminal while Controller retains ManualEscalation. Preserve unresolved holds and original clocks;
+declaration updates cannot retroactively prove stopping. Formal settlement retains original history.
 Known-handle status reads continue with bounded backoff after the Unknown fence, never Execute.
 Run its real-loopback unittest suite, Ruff and function-doc checks; run Catalog tests on Linux.
 The rejected-dispatch maintenance example uses the existing locked journal and exact operator

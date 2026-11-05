@@ -79,8 +79,10 @@ execution-report 依据判定满足。姿态和硬件效果由 Robonix 确认，
 记录了一项接入缺口。当时 task.delegate 部署尚未声明 execution-safety 和对应状态导出，
 因此取消后的本机 CANCELED 与 RG execution Cancelled 仍可能留下 Mission Cancelling
 及资源占用。本分支按 [ADR-0232](../../docs/decisions/0232-task-cancellation-settlement.md)
-补齐了无副作用取消和管理员结案的软件路径，尚未部署到现场。真实运动取消、停止证明
-及 P3 导航继续待验收。新片段声明 no-effects 支持，不声明设备停止能力。
+补齐了无副作用取消和管理员结案的路径。2026-11-05 已部署到狗2及 ThinkPad，
+旧任务正式结案、3 次原生规划期取消和一项只读任务通过，重启保持原结果。
+详见[现场验收](../../docs/development/acceptance/2026-11-05-dog2-cancellation-field-validation.md)。
+真实运动取消、停止证明及 P3 导航继续待验收。新片段声明 no-effects 支持，不声明设备停止能力。
 
 safe-state 只报告明确未发送的原任务，或原 turn interrupted 且完整流中没有任何计划的
 取消。缺 generation、未知、计划已发出、来源不匹配或缺终止事件时不报告。

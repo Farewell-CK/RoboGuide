@@ -2,7 +2,9 @@
 
 [ADR-0232 取消结案候选](docs/decisions/0232-task-cancellation-settlement.md)在独立分支实现
 未产生副作用的自动取消收尾及管理员对账。实现复用现有 Node/State 和 Connector，
-不授予物理停止、恢复或交接权限。现场部署与运动取消另行验证。
+不授予物理停止、恢复或交接权限。
+2026-11-05 的[现场无动作验收](docs/development/acceptance/2026-11-05-dog2-cancellation-field-validation.md)
+已完成部署、旧任务正式结案、3 次新任务自动取消及服务重启保持。运动取消另行验证。
 软件进程、旧 writer 拒绝和检查结果见
 [取消结案验收](docs/development/acceptance/2026-11-04-task-cancellation-settlement.md)。
 
@@ -17,7 +19,7 @@
 [真机验收记录](docs/development/acceptance/2026-11-04-robonix-task-delegation.md)。
 后续 [P0–P3 实测](docs/development/acceptance/2026-11-04-dog2-p0-p3-validation.md)
 已确认部署重启、幂等与原任务取消回传，并发现安全状态证据和人工对账解除的接入缺口。
-当前全局取消仍保留原资源占用，导航尚未执行。
+该轮原占用已在上述 2026-11-05 验收中正式结案，原历史与期限保留；导航尚未执行。
 
 ## 当前整改状态 · 2026-10-26
 
