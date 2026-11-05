@@ -7,6 +7,8 @@ AGY 当前 APK 的实际实现与下一轮交付要求见
 [源码与打包结果审查](mobile-hub-code-audit-2026-11-04.md)。现有界面原型尚未实现手机 Node。
 后续 `41b257a` 已增加 Android Node 代码，注册与真实采图验收仍不通过，详见
 [2026-11-05 交付复核](mobile-node-delivery-audit-2026-11-05.md)。
+`18f1372` 修正了类型字段并补软件联调，Android 真机及采图仍需验收，见
+[v0.5 复核](mobile-node-v05-delivery-audit-2026-11-05.md)。
 
 ## 定位与职责
 
