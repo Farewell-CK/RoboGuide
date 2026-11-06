@@ -132,6 +132,25 @@ attestation 和非空 evidence。完整摘要由 `manual_settlement.audit_digest
 [成功记录](../../docs/development/acceptance/2026-11-05-dog2-stand-recheck-success.md)
 另保留一次短暂 readiness 503 及尚待提供的具体现场原因，不覆盖前次失败。
 
+## 从 RG 只读查询地图位置
+
+`robonix_task.position` 只访问 Controller 的现有 State 和 inventory GET，不提交任务，
+不直接查询 Robonix。统一 Connector 在原 robot-state 中补充 Mapping 缓存年龄；
+旧缓存、节点不可达、外层过期、错误地图与无效坐标均显示 unavailable。
+详情见 [ADR-0234](../../docs/decisions/0234-controller-reported-position-inspection.md)。
+
+```bash
+PYTHONPATH=integrations/robonix-task python -m robonix_task.position \
+  --controller-origin https://CONTROLLER:8080 \
+  --ca /deployment/ca.crt --cert /deployment/reader.crt --key /deployment/reader.key \
+  --node-id NODE_ID --map-id EXPECTED_MAP_ID --output new-inspection.json
+```
+
+reported 表示来自明确来源且具有缓存年龄的 Mapping API 报告位置。它不证明原定位测量
+时间、定位质量、地图 revision 或共享 frame，输出不授予运动、World grounding 或
+MI 权限。`--output` 采用新文件，不覆盖原始证据；退出码 0 表示 reported，2 表示
+unavailable。TLS/传输/格式错误单独失败，没有重试、代理、重定向或机器人回退查询。
+
 ## 检查
 
 从仓库根目录执行以下命令。依赖按独立集成模块加载。

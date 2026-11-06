@@ -1,8 +1,10 @@
 """Serve the existing camera, state, and Pilot workflows from one local process."""
 
 import argparse
+import json
 import signal
 import threading
+import time
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -11,6 +13,7 @@ from camera_adapter import Captures
 from camera_adapter import handler_type as camera_handler
 from robonix_task.adapter import Adapter, Server
 from robonix_task.adapter import Handler as PilotHandler
+from robonix_task.position import annotate_mapping_age
 from robonix_task.protocol import Liaison
 from status_bridge import Status
 from status_bridge import handler_type as observer_handler
@@ -29,7 +32,19 @@ def combined_handler(captures, observer):
             if self.path.startswith("/v1/pilot/"):
                 self.path = "/v1/" + self.path.removeprefix("/v1/pilot/")
                 PilotHandler.do_GET(self)
-            elif self.path in ("/v1/state", "/v1/catalog", "/v1/observer/health"):
+            elif self.path == "/v1/state":
+                value = annotate_mapping_age(observer.read(), time.time_ns())
+                value["atlas"]["providers"] = [
+                    {"id": p["id"], "state": p["state"]}
+                    for p in value["atlas"].get("providers", [])
+                ]
+                raw = json.dumps(value, allow_nan=False).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+            elif self.path in ("/v1/catalog", "/v1/observer/health"):
                 if self.path == "/v1/observer/health":
                     self.path = "/v1/health"
                 state.do_GET(self)

@@ -1,4 +1,9 @@
 ADR-0231 defines opt-in Local EAIOS task delegation and device-provider integration.
+ADR-0234 adds Mapping response-age metadata in the existing combined Connector and a Controller-only
+reported-position reader in robonix_task.position. It uses only authenticated State/inventory GETs,
+retains nested/source freshness gaps and grants no motion, localization, Memory or MI authority.
+Run integration unittests, Ruff, strict package mypy and function-doc checks. Field checks create
+zero new native tasks; unavailable or mismatched data must never become an invented current pose.
 ADR-0232 adds cancel-only task settlement in application/safety_stop/settlement and the existing
 Robonix facade. Explicit no-effects State v0.4 and execution-safety v0.2 never grant physical stop,
 resume or handoff authority. Administrator reconciliation retains original history and clocks.
