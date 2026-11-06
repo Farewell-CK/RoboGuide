@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -153,7 +154,9 @@ def test_default_keeps_metadata_and_local_scope_never_reads_bytes() -> None:
     assert not transport.content_reads
 
 
-@pytest.mark.parametrize("mutation", ["bytes", "provenance", "map", "motion", "size", "digest"])
+@pytest.mark.parametrize(
+    "mutation", ["bytes", "provenance", "map", "motion", "clock", "size", "digest"]
+)
 def test_corrupt_or_relabelled_content_is_a_gap(mutation: str) -> None:
     """A fresh catalog entry cannot authorize bad bytes or a changed original source."""
     manifest, raw = origin_fixture()
@@ -161,10 +164,12 @@ def test_corrupt_or_relabelled_content_is_a_gap(mutation: str) -> None:
         raw += b" "
     elif mutation == "provenance":
         manifest["source_execution_id"] = "other-execution"
-    elif mutation in {"map", "motion"}:
+    elif mutation in {"map", "motion", "clock"}:
         content = cast(JSONObject, json.loads(raw))
         if mutation == "motion":
             content["motion_authorized"] = True
+        elif mutation == "clock":
+            content["captured_at_ns"] = 500000000000
         else:
             cast(JSONObject, content["position"])["map_id"] = "other-map"
         raw = canonical_origin(content)
@@ -192,3 +197,53 @@ def test_old_generation_downgrade_and_tampered_restore_refuse() -> None:
     cast(JSONObject, memory[0]["content"])["memory_id"] = "relabelled"
     with pytest.raises(GroundingContextError, match="provenance"):
         GroundingContextSnapshot.from_json(context)
+
+
+def test_request_engine_persists_content_and_holds_for_approval(tmp_path: Path) -> None:
+    """A real Request store carries admitted origins through model ports without submitting."""
+    from mission.request_engine import MissionRequestEngine
+    from mission.request_record import MissionRequestLifecycle
+    from mission.request_store import MissionRequestStore
+    from test_requests import (
+        FakeController,
+        FakeInterpreter,
+        FakePlanner,
+        _assessment,
+        _catalog,
+        _fixture_contracts,
+        _inventory,
+    )
+
+    transport = OriginTransport(*origin_fixture())
+    reader = HttpMissionGroundingReader(
+        "https://controller",
+        "https://artifact",
+        2,
+        8,
+        8,
+        transport,
+        admitted_memory_content_schemas=frozenset({ORIGIN_SCHEMA}),
+        content_transport=transport,
+    )
+    store = MissionRequestStore(tmp_path / "request.sqlite3")
+    interpreter = FakeInterpreter([_assessment()])
+    planner = FakePlanner()
+    controller = FakeController(_inventory())
+    engine = MissionRequestEngine(
+        store,
+        interpreter,
+        planner,
+        controller,
+        _catalog(),
+        frozenset({_fixture_contracts()[0]}),
+        grounding_reader=reader,
+    )
+    waiting = engine.create("生成返回共享实验起点 origin-one 的计划，等待审阅")
+    assert waiting.lifecycle == MissionRequestLifecycle.AWAITING_APPROVAL
+    assert not controller.submissions
+    assert waiting.grounding_context is not None
+    assert waiting.grounding_context.schema_version == "roboguide.grounding-context/v0.4"
+    assert interpreter.calls[0][1].context_digest == planner.calls[0][2].context_digest
+    restored = MissionRequestStore(tmp_path / "request.sqlite3").get(waiting.request_id)
+    assert restored is not None and restored.grounding_context is not None
+    assert restored.grounding_context.to_json() == waiting.grounding_context.to_json()

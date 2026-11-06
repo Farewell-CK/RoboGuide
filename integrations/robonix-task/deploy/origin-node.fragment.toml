@@ -2,7 +2,7 @@
 # The combined Connector uses --origin-root matching this provider root.
 # Remote Artifact mTLS requires ROBOGUIDE_ARTIFACT_CLIENT_{CERT,KEY,CA}.
 
-[artifact_service]
+[artifacts]
 endpoint = "https://192.168.2.20:8090"
 cache_directory = "/home/nvidia/rg-lab/lite3-20261102/node-state/artifact-cache"
 max_artifact_bytes = 131072
@@ -39,7 +39,7 @@ scope = "global"
 visibility = "exchangeable"
 payload_schema = "roboguide.reported-origin/v0.1"
 media_type = "application/json"
-storage_directory = "/home/nvidia/rg-lab/lite3-20261102/node-state/memory/reported-origins"
+storage_directory = "memory/reported-origins"
 [memory_providers.discover]
 manifests_pointer = "/steps/origin-discover/manifests"
 [[memory_providers.discover.steps]]

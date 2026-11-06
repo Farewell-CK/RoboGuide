@@ -428,7 +428,7 @@ class HttpMissionGroundingReader:
             return item
 
     def _read_memory(self, gaps: _GroundingGapCollector) -> tuple[MemoryGroundingEvidence, ...]:
-        """Read only admissible Global manifest metadata and never fetch artifact bytes."""
+        """Select Global metadata, then fetch only explicitly admitted and bounded origin bytes."""
         try:
             response = self._get_json(f"{self._artifact_endpoint}/v1/memories")
             if response.get("schema") != "roboguide.memory-catalog/v0.1":

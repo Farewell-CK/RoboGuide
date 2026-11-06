@@ -207,7 +207,7 @@ class MemoryGroundingEvidence:
     content: JSONObject | None = None
 
     def __post_init__(self) -> None:
-        """Enforce the first grounding slice's global metadata-only Memory boundary."""
+        """Enforce Global scope and exact provenance for explicitly verified origin content."""
         for field, value in (
             ("evidence_id", self.evidence_id),
             ("memory_id", self.memory_id),
@@ -276,7 +276,7 @@ class MemoryGroundingEvidence:
         return value
 
     def to_json(self) -> JSONObject:
-        """Serialize discovery evidence while explicitly declaring that bytes were not read."""
+        """Serialize metadata with an explicit content status and optional verified origin."""
         return {
             "evidence_id": self.evidence_id,
             "selector": {"memory_id": self.memory_id, "revision_id": self.revision_id},
@@ -306,7 +306,7 @@ class MemoryGroundingEvidence:
 
     @classmethod
     def from_json(cls, value: object) -> MemoryGroundingEvidence:
-        """Restore one sanitized Memory manifest without interpreting its payload schema."""
+        """Restore metadata or revalidate the admitted historical-origin content decoder."""
         item = _object(value, "memory evidence")
         expected = {
             "evidence_id",

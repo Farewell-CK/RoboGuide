@@ -46,8 +46,10 @@ class OriginStore:
             if sys.platform == "win32":
                 import msvcrt
 
-                self.owner.write(b"0")
-                self.owner.flush()
+                self.owner.seek(0)
+                if not self.owner.read(1):
+                    self.owner.write(b"0")
+                    self.owner.flush()
                 self.owner.seek(0)
                 try:
                     msvcrt.locking(self.owner.fileno(), msvcrt.LK_NBLCK, 1)
@@ -124,6 +126,36 @@ class OriginStore:
             raise Conflict("unsupported origin receipt generation")
         raw = canonical(record["content"]).encode()
         manifest = record["manifest"]
+        content = record["content"]
+        request = record["request"]
+        invocation = request["invocation"]
+        intent = invocation.get("intent", invocation)
+        params = intent["parameters"]
+        if (
+            content.get("schema_version") != ORIGIN_SCHEMA
+            or content.get("node_id") != self.node_id
+            or content.get("motion_authorized") is not False
+            or content.get("localization_verified") is not False
+            or content.get("source_execution_id") != request["attempt_id"]
+            or content.get("attempt_id") != request["attempt_id"]
+            or manifest["source_execution_id"] != request["attempt_id"]
+            or manifest["source_mission_id"] != invocation["mission_id"]
+            or content.get("source_mission_id") != invocation["mission_id"]
+            or content.get("source_task_id") != invocation["task_id"]
+            or manifest["source_task_ref"]
+            != {"mission_id": invocation["mission_id"], "task_id": invocation["task_id"]}
+            or manifest["selector"] != {"memory_id": params["memory_id"], "revision_id": "r1"}
+            or content.get("memory_id") != params["memory_id"]
+            or content["position"]["map_id"] != params["expected_map_id"]
+            or manifest["scope"] != {"kind": params["scope"]}
+            or manifest["schema"] != "roboguide.memory-manifest/v0.1"
+            or manifest["payload_schema"] != ORIGIN_SCHEMA
+            or manifest["provider_id"] != PROVIDER_ID
+            or manifest["kind"] != "experience"
+            or manifest["media_type"] != "application/json"
+            or manifest["visibility"] != "exchangeable"
+        ):
+            raise Conflict("origin receipt source or authority was changed")
         if manifest["artifact"] != {
             "content_digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
             "byte_size": len(raw),
@@ -143,6 +175,7 @@ class OriginStore:
         """Freeze one normal Node invocation without accepting caller-supplied coordinates."""
         if set(body) != {"attempt_id", "invocation"}:
             raise ValueError("only original attempt and invocation are allowed")
+        canonical(body)
         attempt = body["attempt_id"]
         if not isinstance(attempt, str) or not 1 <= len(attempt) <= 1024 or not attempt.strip():
             raise ValueError("bounded original Node execution identity required")
@@ -164,10 +197,10 @@ class OriginStore:
         mission = identifier(invocation.get("mission_id"))
         task = identifier(invocation.get("task_id"))
         params = intent.get("parameters")
-        if not isinstance(params, dict) or set(params) != {"memory_id", "map_id", "scope"}:
-            raise ValueError("explicit memory_id, map_id and scope required; coordinates forbidden")
+        if not isinstance(params, dict) or set(params) != {"memory_id", "expected_map_id", "scope"}:
+            raise ValueError("explicit memory_id, expected_map_id and scope required")
         memory_id = identifier(params["memory_id"])
-        map_id = identifier(params["map_id"])
+        map_id = identifier(params["expected_map_id"])
         if params["scope"] not in {"global", "local"}:
             raise ValueError("only explicitly selected global or local scope is supported")
         # The Node has already validated execution/attempt identity and allocation.
@@ -225,6 +258,8 @@ class OriginStore:
                 "motion_authorized": False,
             }
             raw = canonical(content).encode()
+            if len(raw) > 65536:
+                raise ValueError("origin content exceeds its admitted decoder bound")
             digest = hashlib.sha256(raw).hexdigest()
             manifest = {
                 "schema": "roboguide.memory-manifest/v0.1",
@@ -252,7 +287,10 @@ class OriginStore:
                 "content": content,
             }
             self._verify(receipt)
-            self._publish(path, canonical(receipt).encode())
+            receipt_raw = canonical(receipt).encode()
+            if len(receipt_raw) > 131072:
+                raise ValueError("origin receipt exceeds its immutable reader bound")
+            self._publish(path, receipt_raw)
             return self.status(handle)
 
     def status(self, execution: str) -> dict[str, Any]:

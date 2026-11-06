@@ -58,7 +58,7 @@
             "objective": "查询当前位置并冻结为共享实验起点，保持当前姿态，不下发运动。",
             "parameters": {
               "memory_id": "dog2-origin-20261106",
-              "map_id": "1101_visual_dog2",
+              "expected_map_id": "1101_visual_dog2",
               "scope": "global"
             }
           },

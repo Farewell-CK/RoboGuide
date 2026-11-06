@@ -106,6 +106,16 @@ def validate_origin(
     age = mapping.get("age_ms")
     if isinstance(age, bool) or not isinstance(age, int | float) or not 0 <= age <= 10000:
         raise ValueError("origin was not fresh at capture time")
+    received_ns = mapping.get("received_at_ns")
+    captured_ns = content["captured_at_ns"]
+    if (
+        type(received_ns) is not int
+        or type(captured_ns) is not int
+        or received_ns <= 0
+        or captured_ns < received_ns
+        or abs((captured_ns - received_ns) / 1_000_000 - age) > 0.000001
+    ):
+        raise ValueError("origin receive age differs from its original capture clock")
     value = mapping.get("value")
     if not isinstance(value, dict) or value.get("map_id") != position["map_id"]:
         raise ValueError("origin map differs from the original observation")

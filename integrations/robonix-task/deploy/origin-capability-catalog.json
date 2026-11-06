@@ -1,0 +1,89 @@
+{
+  "schema_version": "roboguide.capability-catalog/v0.3",
+  "capabilities": [
+    {
+      "contract": {
+        "namespace": "task",
+        "name": "delegate",
+        "version": "v1"
+      },
+      "description": "Delegate one local goal to a task runtime that admits supported work under its deployment profile.",
+      "attributes": [
+        {
+          "name": "task-profile",
+          "type": "string",
+          "description": "Deployment profile of the receiving local task runtime."
+        }
+      ]
+    },
+    {
+      "contract": {
+        "namespace": "spatial.origin",
+        "name": "capture",
+        "version": "v1"
+      },
+      "description": "Capture an immutable reported origin from a readonly local observation; grants no motion or localization verification.",
+      "attributes": []
+    }
+  ],
+  "operations": [
+    {
+      "operation": {
+        "namespace": "task",
+        "name": "delegate",
+        "version": "v1"
+      },
+      "description": "Submit the intact objective to a local task runtime and track its attributed result.",
+      "parameters": [
+        {
+          "name": "profile",
+          "type": "string",
+          "required": true,
+          "description": "Exact deployed task profile admitted by the receiving runtime."
+        }
+      ],
+      "required_capabilities": [
+        {
+          "namespace": "task",
+          "name": "delegate",
+          "version": "v1"
+        }
+      ]
+    },
+    {
+      "operation": {
+        "namespace": "spatial.origin",
+        "name": "capture",
+        "version": "v1"
+      },
+      "description": "Freeze one original Task observation as origin Memory. Explicit global scope offers this one record to the Node publisher. It does not load maps or call Pilot.",
+      "parameters": [
+        {
+          "name": "memory_id",
+          "type": "string",
+          "required": true,
+          "description": "A new immutable origin identity; repetitions cannot overwrite it."
+        },
+        {
+          "name": "expected_map_id",
+          "type": "string",
+          "required": true,
+          "description": "Exact expected local Mapping map label, not a verified shared frame or map revision."
+        },
+        {
+          "name": "scope",
+          "type": "string",
+          "required": true,
+          "description": "Explicit global for shared experiment publication, or local for nonpublished local retention."
+        }
+      ],
+      "required_capabilities": [
+        {
+          "namespace": "spatial.origin",
+          "name": "capture",
+          "version": "v1"
+        }
+      ]
+    }
+  ]
+}

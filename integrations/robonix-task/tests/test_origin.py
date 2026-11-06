@@ -22,7 +22,7 @@ def request():
             "objective": "记录狗2当前位置为共享实验起点",
             "parameters": {
                 "memory_id": "experiment-origin",
-                "map_id": "map-one",
+                "expected_map_id": "map-one",
                 "scope": "global",
             },
         },
@@ -57,7 +57,7 @@ class OriginTests(unittest.TestCase):
             blob = Path(directory) / store.export(manifest)["path"]
             raw = blob.read_bytes()
             changed = request()
-            changed["invocation"]["parameters"]["map_id"] = "other-map"
+            changed["invocation"]["parameters"]["expected_map_id"] = "other-map"
             with self.assertRaises(Conflict):
                 store.capture(changed, snapshot())
             store.close()
@@ -137,6 +137,23 @@ class OriginTests(unittest.TestCase):
                 edited["source_execution_id"] = "other"
                 with self.assertRaises(ValueError):
                     store.export(edited)
+            finally:
+                store.close()
+
+    def test_local_receipt_cannot_be_relabelled_for_publication(self):
+        """A changed scope in retained metadata never promotes an original private capture."""
+        with tempfile.TemporaryDirectory() as directory:
+            store = OriginStore(Path(directory), "dog-2")
+            try:
+                body = request()
+                body["invocation"]["parameters"]["scope"] = "local"
+                store.capture(body, snapshot())
+                path = next(Path(directory).glob("origin-*.json"))
+                row = json.loads(path.read_text())
+                row["manifest"]["scope"] = {"kind": "global"}
+                path.write_text(json.dumps(row))
+                with self.assertRaises(Conflict):
+                    store.discover()
             finally:
                 store.close()
 
