@@ -47,6 +47,7 @@ class MissionServiceSettings:
     execution_planning_evidence_required: bool
     max_request_bytes: int
     approval_policy: ApprovalPolicy
+    grounding_memory_content_schemas: frozenset[str] = frozenset()
     controller_preflight_enabled: bool = False
     max_deployment_recovery_attempts: int = 0
     deployment_recovery_timeout_ms: int = 900_000
@@ -183,6 +184,9 @@ def load_service_settings(
         ),
         grounding_world_payload_schemas=_optional_text_set(
             service, "grounding_world_payload_schemas"
+        ),
+        grounding_memory_content_schemas=_optional_text_set(
+            service, "grounding_memory_content_schemas"
         ),
         grounding_semantic_evidence_path=_optional_path(
             service, "grounding_semantic_evidence_path", root

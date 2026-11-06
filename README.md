@@ -1,5 +1,10 @@
 # RoboGuide
 
+[ADR-0235](docs/decisions/0235-origin-memory-grounding.md)增加显式启用的起点记录操作和
+MI 起点内容解码。正常 Task 调用统一 Connector 的只读观察，现有 Node provider 发布
+Memory/Artifact；MI 校验原始 bytes、摘要、大小及任务来源后冻结到 grounding v0.4。
+Global 共享需要原操作明确选择；历史报告起点不授予当前定位或运动权限。
+
 [ADR-0234](docs/decisions/0234-controller-reported-position-inspection.md)补齐统一 Connector
 的 Mapping 缓存年龄与 Controller-only 位置诊断工具；保留地图版本、定位质量与
 MI grounding 尚未接通的边界，不增加运动权限。

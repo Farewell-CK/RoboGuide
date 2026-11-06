@@ -1,0 +1,123 @@
+# Opt-in dog2 fragment appended to the existing single Node configuration.
+# The combined Connector uses --origin-root matching this provider root.
+# Remote Artifact mTLS requires ROBOGUIDE_ARTIFACT_CLIENT_{CERT,KEY,CA}.
+
+[artifact_service]
+endpoint = "https://192.168.2.20:8090"
+cache_directory = "/home/nvidia/rg-lab/lite3-20261102/node-state/artifact-cache"
+max_artifact_bytes = 131072
+
+[[capability_profiles]]
+contract = "spatial.origin.capture@v1"
+kind = "observation"
+owner = "robot-observer"
+attributes = {}
+[capability_profiles.readiness]
+state_pointer = "/state"
+detail_pointer = "/detail"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+[capability_profiles.readiness.step]
+id = "origin-readiness"
+connection = "observer-http"
+[capability_profiles.readiness.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/origins/readiness"
+
+[[resources]]
+id = "dog2-origin-slot"
+kind = "compute"
+capacity = 1
+owner = "robot-observer"
+
+[[memory_providers]]
+id = "reported-origins"
+owner = "robot-observer"
+kind = "experience"
+scope = "global"
+visibility = "exchangeable"
+payload_schema = "roboguide.reported-origin/v0.1"
+media_type = "application/json"
+storage_directory = "/home/nvidia/rg-lab/lite3-20261102/node-state/memory/reported-origins"
+[memory_providers.discover]
+manifests_pointer = "/steps/origin-discover/manifests"
+[[memory_providers.discover.steps]]
+id = "origin-discover"
+connection = "observer-http"
+[memory_providers.discover.steps.operation]
+kind = "http"
+method = "GET"
+path = "/v1/origins/discover"
+[memory_providers.export]
+artifact_path_pointer = "/steps/origin-export/path"
+[[memory_providers.export.steps]]
+id = "origin-export"
+connection = "observer-http"
+[memory_providers.export.steps.operation]
+kind = "http"
+method = "POST"
+path = "/v1/origins/export"
+[memory_providers.export.steps.request]
+base = {}
+[[memory_providers.export.steps.request.bindings]]
+target = "/manifest"
+value = { kind = "pointer", pointer = "/invocation/memory_manifest" }
+
+[[operations]]
+operation = "spatial.origin.capture@v1"
+owner = "robot-observer"
+required_resources = ["dog2-origin-slot"]
+local_locks = ["dog2-origin-capture"]
+[operations.workflow]
+poll_interval_ms = 500
+[operations.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/origin-capture/handle"
+[operations.workflow.execution_state]
+state_pointer = "/steps/origin-status/state"
+reason_pointer = "/steps/origin-status/detail"
+accepted = ["PENDING"]
+running = ["RUNNING"]
+completed = ["SUCCEEDED"]
+failed = ["FAILED"]
+cancelled = ["CANCELED"]
+[[operations.workflow.execute]]
+id = "origin-capture"
+connection = "observer-http"
+[operations.workflow.execute.operation]
+kind = "http"
+method = "POST"
+path = "/v1/origins/capture"
+[operations.workflow.execute.request]
+base = {}
+[[operations.workflow.execute.request.bindings]]
+target = "/attempt_id"
+value = { kind = "pointer", pointer = "/attempt_id" }
+[[operations.workflow.execute.request.bindings]]
+target = "/invocation"
+value = { kind = "pointer", pointer = "/invocation" }
+[[operations.workflow.status]]
+id = "origin-status"
+connection = "observer-http"
+[operations.workflow.status.operation]
+kind = "http"
+method = "POST"
+path = "/v1/origins/status"
+[operations.workflow.status.request]
+base = {}
+[[operations.workflow.status.request.bindings]]
+target = "/handle"
+value = { kind = "pointer", pointer = "/local_handle" }
+[[operations.workflow.cancel]]
+id = "origin-cancel"
+connection = "observer-http"
+[operations.workflow.cancel.operation]
+kind = "http"
+method = "POST"
+path = "/v1/origins/cancel"
+[operations.workflow.cancel.request]
+base = {}
+[[operations.workflow.cancel.request.bindings]]
+target = "/handle"
+value = { kind = "pointer", pointer = "/local_handle" }

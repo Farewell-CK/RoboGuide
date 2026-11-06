@@ -1,5 +1,10 @@
 # RoboGuide V2 现行架构
 
+[ADR-0235](../../decisions/0235-origin-memory-grounding.md)把实验起点记录归于正常 Task
+调用的 Node 只读观察操作，复用现有 Memory provider、Artifact CAS 和 Node 会话发布。
+明确选择 Global 的单条记录才进入共享发现；MI 仅在配置准入、原 bytes 摘要及来源核对后
+读入 v0.4 grounding 快照。历史报告位置不授予当前定位或运动权限，首轮计划必须停在审阅。
+
 [ADR-0233](../../decisions/0233-local-administrator-cancel-settlement.md)将缺少原生终态的
 本机取消人工结案归于 Local EAIOS 适配模块的离线运维入口，保留原证据并拒绝旧 writer。
 RG Controller 继续独立处理原取消及认证管理员结案；两者都不产生物理停止或自动续跑权限。

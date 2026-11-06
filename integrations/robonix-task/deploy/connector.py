@@ -13,13 +13,14 @@ from camera_adapter import Captures
 from camera_adapter import handler_type as camera_handler
 from robonix_task.adapter import Adapter, Server
 from robonix_task.adapter import Handler as PilotHandler
+from robonix_task.origin import OriginStore
 from robonix_task.position import annotate_mapping_age
 from robonix_task.protocol import Liaison
 from status_bridge import Status
 from status_bridge import handler_type as observer_handler
 
 
-def combined_handler(captures, observer):
+def combined_handler(captures, observer, origins=None):
     """Keep the existing route implementations and disambiguate readiness paths."""
     camera = camera_handler(captures)
     state = observer_handler(observer)
@@ -29,7 +30,19 @@ def combined_handler(captures, observer):
 
         def do_GET(self):
             """Select the module by the fixed Node workflow route."""
-            if self.path.startswith("/v1/pilot/"):
+            if self.path.startswith("/v1/origins/"):
+                if origins is None:
+                    self.reply(404, {"error": "origin profile disabled"})
+                elif self.path == "/v1/origins/discover":
+                    try:
+                        self.reply(200, origins.discover())
+                    except (ValueError, OSError):
+                        self.reply(503, {"error": "origin content unavailable"})
+                elif self.path == "/v1/origins/readiness":
+                    self.reply(200, {"state": "READY", "detail": "immutable origin store open"})
+                else:
+                    self.reply(404, {"error": "route not found"})
+            elif self.path.startswith("/v1/pilot/"):
                 self.path = "/v1/" + self.path.removeprefix("/v1/pilot/")
                 PilotHandler.do_GET(self)
             elif self.path == "/v1/state":
@@ -53,7 +66,37 @@ def combined_handler(captures, observer):
 
         def do_POST(self):
             """Send capture and execution requests to their original owners."""
-            if self.path in (
+            if self.path.startswith("/v1/origins/"):
+                if origins is None:
+                    self.reply(404, {"error": "origin profile disabled"})
+                    return
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if self.headers.get("Transfer-Encoding") or not 0 < length <= 65536:
+                        raise ValueError("bounded Content-Length required")
+                    raw = self.rfile.read(length)
+                    if len(raw) != length:
+                        raise ValueError("incomplete request")
+                    body = json.loads(raw)
+                    if not isinstance(body, dict):
+                        raise ValueError("object required")
+                    if self.path == "/v1/origins/capture":
+                        value = origins.capture(body, observer.read())
+                    elif self.path in ("/v1/origins/status", "/v1/origins/cancel"):
+                        if set(body) != {"handle"}:
+                            raise ValueError("exact handle required")
+                        value = origins.status(body["handle"])
+                    elif self.path == "/v1/origins/export":
+                        if set(body) != {"manifest"}:
+                            raise ValueError("exact manifest required")
+                        value = origins.export(body["manifest"])
+                    else:
+                        self.reply(404, {"error": "route not found"})
+                        return
+                    self.reply(200, value)
+                except (ValueError, KeyError, TypeError, OSError):
+                    self.reply(409, {"error": "origin request refused or content unavailable"})
+            elif self.path in (
                 "/v1/captures",
                 "/v1/captures/status",
                 "/v1/captures/cancel",
@@ -83,7 +126,11 @@ def main():
     parser.add_argument("--pki", type=Path, required=True)
     parser.add_argument("--port", type=int, default=18112)
     parser.add_argument("--delegate-profile")
+    parser.add_argument("--origin-root", type=Path)
+    parser.add_argument("--origin-node-id")
     args = parser.parse_args()
+    if (args.origin_root is None) != (args.origin_node_id is None):
+        parser.error("origin-root and origin-node-id must be supplied together")
 
     def publish(path, execution_id):
         """Reuse the existing authenticated upload and finalization path."""
@@ -127,7 +174,14 @@ def main():
             observer = Status(args.codegen)
             captures = Captures(args.capture_root, publisher=publish)
             cleanup.callback(stop_captures, captures)
-            server.RequestHandlerClass = combined_handler(captures, observer)
+            origins = (
+                OriginStore(args.origin_root, args.origin_node_id)
+                if args.origin_root is not None
+                else None
+            )
+            if origins is not None:
+                cleanup.callback(origins.close)
+            server.RequestHandlerClass = combined_handler(captures, observer, origins)
             server.timeout = 0.5
             observer_thread = threading.Thread(target=observe, name="robonix-observer")
             observer_thread.start()

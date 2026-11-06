@@ -1,4 +1,12 @@
 ADR-0231 defines opt-in Local EAIOS task delegation and device-provider integration.
+ADR-0235 adds an opt-in reported-origin capture operation in the existing combined Connector.
+Normal Task/resource admission owns capture; original attempts freeze immutable local evidence.
+Only explicitly global records enter existing Node provider/Artifact publication. MI defaults to
+metadata; admitted origins require exact bytes/hash/size and original Task provenance, frozen in
+grounding v0.4. Older snapshot readers refuse this generation. Never claim current localization,
+typed map publication, private request-Memory support or motion permission from an origin.
+Run origin/adapter tests, Mission grounding/requests, strict Linux mypy, Ruff and function docs.
+Initial field scope is capture/publication/grounding and approved-plan holding, with zero motion.
 ADR-0234 adds Mapping response-age metadata in the existing combined Connector and a Controller-only
 reported-position reader in robonix_task.position. It uses only authenticated State/inventory GETs,
 retains nested/source freshness gaps and grants no motion, localization, Memory or MI authority.

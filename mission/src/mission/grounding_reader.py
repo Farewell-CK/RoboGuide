@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
 import ssl
@@ -9,6 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping
+from dataclasses import replace
 from email.message import Message
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -19,6 +21,7 @@ from mission.grounding_context import (
     GroundingContextSnapshot,
     GroundingFreshness,
     GroundingGap,
+    MemoryContentStatus,
     MemoryGroundingEvidence,
     StateGroundingEvidence,
     dialogue_digest,
@@ -26,6 +29,7 @@ from mission.grounding_context import (
     grounding_selection_policy_ref,
 )
 from mission.models import JSONObject, JSONValue
+from mission.origin_evidence import MAX_ORIGIN_BYTES, ORIGIN_SCHEMA, canonical_origin
 from mission.planning_world_evidence import (
     AuthoritativePlanningWorldEvidence,
     PlanningWorldEvidenceError,
@@ -140,6 +144,14 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         raise GroundingReadError(f"grounding endpoint returned redirect HTTP {code}")
 
 
+class GroundingContentTransport(Protocol):
+    """Read bounded exact bytes from the same configured and authenticated Artifact authority."""
+
+    def get_bytes(self, url: str, timeout_seconds: float) -> bytes:
+        """Return exact response bytes without JSON normalization or redirect following."""
+        ...
+
+
 class UrllibGroundingJsonTransport:
     """Read bounded JSON from fixed State and Memory HTTP origins."""
 
@@ -155,6 +167,17 @@ class UrllibGroundingJsonTransport:
 
     def get_json(self, url: str, timeout_seconds: float) -> JSONObject:
         """Fetch one JSON document and distinguish retryable acquisition failures."""
+        raw = self.get_bytes(url, timeout_seconds)
+        try:
+            decoded: object = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise GroundingReadError("grounding endpoint returned invalid JSON") from error
+        if not isinstance(decoded, dict) or not all(isinstance(key, str) for key in decoded):
+            raise GroundingReadError("grounding endpoint response must be an object")
+        return cast(JSONObject, decoded)
+
+    def get_bytes(self, url: str, timeout_seconds: float) -> bytes:
+        """Fetch bounded original bytes under the existing origin, TLS and tenant constraints."""
         headers = {"Accept": "application/json"}
         tenant = authenticated_tenant()
         if tenant is not None:
@@ -180,13 +203,7 @@ class UrllibGroundingJsonTransport:
             ) from error
         if len(raw) > MAX_GROUNDING_RESPONSE_BYTES:
             raise GroundingReadError("grounding endpoint response exceeds local limit")
-        try:
-            decoded: object = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise GroundingReadError("grounding endpoint returned invalid JSON") from error
-        if not isinstance(decoded, dict) or not all(isinstance(key, str) for key in decoded):
-            raise GroundingReadError("grounding endpoint response must be an object")
-        return cast(JSONObject, decoded)
+        return cast(bytes, raw)
 
 
 class HttpMissionGroundingReader:
@@ -207,6 +224,8 @@ class HttpMissionGroundingReader:
         semantic_evidence_path: Path | None = None,
         planning_world_evidence_path: Path | None = None,
         planning_world_evidence_required: bool = False,
+        admitted_memory_content_schemas: frozenset[str] = frozenset(),
+        content_transport: GroundingContentTransport | None = None,
     ) -> None:
         """Bind fixed origins and positive evidence budgets without accepting query injection."""
         self._controller_endpoint = _endpoint(controller_endpoint, "Controller")
@@ -226,6 +245,14 @@ class HttpMissionGroundingReader:
         self._max_gaps = max_gaps
         self._max_acquisition_attempts = max_acquisition_attempts
         self._transport = transport or UrllibGroundingJsonTransport()
+        if admitted_memory_content_schemas - {ORIGIN_SCHEMA}:
+            raise GroundingReadError("unsupported Memory content schema admission")
+        self._admitted_memory_content_schemas = admitted_memory_content_schemas
+        self._content_transport = content_transport or (
+            self._transport if isinstance(self._transport, UrllibGroundingJsonTransport) else None
+        )
+        if admitted_memory_content_schemas and self._content_transport is None:
+            raise GroundingReadError("Memory content admission requires an exact-byte transport")
         self._semantic_evidence_path = semantic_evidence_path
         self._planning_world_evidence_path = planning_world_evidence_path
         if planning_world_evidence_required and planning_world_evidence_path is None:
@@ -235,6 +262,10 @@ class HttpMissionGroundingReader:
             raise GroundingReadError("admitted World payload schemas must be nonblank")
         self._admitted_world_payload_schemas = admitted_world_payload_schemas
         self._selection_policy_ref = grounding_selection_policy_ref(admitted_world_payload_schemas)
+        if admitted_memory_content_schemas:
+            self._selection_policy_ref += "#memory-content=" + ",".join(
+                sorted(admitted_memory_content_schemas)
+            )
 
     def capture(
         self,
@@ -345,6 +376,57 @@ class HttpMissionGroundingReader:
             )
         return tuple(evidence)
 
+    def _read_memory_content(
+        self, item: MemoryGroundingEvidence, gaps: _GroundingGapCollector
+    ) -> MemoryGroundingEvidence:
+        """Read only admitted Global origin bytes and retain metadata on any failed verification."""
+        if item.payload_schema not in self._admitted_memory_content_schemas:
+            return item
+        try:
+            artifact = item.artifact
+            if (
+                item.visibility != "exchangeable"
+                or item.media_type != "application/json"
+                or item.kind != "experience"
+                or item.provider_id != "reported-origins"
+                or artifact is None
+                or self._content_transport is None
+            ):
+                raise GroundingReadError("origin manifest is not qualified for content reading")
+            digest, size = artifact.get("content_digest"), artifact.get("byte_size")
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 71
+                or not digest.startswith("sha256:")
+                or any(char not in "0123456789abcdef" for char in digest[7:])
+                or type(size) is not int
+                or not 0 < size <= MAX_ORIGIN_BYTES
+            ):
+                raise GroundingReadError("origin Artifact identity or byte bound is invalid")
+            raw = self._content_transport.get_bytes(
+                self._artifact_endpoint + "/v1/artifacts/" + digest[7:], self._timeout_seconds
+            )
+            if len(raw) != size or "sha256:" + hashlib.sha256(raw).hexdigest() != digest:
+                raise GroundingReadError("origin Artifact bytes differ from manifest")
+            decoded: object = json.loads(raw)
+            content = _object(decoded, "origin content")
+            if raw != canonical_origin(content):
+                raise GroundingReadError("origin bytes are not canonical")
+            updated = item.to_json()
+            updated.pop("evidence_id")
+            updated.update(
+                content=content, content_status=MemoryContentStatus.VERIFIED_ORIGIN.value
+            )
+            return replace(
+                item,
+                content=content,
+                content_status=MemoryContentStatus.VERIFIED_ORIGIN,
+                evidence_id=evidence_id("memory", updated),
+            )
+        except (GroundingReadError, GroundingContextError, ValueError, OverflowError) as error:
+            gaps.add("memory_content_rejected", item.evidence_id, str(error))
+            return item
+
     def _read_memory(self, gaps: _GroundingGapCollector) -> tuple[MemoryGroundingEvidence, ...]:
         """Read only admissible Global manifest metadata and never fetch artifact bytes."""
         try:
@@ -376,7 +458,7 @@ class HttpMissionGroundingReader:
                 "memory-catalog",
                 f"retained at most {self._max_memory_evidence} Global Memory manifests",
             )
-        return tuple(evidence)
+        return tuple(self._read_memory_content(item, gaps) for item in evidence)
 
     def _get_json(self, url: str) -> JSONObject:
         """Retry only transient acquisition failures before preserving one final source gap."""

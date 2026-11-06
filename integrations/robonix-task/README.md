@@ -1,5 +1,15 @@
 # Robonix 本机任务接入
 
+起点记录使用 [Node 配置片段](deploy/origin-node.fragment.toml)和
+[无运动 Mission 示例](deploy/origin-mission-plan.json)：`spatial.origin.capture@v1`
+只读取当前 Mapping 观察，不调用 Pilot。统一 Connector 显式配置 `--origin-root` 和
+`--origin-node-id`，根目录须与 provider storage_directory 相同。只在原操作明确指定
+`scope=global` 时向 Node 提供发现和导出。中央 Memory 发布仍由 Node 的真实会话、
+provider 授权和 Artifact mTLS 完成；本地捕获成功与中央发布成功需要分别验收。
+MI 的 `grounding_memory_content_schemas=["roboguide.reported-origin/v0.1"]` 才启用
+有界内容读取，默认只读 metadata。原生运动任务仍走 Robonix Pilot，职责不变。
+起点是历史报告位置，原测量时间、地图 revision、共享 frame 和定位质量仍未知。
+
 本包在 Robonix 一侧将已有 Liaison/Pilot 任务协议转换为 RG Node 可配置的
 execute/status/cancel 接口。任务由 RG 的正常 Mission、Matching、Commit 和 Bind
 进入本机。Pilot 接收完整目标并决定本机步骤，Executor 执行本机能力。
