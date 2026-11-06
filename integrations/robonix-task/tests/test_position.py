@@ -10,6 +10,7 @@ from robonix_task.position import (
     MAX_RESPONSE_BYTES,
     annotate_mapping_age,
     inspect_position,
+    main,
     read_controller,
 )
 
@@ -180,6 +181,38 @@ class PositionTests(unittest.TestCase):
 
 class ControllerReadTests(unittest.TestCase):
     """Verify the maintained reader performs only bounded GETs against explicit HTTPS."""
+
+    def test_cli_filters_source_locally_without_encoded_controller_query(self) -> None:
+        """Keep exact source checks when deployed Controller query parsing is literal-only."""
+        state, inventory = fixture()
+        arguments = [
+            "position",
+            "--controller-origin",
+            "https://controller:8080",
+            "--ca",
+            "ca.crt",
+            "--cert",
+            "reader.crt",
+            "--key",
+            "reader.key",
+            "--node-id",
+            "dog-2",
+            "--map-id",
+            "current-map",
+        ]
+        with (
+            patch("sys.argv", arguments),
+            patch("robonix_task.position.ssl.create_default_context"),
+            patch("robonix_task.position.read_controller", side_effect=[inventory, state]) as read,
+            patch("builtins.print"),
+            self.assertRaises(SystemExit) as exited,
+        ):
+            main()
+        self.assertEqual(exited.exception.code, 0)
+        self.assertEqual(read.call_args_list[0].args[1], "/v1/inventory")
+        self.assertEqual(
+            read.call_args_list[1].args[1], "/v1/state/records?object_class=node&object_type=robot"
+        )
 
     def test_get_only_disables_proxy_and_redirects(self) -> None:
         """Read a real-shaped response without forwarding an action or client-controlled body."""

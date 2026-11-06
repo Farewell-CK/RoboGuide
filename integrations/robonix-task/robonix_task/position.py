@@ -263,9 +263,6 @@ def main() -> None:
         {
             "object_class": "node",
             "object_type": "robot",
-            "object_id": args.node_id,
-            "channel_id": args.channel_id,
-            "source": f"node:{args.node_id}/{args.local_system_id}",
         }
     )
     inventory = read_controller(args.controller_origin, "/v1/inventory", context)
