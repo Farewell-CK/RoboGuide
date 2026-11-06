@@ -7,6 +7,10 @@ grounding v0.4. Older snapshot readers refuse this generation. Never claim curre
 typed map publication, private request-Memory support or motion permission from an origin.
 Run origin/adapter tests, Mission grounding/requests, strict Linux mypy, Ruff and function docs.
 Initial field scope is capture/publication/grounding and approved-plan holding, with zero motion.
+The origin gate passes with real isolated Controller/Node/CAS and a synthetic readonly source.
+76 related Mission and 56 integration tests pass; full Mission retains one baseline-reproduced
+certificate-rotation 404. Thor2 went offline before deployment: no field origin capture, real
+model planning or movement was performed. Keep this explicit in the origin acceptance note.
 ADR-0234 adds Mapping response-age metadata in the existing combined Connector and a Controller-only
 reported-position reader in robonix_task.position. It uses only authenticated State/inventory GETs,
 retains nested/source freshness gaps and grants no motion, localization, Memory or MI authority.

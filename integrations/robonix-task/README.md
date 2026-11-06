@@ -1,5 +1,8 @@
 # Robonix 本机任务接入
 
+起点接入的隔离实际进程与测试已通过，现场部署因 Thor2 离线待验。
+边界及复现证据见[起点 Memory 与 MI 验收](../../docs/development/acceptance/2026-11-06-dog2-origin-memory-grounding.md)。
+
 起点记录使用 [Node 配置片段](deploy/origin-node.fragment.toml)和
 [无运动 Mission 示例](deploy/origin-mission-plan.json)：`spatial.origin.capture@v1`
 只读取当前 Mapping 观察，不调用 Pilot。统一 Connector 显式配置 `--origin-root` 和

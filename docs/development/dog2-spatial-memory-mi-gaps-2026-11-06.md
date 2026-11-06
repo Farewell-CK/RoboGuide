@@ -1,5 +1,9 @@
 # 狗2位置接入后的 Memory 与 MI 接线缺口
 
+后续进展：[起点 Memory 与 MI 软件验收](acceptance/2026-11-06-dog2-origin-memory-grounding.md)
+已完成 opt-in 记录、正常 Node/Memory/Artifact 通路及 MI 内容读取代码，隔离实际进程
+通过。Thor2 离线阻塞现场部署和真实模型规划，不能称真机接入已完成。
+
 本文件承接[Controller 位置查询验收](acceptance/2026-11-06-dog2-controller-position.md)。
 第一步已从现有正式 RG State 取得报告位置，后续不应再由外部操作端替系统查询
 Robonix、保存坐标并手填计划。下述内容是待实现范围，不是已完成的系统能力。
