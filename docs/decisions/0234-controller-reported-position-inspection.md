@@ -1,6 +1,6 @@
 # ADR-0234 Controller 只读报告位置检查
 
-状态：实现；软件与现场结果在独立验收中记录。
+状态：实现，并通过[软件与现场验收](../development/acceptance/2026-11-06-dog2-controller-position.md)。
 
 ## 背景
 

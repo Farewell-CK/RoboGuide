@@ -4,6 +4,10 @@ reported-position reader in robonix_task.position. It uses only authenticated St
 retains nested/source freshness gaps and grants no motion, localization, Memory or MI authority.
 Run integration unittests, Ruff, strict package mypy and function-doc checks. Field checks create
 zero new native tasks; unavailable or mismatched data must never become an invented current pose.
+The 2026-11-06 field check passed live Controller-only inspection, wrong-map refusal and actual
+Node-stop expiry/recovery. Native history stayed 28 runs/492 events. The current World query is
+empty; MI world/schema admission and origin Memory remain unimplemented for this deployment.
+Reported Mapping response freshness never proves original localization quality or a shared frame.
 ADR-0232 adds cancel-only task settlement in application/safety_stop/settlement and the existing
 Robonix facade. Explicit no-effects State v0.4 and execution-safety v0.2 never grant physical stop,
 resume or handoff authority. Administrator reconciliation retains original history and clocks.

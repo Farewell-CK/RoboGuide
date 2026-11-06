@@ -3,6 +3,9 @@
 [ADR-0234](docs/decisions/0234-controller-reported-position-inspection.md)补齐统一 Connector
 的 Mapping 缓存年龄与 Controller-only 位置诊断工具；保留地图版本、定位质量与
 MI grounding 尚未接通的边界，不增加运动权限。
+[2026-11-06 现场验收](docs/development/acceptance/2026-11-06-dog2-controller-position.md)
+已通过真实 State 查询、错图拒绝、Node 断开后的过期拒绝及重连恢复，零新原生任务。
+起点记忆与 MI 的剩余工作见[接线缺口](docs/development/dog2-spatial-memory-mi-gaps-2026-11-06.md)。
 
 [狗2真实任务执行流水](docs/development/dog2-real-task-pipeline-2026-11-05.md)
 逐步核对实际 HTTPS 入口、Match/Commit/Bind、Node workflow、Robonix 事件回传和协作模式。
