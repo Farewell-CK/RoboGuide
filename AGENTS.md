@@ -12,6 +12,9 @@ The 2026-11-09 field issue/branch audit is docs/development/rg-experiment-mainte
 ThinkPad main was clean; deployed lab sources are separate from that Git checkout. Preserve
 the primary Windows worktree's uncommitted phone probe. The three hot-enrollment gaps in
 that ledger have independent statuses; gap 1 is software-accepted, gaps 2/3 remain open.
+The maintenance branch merges delegation@89dca456's five historical mobile documentation
+commits, with a current-contract note. It does not include the primary checkout's phone probe
+or constitute Android acceptance; main and field deployments have not been changed.
 ADR-0238 keeps RG selection, identity/tenant authorization, approval and dispatch out of
 Local EAIOS execution objectives. Planner/Reviewer/Repairer and experiment catalog metadata
 retain all local goals/action limits, without making Pilot prove cluster uniqueness or match
