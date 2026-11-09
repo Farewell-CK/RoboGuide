@@ -38,6 +38,7 @@ def run(args):
     environment = {k: v for k, v in os.environ.items() if not k.startswith("ROBOGUIDE_")}
     environment.update(
         ROBOGUIDE_OPERATOR_LOCAL_RECOVERY_ADMIN="1",
+        ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA=args.storage_schema,
         ROBOGUIDE_NODE_HEARTBEAT_INTERVAL_MS="200",
         ROBOGUIDE_NODE_LEASE_DURATION_MS="1200",
     )
@@ -534,6 +535,7 @@ def main():
     parser.add_argument("--controller", type=Path, required=True)
     parser.add_argument("--node", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--storage-schema", choices=("legacy", "1", "2"), default="legacy")
     run(parser.parse_args())
 
 

@@ -248,10 +248,19 @@ impl SqliteEventLog {
 
     /// Validates the complete original history but retains only records needed by Catalog recovery.
     ///
-    /// Legacy histories still receive a full integrity scan. Each live row is decoded once and
-    /// discarded immediately when irrelevant; corrupt telemetry remains a recovery error. This
-    /// changes neither durable history nor the archive/source authentication contract.
+    /// Legacy/v1 histories receive a full integrity scan with one live row decoded at a time.
+    /// Explicit v2 instead reads its transactionally maintained coverage and protected originals;
+    /// auditing old unrelated telemetry remains the separate complete-history API. Neither path
+    /// changes durable history or grants authority to a missing original Catalog source.
     pub fn catalog_recovery_events(&self) -> Result<CatalogRecoveryEvents, SqliteEventLogError> {
+        if self.catalog_checkpoint_enabled {
+            self.ensure_no_open_batch()?;
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+            return super::catalog_checkpoint::read(&connection);
+        }
         self.scan_catalog_replay(true)
     }
 
@@ -536,6 +545,64 @@ mod tests {
             .unwrap();
         assert!(log.catalog_replay_events().is_err());
         assert!(log.catalog_recovery_events().is_err());
+    }
+
+    /// V2 migration preserves independently archived originals even when the ordinary tail is empty.
+    #[test]
+    fn recovery_checkpoint_migrates_an_archived_prefix_and_accepts_a_new_tail() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("events.sqlite3");
+        let log = SqliteEventLog::open(&path).unwrap();
+        let manifest = original(&log);
+        let sink = SnapshotSink {
+            log: log.clone(),
+            originals: Mutex::new(Vec::new()),
+            fail: AtomicBool::new(false),
+            effects: AtomicUsize::new(0),
+        };
+        log.archive_and_gc_with_catalog(
+            1,
+            &sink,
+            super::super::archive_operation::ArchiveRequest {
+                command_id: "v2-original-archive".into(),
+                principal: "fixture-admin".into(),
+                tenant: "local".into(),
+                source_owner: format!("artifact-store:{}", "a".repeat(64)),
+                authority_id: log.archive_authority_id().unwrap(),
+                destination: directory.path().join("archive").to_str().unwrap().into(),
+                budget_ms: 30_000,
+            },
+        )
+        .unwrap();
+        drop(sink);
+        drop(log);
+        let mut log = SqliteEventLog::open_controller_with_checkpoint_policy(
+            &path,
+            CheckpointStoragePolicy::Full,
+            ControllerStorageFormat::V2,
+        )
+        .unwrap();
+        let recovery = log.catalog_recovery_events().unwrap();
+        assert_eq!(
+            recovery.events[0].payload(),
+            &EventPayload::MemoryManifestPublished { manifest }
+        );
+        assert_eq!(recovery.timestamp_high_water, TimestampMs::new(7));
+        log.append(
+            TimestampMs::new(8),
+            &CorrelationId::new("new-tail").unwrap(),
+            None,
+            EventPayload::NodeHeartbeatAccepted {
+                node_id: NodeId::new("node").unwrap(),
+                lease_id: LeaseId::new("lease").unwrap(),
+            },
+        );
+        assert!(log.take_error().unwrap().is_none());
+        assert_eq!(log.catalog_recovery_events().unwrap().scanned_events, 1);
+        assert_eq!(
+            log.catalog_recovery_events().unwrap().timestamp_high_water,
+            TimestampMs::new(8)
+        );
     }
 
     /// Repeated telemetry is validated and advances time without joining the Catalog output array.

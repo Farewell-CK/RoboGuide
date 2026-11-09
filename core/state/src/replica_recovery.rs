@@ -740,6 +740,12 @@ impl SqliteEventLog {
     ) -> Result<CompleteReplicaState, SqliteEventLogError> {
         let mut connection =
             Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        if connection.pragma_query_value(None, "user_version", |row| row.get::<_, u64>(0))? == 2 {
+            return Err(SqliteEventLogError::Codec(
+                "storage v2 requires a complete SQLite backup; replica export not negotiated"
+                    .into(),
+            ));
+        }
         let transaction = connection.transaction()?;
         let original = complete(&transaction)?;
         transaction.commit()?;
@@ -764,6 +770,11 @@ impl SqliteEventLog {
     pub fn replica_recovery_projection(
         &self,
     ) -> Result<ReplicaRecoveryProjection, SqliteEventLogError> {
+        if self.catalog_checkpoint_enabled {
+            return Err(SqliteEventLogError::Codec(
+                "storage v2 replica export is not negotiated".into(),
+            ));
+        }
         self.ensure_no_open_batch()?;
         let connection = self
             .connection

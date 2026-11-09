@@ -1,5 +1,10 @@
 # RoboGuide V2 现行架构
 
+[ADR-0243](../../decisions/0243-catalog-recovery-checkpoint.md)定义显式 standalone 存储 v2：
+State 在原事件事务内维护带原始来源、覆盖序号及摘要的 Catalog 恢复投影，正常启动只读
+相关记录；旧历史完整保留，旧 writer 拒绝新代际。任务和恢复权威不迁移到投影；复制部署
+及高频历史归档仍须分别接线验收。当前实现和隔离验收已完成，未部署现场。
+
 [ADR-0241](../../decisions/0241-reported-posture-goal-profile.md)将姿态目标的判定接到既有
 Task satisfaction 通路：本机执行完成后等待确切任务的验证证据，更新的报告不符则拒绝目标，
 离线、旧样本与未知状态不推进依赖。纯评估器只证明有来源的 reported-state 谓词；

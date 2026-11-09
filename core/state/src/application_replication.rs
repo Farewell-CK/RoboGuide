@@ -221,6 +221,12 @@ impl SqliteEventLog {
     }
     /// Installs an optional quorum port before the application shares this store or creates authority.
     pub fn with_replicator(mut self, replicator: Arc<dyn ApplicationBatchReplicator>) -> Self {
+        if self.catalog_checkpoint_enabled {
+            let _ = self.disable_writes(
+                "storage v2 requires a standalone writer; replica projection not negotiated",
+                false,
+            );
+        }
         self.replicator = Some(replicator);
         self
     }
@@ -291,6 +297,11 @@ impl SqliteEventLog {
         commands: &[ControlCommandJournalEntry],
         recovery: Option<&ReplicaRecoveryProjection>,
     ) -> Result<(), SqliteEventLogError> {
+        if self.catalog_checkpoint_enabled {
+            return Err(SqliteEventLogError::Codec(
+                "storage v2 replica materialization is not negotiated".into(),
+            ));
+        }
         self.require_writes_enabled()?;
         self.ensure_no_open_batch()?;
         if let Some(recovery) = recovery {

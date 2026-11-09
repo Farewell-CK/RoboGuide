@@ -1,10 +1,17 @@
+ADR-0243 adds explicit standalone Controller storage v2. Its one-time migration validates all
+original history atomically; each append maintains Catalog recovery coverage in the same SQL
+transaction. Normal v2 recovery validates protected source envelopes and coverage rather than
+scrubbing old unrelated telemetry. Full-history audit remains available. Never silently rebuild a
+missing v2 projection, strip its version fence, enable unnegotiated replica/export tooling, or delete
+original task/Unknown evidence. Legacy streaming still validates unrelated rows. Field deployment
+requires separate acceptance; tests must run with bounded resources away from the live Controller.
 Controller startup streaming reuses State's original typed validation and Catalog archive
 contract. catalog_recovery_events scans one consistent original prefix/tail, discards unrelated
 telemetry after validation, preserves the clock floor and exact publication/adoption evidence.
 Catalog collects localization evidence in the same pass; main consumes it once. Never bypass
 bad unrelated rows to improve timing or claim the legacy O(history) scan has become O(1).
-See docs/development/controller-startup-streaming-2026-11-09.md for measured acceptance and
-the separate, still-unimplemented durable-projection and telemetry-retention work.
+See docs/development/controller-startup-streaming-2026-11-09.md for measured acceptance,
+the explicit standalone v2 projection, and separate still-unimplemented telemetry retention.
 ADR-0239 adds explicit recovery-admin static Node identity adoption in the existing
 application/node_identity writer. Domain node_identity_adoption owns the exact original
 map/explicit ownership and required v0.2 receipt. Control also checks pre-Bind reservations;

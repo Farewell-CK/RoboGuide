@@ -12,7 +12,18 @@ pub(crate) fn open_controller_event_log(
             state::ControllerStorageFormat::Legacy
         }
         Ok("1") => state::ControllerStorageFormat::V1,
-        _ => return Err("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA must be legacy or 1".into()),
+        Ok("2") => {
+            if std::env::vars_os()
+                .any(|(key, _)| key.to_string_lossy().starts_with("ROBOGUIDE_REPLICA_"))
+            {
+                return Err(
+                    "storage v2 is standalone; replica recovery projection is not negotiated"
+                        .into(),
+                );
+            }
+            state::ControllerStorageFormat::V2
+        }
+        _ => return Err("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA must be legacy, 1 or 2".into()),
     };
     Ok(state::SqliteEventLog::open_controller_with_checkpoint_policy(event_path, policy, format)?)
 }
