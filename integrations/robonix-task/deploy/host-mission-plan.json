@@ -1,0 +1,122 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.10",
+  "mission": {
+    "id": "two-host-inspection-example",
+    "objective": "Inspect two enrolled compute hosts without requesting any robot action.",
+    "actors": [
+      {
+        "id": "host-a"
+      },
+      {
+        "id": "host-b"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "host-context",
+      "roles": [
+        {
+          "id": "host-a",
+          "actor": "host-a"
+        },
+        {
+          "id": "host-b",
+          "actor": "host-b"
+        }
+      ],
+      "relations": [],
+      "executor_constraints": [],
+      "coupling_mode": "independent"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "inspect-both-hosts",
+      "description": "Each participant reads its own host facts; chassis readiness stays separate.",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "host-a",
+          "context_role": "host-a",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "system.host",
+                  "name": "inspect",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": [
+              {
+                "kind": "compute",
+                "units": 1,
+                "allocation_mode": "divisible",
+                "resource_class": "system.host-inspection-slots/v1"
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "system.host",
+              "name": "inspect",
+              "version": "v1"
+            },
+            "objective": "Read this host identity and availability only; no Pilot task or actuator command.",
+            "parameters": {}
+          },
+          "resource_scope": "task"
+        },
+        {
+          "id": "host-b",
+          "context_role": "host-b",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "system.host",
+                  "name": "inspect",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": [
+              {
+                "kind": "compute",
+                "units": 1,
+                "allocation_mode": "divisible",
+                "resource_class": "system.host-inspection-slots/v1"
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "system.host",
+              "name": "inspect",
+              "version": "v1"
+            },
+            "objective": "Read this host identity and availability only; no Pilot task or actuator command.",
+            "parameters": {}
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "host-context",
+      "coupling_mode": "independent",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": 30000
+      },
+      "satisfaction": {
+        "expected_effect": "Both enrolled hosts completed their own readonly inspection; this says nothing about robot motion readiness.",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}

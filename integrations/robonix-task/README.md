@@ -1,5 +1,16 @@
 # Robonix 本机任务接入
 
+2026-11-09 两台 Thor 已以 `lite3-dog1`、`lite3-dog2` 独立接入同一现场 Controller，
+完成一个包含两个角色的正式只读任务。见[双主机接入验收](../../docs/development/acceptance/2026-11-09-two-host-enrollment.md)。
+这次两台底盘尚未上电，不代表两只狗的运动能力已同时就绪。
+
+[主机 Node 片段](deploy/host-node.fragment.toml)须使用 v0.14，并替换 `NODE_ID`；
+现有统一 Connector 加 `--node-id`。固定 GET `/v1/host/status` 上报主机事实、
+保留原机器人数据及其不可用状态，`system.host.inspect@v1` 通过正常任务链执行同一个只读查询。
+[双角色 Mission 示例](deploy/host-mission-plan.json)使用 `independent` 模式和容量各为 1 的
+专用 Compute class，使联合分配选择两个节点。未增加独立适配器进程，也没有调用 Pilot。
+狗1首轮使用全新状态目录及独立证书，只声明主机检查；其 Pilot 委派须在本机服务就绪后另验。
+
 起点接入的隔离实际进程与测试已通过，现场部署因 Thor2 离线待验。
 边界及复现证据见[起点 Memory 与 MI 验收](../../docs/development/acceptance/2026-11-06-dog2-origin-memory-grounding.md)。
 

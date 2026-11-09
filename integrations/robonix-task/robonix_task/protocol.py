@@ -58,13 +58,13 @@ def event_dict(raw: bytes) -> dict[str, Any]:
         event.ParseFromString(raw)
     if not event.session_id or event.event_kind >= len(EVENT_NAMES):
         raise ValueError("event has no session identity or has an unsupported kind")
-    result = json_format.MessageToDict(
+    result: dict[str, Any] = json_format.MessageToDict(
         event,
         preserving_proto_field_name=True,
         always_print_fields_with_no_presence=True,
     )
     result["kind"] = EVENT_NAMES[event.event_kind]
-    return cast(dict[str, Any], result)
+    return result
 
 
 def execution_intent(request: dict[str, Any]) -> dict[str, Any]:

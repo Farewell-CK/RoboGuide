@@ -1,3 +1,13 @@
+ADR-0237 separates host enrollment from Local EAIOS and chassis readiness. The optional
+host GET in the existing combined Connector uses a normal two-role Task and typed Compute
+pools; no new adapter process or Pilot submission is involved. Use unique Node leaf keys,
+IDs and fresh storage when recovering a copied deployment. Static mTLS trust is not the
+dynamic identity lifecycle or a physical attestation. Run host/adapter unittests, strict
+package mypy, Ruff, function docs and the isolated two-Node host_process_gate.py.
+The 2026-11-09 field host Task completed on distinct dog1/dog2 Nodes, with fresh State,
+zero Unknown/allocations and unchanged original native journals. Both RG services are
+enabled with linger; dog1 Node restart/rejoin is separately checked. Chassis were off by
+operator report; no motion, MI planning or two-robot physical collaboration was tested.
 ADR-0231 defines opt-in Local EAIOS task delegation and device-provider integration.
 ADR-0235 adds an opt-in reported-origin capture operation in the existing combined Connector.
 Normal Task/resource admission owns capture; original attempts freeze immutable local evidence.

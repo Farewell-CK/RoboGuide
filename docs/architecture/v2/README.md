@@ -1,5 +1,13 @@
 # RoboGuide V2 现行架构
 
+[ADR-0237](../../decisions/0237-host-enrollment-with-unavailable-chassis.md)区分计算主机
+在线、Node 身份和机器人能力可用性。统一 Connector 的只读 host inspection 复用正常
+Task/资源和 Node State；两台主机分别使用独立凭据及存储，不将在线解释为运动就绪。
+
+[ADR-0236](../../decisions/0236-unadmitted-cancellation-snapshots.md)补齐 Node 对持久取消
+但从未进入本地执行的快照回放；不生成原执行记录，不授予物理停止或自动续跑权限。
+起点操作采用既有定量 Compute class 合同，与相机槽明确区分。
+
 [ADR-0235](../../decisions/0235-origin-memory-grounding.md)把实验起点记录归于正常 Task
 调用的 Node 只读观察操作，复用现有 Memory provider、Artifact CAS 和 Node 会话发布。
 明确选择 Global 的单条记录才进入共享发现；MI 仅在配置准入、原 bytes 摘要及来源核对后

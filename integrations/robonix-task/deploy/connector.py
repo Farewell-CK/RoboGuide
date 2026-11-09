@@ -13,6 +13,7 @@ from camera_adapter import Captures
 from camera_adapter import handler_type as camera_handler
 from robonix_task.adapter import Adapter, Server
 from robonix_task.adapter import Handler as PilotHandler
+from robonix_task.host import inspect_host
 from robonix_task.origin import OriginStore
 from robonix_task.position import annotate_mapping_age
 from robonix_task.protocol import Liaison
@@ -20,7 +21,7 @@ from status_bridge import Status
 from status_bridge import handler_type as observer_handler
 
 
-def combined_handler(captures, observer, origins=None):
+def combined_handler(captures, observer, origins=None, node_id=None):
     """Keep the existing route implementations and disambiguate readiness paths."""
     camera = camera_handler(captures)
     state = observer_handler(observer)
@@ -30,7 +31,12 @@ def combined_handler(captures, observer, origins=None):
 
         def do_GET(self):
             """Select the module by the fixed Node workflow route."""
-            if self.path.startswith("/v1/origins/"):
+            if self.path == "/v1/host/status":
+                if node_id is None:
+                    self.reply(404, {"error": "host inspection profile disabled"})
+                else:
+                    self.reply(200, inspect_host(node_id, observer.read()))
+            elif self.path.startswith("/v1/origins/"):
                 if origins is None:
                     self.reply(404, {"error": "origin profile disabled"})
                 elif self.path == "/v1/origins/discover":
@@ -128,6 +134,7 @@ def main():
     parser.add_argument("--delegate-profile")
     parser.add_argument("--origin-root", type=Path)
     parser.add_argument("--origin-node-id")
+    parser.add_argument("--node-id")
     args = parser.parse_args()
     if (args.origin_root is None) != (args.origin_node_id is None):
         parser.error("origin-root and origin-node-id must be supplied together")
@@ -181,7 +188,7 @@ def main():
             )
             if origins is not None:
                 cleanup.callback(origins.close)
-            server.RequestHandlerClass = combined_handler(captures, observer, origins)
+            server.RequestHandlerClass = combined_handler(captures, observer, origins, args.node_id)
             server.timeout = 0.5
             observer_thread = threading.Thread(target=observe, name="robonix-observer")
             observer_thread.start()
