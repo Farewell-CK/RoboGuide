@@ -12,6 +12,7 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -124,10 +125,22 @@ def run(args):
             data=None if body is None else canonical(body).encode(),
             headers={"Content-Type": "application/json"},
         )
-        with opener.open(request, timeout=5) as response:
+        try:
+            response = opener.open(request, timeout=5)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
             value = json.load(response)
+            status = response.status
         with (root / "http.jsonl").open("a") as stream:
-            stream.write(canonical({"at_ns": time.time_ns(), "path": path, "value": value}) + "\n")
+            stream.write(
+                canonical(
+                    {"at_ns": time.time_ns(), "path": path, "http_status": status, "value": value}
+                )
+                + "\n"
+            )
+        if status >= 400:
+            raise ValueError(f"gate-owned {path} returned HTTP {status}: {value}")
         return value
 
     def launch(binary, argv, name):
@@ -159,7 +172,7 @@ def run(args):
         )
         config = root / "node.toml"
         config.write_text(
-            'schema="roboguide.node-config/v0.13"\nnode_id="origin-fixture"\n'
+            'schema="roboguide.node-config/v0.14"\nnode_id="origin-fixture"\n'
             + f'server_endpoint="http://127.0.0.1:{grpc_port}"\n'
             + f"state_directory={json.dumps(str(root / 'node-state'))}\nreconnect_delay_ms=100\n"
             + '[[local_systems]]\nid="robot-observer"\nruntime_name="synthetic-origin-fixture"\n'
@@ -169,6 +182,8 @@ def run(args):
             + '[local_systems.health.step.operation]\nkind="http"\nmethod="GET"\npath="/health"\n'
             + '[[connections]]\nid="observer-http"\ndriver="http"\nlocal_system="robot-observer"\n'
             + f'endpoint="http://127.0.0.1:{fixture.server_port}"\ntimeout_ms=3000\n'
+            + '[[resources]]\nid="aaa-unrelated-camera-slot"\nkind="compute"\n'
+            + 'capacity=1\nowner="robot-observer"\n'
             + fragment
         )
         validation = subprocess.run(

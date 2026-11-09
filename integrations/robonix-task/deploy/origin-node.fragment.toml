@@ -1,6 +1,7 @@
 # Opt-in dog2 fragment appended to the existing single Node configuration.
 # The combined Connector uses --origin-root matching this provider root.
 # Remote Artifact mTLS requires ROBOGUIDE_ARTIFACT_CLIENT_{CERT,KEY,CA}.
+# Requires the containing Node configuration to opt into schema v0.14.
 
 [artifacts]
 endpoint = "https://192.168.2.20:8090"
@@ -29,6 +30,8 @@ path = "/v1/origins/readiness"
 id = "dog2-origin-slot"
 kind = "compute"
 capacity = 1
+allocation_mode = "divisible"
+resource_class = "spatial.origin-slots/v1"
 owner = "robot-observer"
 
 [[memory_providers]]

@@ -254,6 +254,26 @@ impl LocalIntegrationEngine {
             .collect())
     }
 
+    /// Observes one operator-selected durable pre-admission cancellation without creating a run.
+    pub fn unadmitted_cancellation_snapshot(
+        &self,
+        execution_id: &str,
+    ) -> Result<Option<ExecutionSnapshot>, EngineError> {
+        Ok(self
+            .inner
+            .journal
+            .unadmitted_cancellations()?
+            .into_iter()
+            .find(|id| id == execution_id)
+            .map(|execution_id| ExecutionSnapshot {
+                session_id: String::new(),
+                execution_id,
+                last_sequence: 1,
+                phase: ExecutionPhase::Cancelled as i32,
+                reason: "cancelled before local dispatch".into(),
+            }))
+    }
+
     /// Recovers status polling for known active executions without redispatching them.
     pub fn recover(&self) -> Result<(), EngineError> {
         self.validate_capacity_admission(None)?;

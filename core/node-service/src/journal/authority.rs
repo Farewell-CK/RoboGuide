@@ -307,6 +307,22 @@ impl ExecutionJournal {
         )?)
     }
 
+    /// Reads durable pre-admission cancels, excluding every admitted or dispatch-authorized identity.
+    pub fn unadmitted_cancellations(&self) -> Result<Vec<String>, JournalError> {
+        let connection = self.lock_connection()?;
+        let mut statement = connection.prepare(
+            "SELECT c.execution_id FROM cancellation_intents c
+             WHERE NOT EXISTS(SELECT 1 FROM execution_authority_v7 e
+                              WHERE e.execution_id = c.execution_id)
+               AND NOT EXISTS(SELECT 1 FROM local_dispatch_authorizations d
+                              WHERE d.execution_id = c.execution_id)
+             ORDER BY c.execution_id",
+        )?;
+        Ok(statement
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?)
+    }
+
     /// Persists the local handle returned by the single permitted physical dispatch.
     ///
     /// Repeating the same handle is idempotent. A different handle or a handle arriving
