@@ -14,6 +14,12 @@ ExecutionIntent must retain every local action constraint, while RG checks and p
 phase bookkeeping remain outside that executable goal. Experiment catalog descriptions
 state the same operation boundary.
 
+The Interpreter must keep explicit participant targets, exclusions and cardinality in the
+frozen self-contained objective, not only in its separate constraints list. Otherwise a
+Reviewer may correctly find missing Mission-level scope, while a Repairer cannot add it to
+the immutable objective. Do not weaken that exact-objective fence to repair an incomplete
+interpretation. A new dialogue cycle must produce a complete interpretation first.
+
 Participant scope remains a Mission/Role requirement. Referring to an RG-established
 receiver as this robot does not create a physical identity binding or permit a different
 participant. Unresolved selection still blocks RG admission. The Node adapter passes
