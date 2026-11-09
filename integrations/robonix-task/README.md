@@ -4,6 +4,11 @@
 完成一个包含两个角色的正式只读任务。见[双主机接入验收](../../docs/development/acceptance/2026-11-09-two-host-enrollment.md)。
 这次两台底盘尚未上电，不代表两只狗的运动能力已同时就绪。
 
+随后狗2上电后，通过 RG 委派 Robonix 完成一次只读姿态/电量任务，原生只调用一次
+chassis/state，返回 down、97%，RG Completed 并释放资源。
+见[上电后只读验收](../../docs/development/acceptance/2026-11-09-dog2-poweron-readonly.md)。
+该轮没有运动或 MI 规划；狗1后续排查已按用户要求停止。
+
 [主机 Node 片段](deploy/host-node.fragment.toml)须使用 v0.14，并替换 `NODE_ID`；
 现有统一 Connector 加 `--node-id`。固定 GET `/v1/host/status` 上报主机事实、
 保留原机器人数据及其不可用状态，`system.host.inspect@v1` 通过正常任务链执行同一个只读查询。

@@ -8,6 +8,11 @@ The 2026-11-09 field host Task completed on distinct dog1/dog2 Nodes, with fresh
 zero Unknown/allocations and unchanged original native journals. Both RG services are
 enabled with linger; dog1 Node restart/rejoin is separately checked. Chassis were off by
 operator report; no motion, MI planning or two-robot physical collaboration was tested.
+After chassis power-on, the separate dog2-poweron-read-20261109T014552Z Mission completed
+through RG and Robonix Pilot with one chassis/state call: down, 97 percent, fresh source.
+Original 28/492 journal rows were preserved; one new run and 13 events were added. Slot and
+Unknown are zero. MI/static World and movement were not validated. User excluded dog1
+repair; do not investigate, modify or restart dog1 without later explicit authorization.
 ADR-0231 defines opt-in Local EAIOS task delegation and device-provider integration.
 ADR-0235 adds an opt-in reported-origin capture operation in the existing combined Connector.
 Normal Task/resource admission owns capture; original attempts freeze immutable local evidence.
