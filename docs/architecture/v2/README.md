@@ -1,5 +1,9 @@
 # RoboGuide V2 现行架构
 
+[ADR-0239](../../decisions/0239-reported-chassis-posture-state.md)使 RG 通过周期 State 检查
+Robonix 报告的底盘姿态。统一 Connector 可选采集固定只读 chassis/state，中央读取器
+校验确切来源及内外层时效，不为每次检查创建 Pilot 任务，也不推导阻尼或遥控器状态。
+
 [ADR-0238](../../decisions/0238-local-eaios-delegation-objective-boundary.md)约束任务级委派的
 MI 解释边界：RG 承担选机、身份与租户授权、审批及派发，本机 EAIOS 接收完整本机目标和
 动作限制。不得要求 Pilot 反查 RG 集群或再次执行 RG 委派；适配器不删改模型生成目标。

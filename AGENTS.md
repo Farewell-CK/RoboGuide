@@ -2,6 +2,17 @@ The 2026-11-09 field issue/branch audit is docs/development/rg-experiment-mainte
 ThinkPad main was clean; deployed lab sources are separate from that Git checkout. Preserve
 the primary Windows worktree's uncommitted phone probe. The three hot-enrollment gaps in
 that ledger are source-verified open issues, not completed fixes or blanket Node blockers.
+ADR-0239 adds opt-in --chassis-state in the existing combined Connector. It samples only the
+fixed Robonix chassis/state tool through Atlas/MCP, closes its own session/channel and adds
+cached chassis evidence to the existing robot-state export. Central posture inspection GETs
+only authenticated Controller State/inventory and refuses expired/unknown/foreign evidence.
+Do not replace Robonix posture logic with joint-angle inference or infer damping/remote state.
+63 integration tests, strict package mypy, Ruff and function docs pass. The dog2 field check
+read standing via an earlier readonly Task, then down via the new State source; do not infer
+who changed its posture. Real Connector-stop expiry/refusal/recovery passed with 33 runs/569
+events unchanged; no extra Node, adapter process or Pilot task was needed for state polling.
+The reader is diagnostic; no universal Controller posture admission rule or MI World schema
+is added. For this experiment the operator approval flow explicitly calls the RG reader.
 ADR-0238 keeps RG selection, identity/tenant authorization, approval and dispatch out of
 Local EAIOS execution objectives. Planner/Reviewer/Repairer and experiment catalog metadata
 retain all local goals/action limits, without making Pilot prove cluster uniqueness or match
