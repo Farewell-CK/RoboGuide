@@ -1,3 +1,7 @@
+The 2026-11-09 field issue/branch audit is docs/development/rg-experiment-maintenance.md.
+ThinkPad main was clean; deployed lab sources are separate from that Git checkout. Preserve
+the primary Windows worktree's uncommitted phone probe. The three hot-enrollment gaps in
+that ledger are source-verified open issues, not completed fixes or blanket Node blockers.
 ADR-0238 keeps RG selection, identity/tenant authorization, approval and dispatch out of
 Local EAIOS execution objectives. Planner/Reviewer/Repairer and experiment catalog metadata
 retain all local goals/action limits, without making Pilot prove cluster uniqueness or match
