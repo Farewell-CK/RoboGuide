@@ -15,6 +15,9 @@ mod readiness_tests;
 #[path = "identity_adoption_tests.rs"]
 mod identity_adoption_tests;
 
+#[path = "deployment_management_tests.rs"]
+mod deployment_management_tests;
+
 /// Metrics-only identity is explicitly global yet cannot read business projections or any mutation.
 #[tokio::test]
 async fn metrics_reader_cannot_read_business_or_acquire_mutation_authority() {
@@ -131,6 +134,7 @@ fn integrated_legacy_wrappers_retain_original_verifier_configuration_fence() {
 /// Creates an empty Controller using the existing application and SQLite authority only.
 fn controller(log: &state::SqliteEventLog) -> Arc<Mutex<ControllerState>> {
     Arc::new(Mutex::new(ControllerState {
+        published_deployments: Default::default(),
         federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
@@ -880,6 +884,7 @@ fn identity_controller_with_policy(
         control.bootstrap_node_identity_registry(registry).unwrap();
     }
     Arc::new(Mutex::new(ControllerState {
+        published_deployments: Default::default(),
         federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control,

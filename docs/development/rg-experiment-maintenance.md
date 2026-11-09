@@ -1,5 +1,10 @@
 # RoboGuide 真机实验问题与分支维护
 
+2026-11-09 框架修复：RG-HOT-002/003 已按 ADR-0242 实现并完成隔离软件验收，
+包括实体/可行性在线发布、旧绑定保留、原版本冷恢复及真正旧 writer 拒绝。
+详见[验收记录](online-deployment-publications-acceptance-20261109.md)。三处热接入断层
+均已完成框架软件修复；本轮没有升级 ThinkPad 或机器狗部署。
+
 2026-11-09 后续增量：实验线 `d247e03c` 的姿态目标评估器及离线/恢复软件验收合入
 维护线。目标评估 ADR 调整为 0241，与已有姿态 State ADR-0240 及身份 ADR-0239 区分。
 86 项集成测试、54 项 subtests 和 17 项实际软件进程检查通过；详情在下方合并记录的
@@ -104,11 +109,11 @@ profile 并重启 Controller 才解决 MI 的租户接入，属于部署处理�
 
 ### RG-HOT-002：PhysicalEntityRegistry 缺少运行期管理接线
 
-状态：底层更新能力和 HTTP 接线缺口已确认，框架修复待做。
+状态：已修复并完成隔离软件进程验收，尚未部署现场。
 
-`core/control/src/lib.rs:1578` 已检查 provenance 单调性及现有 actor_bindings 冲突，
-但 `apps/integration-server/src/main.rs:1100,1552` 仅在启动安装当前 snapshot；
-现有 Controller HTTP 路由没有 `/v1/physical-entities` 管理入口。
+修复前，Control 已检查 provenance 单调性及现有 actor_bindings 冲突，但应用只在启动
+安装当前 snapshot。现已增加 GET/POST `/v1/physical-entities`，沿认证管理员、原写入
+事务、完整版本检查及现有 Control 安装通路提交，保留所有原始回执和资源/绑定。
 
 这是显式 PhysicalEntity 绑定/放置场景的缺口，不代表不绑定实体的普通 Node 无法执行。
 底层代码还明确要求当前物理 registry 不由 Control checkpoint 直接恢复：checkpoint
@@ -118,11 +123,12 @@ profile 并重启 Controller 才解决 MI 的租户接入，属于部署处理�
 
 ### RG-HOT-003：启用 DeploymentFeasibility 的部署缺少受控在线版本切换
 
-状态：启动冻结及缺少在线入口已确认；受影响部署范围已限定，框架修复待做。
+状态：已修复并完成隔离软件进程验收，尚未部署现场。
 
-`main.rs:1104,1220` 从可选环境路径读取一次并包为 Arc；HTTP 持有同一只读对象。
-`application/plan_revision/checkpoint.rs:395` 还要求恢复后的运行期 revision 继续绑定
-原 deployment digest。它包含原初始世界、操作准入、端点和证据语义，不是 live inventory。
+修复前，main 从可选环境路径读取一次并包为 Arc，HTTP 持有同一只读对象。现在
+GET/POST `/v1/deployment-feasibility` 发布并保留完整原始来源；新 Mission/Prepare
+在原 writer 内读取当前版本，旧运行期 revision 及 Control 限制继续绑定各自原 digest。
+启动 Arc 保留为显式原始 baseline，不直接替换它而改变历史证据。原来源仍不是 live inventory。
 
 所以该缺口不能概括为“所有新节点热接入都被阻断”，也不能通过简单文件监视/替换 Arc
 把旧候选、原证据年龄和旧计划的权威切到新版本。修复需明确版本所有权：新请求采用

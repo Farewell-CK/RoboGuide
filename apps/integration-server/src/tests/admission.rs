@@ -72,6 +72,7 @@ async fn admission_http_and_checkpoint_preserve_exact_accepted_input() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("opens");
     let controller = Arc::new(Mutex::new(ControllerState {
+        published_deployments: Default::default(),
         federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
@@ -122,6 +123,7 @@ async fn admission_http_and_checkpoint_preserve_exact_accepted_input() {
     let saved: ServerCheckpoint =
         serde_json::from_str(&checkpoint.checkpoint_json).expect("decodes");
     let restored = Arc::new(Mutex::new(ControllerState {
+        published_deployments: Default::default(),
         federation: Default::default(),
         bridge: IntegrationRuntimeBridge::restore_from_checkpoint(
             &saved.integration_json,

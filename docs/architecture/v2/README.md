@@ -1,5 +1,10 @@
 # RoboGuide V2 现行架构
 
+[ADR-0242](../../decisions/0242-online-deployment-publications.md)将在线物理实体发布归于
+现有管理员写入和 Control provenance，将新请求的可行性版本归于应用层受检历史；
+原 Actor 绑定、Control 限制和运行期候选保留原证据。当前物理路由仍须显式部署输入，
+不由 checkpoint 恢复；在线版本、身份、能力、World 来源与设备事实分别验证。
+
 [ADR-0241](../../decisions/0241-reported-posture-goal-profile.md)将姿态目标的判定接到既有
 Task satisfaction 通路：本机执行完成后等待确切任务的验证证据，更新的报告不符则拒绝目标，
 离线、旧样本与未知状态不推进依赖。纯评估器只证明有来源的 reported-state 谓词；

@@ -225,6 +225,8 @@ fn authorize_tenant_path(
             | "/v1/artifact-authorizations"
             | "/v1/resource-quotas"
             | "/v1/resource-topology"
+            | "/v1/physical-entities"
+            | "/v1/deployment-feasibility"
     ) {
         return Err(
             "global administration/diagnostics require an explicitly delegated global principal"
@@ -270,6 +272,8 @@ fn authorize_operator_request(
             | "/v1/resource-quotas"
             | "/v1/resource-topology"
             | "/v1/maintenance/archive/operations"
+            | "/v1/physical-entities"
+            | "/v1/deployment-feasibility"
             | "/v1/maintenance/coordinated-archive/operations",
         ) => 2,
         ("GET", _)
@@ -302,7 +306,13 @@ fn authorize_operator_request(
         ("POST", path) if path.starts_with("/v1/memory/handoffs/") && path.ends_with("/commit") => {
             2
         }
-        ("POST", "/v1/node-identities/commands" | "/v1/node-identities/adopt") => 2,
+        (
+            "POST",
+            "/v1/node-identities/commands"
+            | "/v1/node-identities/adopt"
+            | "/v1/physical-entities"
+            | "/v1/deployment-feasibility",
+        ) => 2,
         ("POST", "/v1/tenant-migrations") => 2,
         (
             "POST",
@@ -973,6 +983,13 @@ where
             }
         };
     }
+    let current_deployment = {
+        let live = controller
+            .lock()
+            .map_err(|_| "Controller lock is poisoned")?;
+        application::deployment_management::current(&live, deployment_feasibility)?
+    };
+    let deployment_feasibility = current_deployment.as_deref();
     if path.starts_with("/v1/federation/") && matches!(method, "GET" | "POST") {
         return handle_federation_route(
             stream,
@@ -1328,6 +1345,52 @@ where
             clock.now(),
         ) {
             Ok(result) => write_http_response(stream, "200 OK", result).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
+    if matches!(path, "/v1/physical-entities" | "/v1/deployment-feasibility") {
+        let result = if method == "GET" {
+            let live = controller
+                .lock()
+                .map_err(|_| "Controller lock is poisoned")?;
+            if path == "/v1/physical-entities" {
+                Ok(application::deployment_management::physical_view(&live))
+            } else {
+                application::deployment_management::feasibility_view(&live, deployment_feasibility)
+            }
+        } else if method == "POST" {
+            let subject = principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:recovery-admin");
+            if path == "/v1/physical-entities" {
+                application::deployment_management::submit_physical(
+                    controller,
+                    event_log,
+                    event_write_gate.as_ref(),
+                    &request.body,
+                    subject,
+                    clock,
+                )
+            } else {
+                application::deployment_management::submit_feasibility(
+                    controller,
+                    event_log,
+                    event_write_gate.as_ref(),
+                    &request.body,
+                    subject,
+                    clock,
+                    deployment_feasibility,
+                )
+            }
+        } else {
+            Err("unsupported deployment administration method".into())
+        };
+        return match result {
+            Ok(body) => write_http_response(stream, "200 OK", body).await,
             Err(error) => {
                 write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
                     .await
@@ -2402,6 +2465,13 @@ where
             );
             let _write_guard = event_write_gate.lock()?;
             drop(gate_wait);
+            let current_deployment = {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "Controller lock is poisoned")?;
+                application::deployment_management::current(&live, deployment_feasibility)?
+            };
+            let deployment_feasibility = current_deployment.as_deref();
             let capacity = {
                 let live = controller
                     .lock()

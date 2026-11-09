@@ -1,5 +1,9 @@
 # RoboGuide
 
+[ADR-0242](docs/decisions/0242-online-deployment-publications.md)补齐物理实体与可行性来源的
+在线发布。更新沿现有认证管理员、单写入事务和 Control 防回退通路，旧绑定及运行期计划
+保留原来源。合同与恢复输入见[在线部署信息发布](docs/development/online-deployment-publications-v0.1.md)。
+
 [ADR-0239](docs/decisions/0239-online-static-node-identity-adoption.md)增加显式在线采用原静态
 Node 证书映射的管理入口，保留原凭据和任务归属后进入生命周期热注册；原采用凭证
 进入 v0.2 registry 并用于冷恢复。接口与独立进程验收见[接入合同](docs/development/hot-node-enrollment-v0.1.md)。

@@ -9,6 +9,7 @@ pub(crate) mod catalog_retention;
 pub(crate) mod coordinated_archive;
 mod deployment_document;
 mod deployment_feasibility;
+pub(crate) mod deployment_management;
 mod deployment_operation_admission;
 mod deployment_sources;
 mod dispatch;

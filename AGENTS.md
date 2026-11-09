@@ -1,3 +1,14 @@
+ADR-0242 adds online physical/feasibility publications in application/deployment_management,
+using the original global recovery-admin, FIFO writer, Control digest history and SQL command
+journal. New closed RegistryCommandKind values fence old writers; historical wrappers cannot
+hide this authority. Physical routing is never restored from checkpoint: cold startup explicitly
+supplies the latest current physical file. Feasibility retains original source documents and
+startup lineage, and runtime revisions reattach their own original digest, not the current one.
+Normal Mission admission/Federation Prepare resolve current publication inside the writer.
+Never renew reset/preference/measurement clocks or reinterpret declarations as Node/device facts.
+Run affected deployment/runtime/Control tests, workspace all-target/all-feature Clippy and
+check_online_deployment_processes.py with actual current Controller/Node and a genuine prior
+Controller; also retain identity-adoption and posture-goal process regression boundaries.
 ADR-0239 adds explicit recovery-admin static Node identity adoption in the existing
 application/node_identity writer. Domain node_identity_adoption owns the exact original
 map/explicit ownership and required v0.2 receipt. Control also checks pre-Bind reservations;
@@ -22,7 +33,7 @@ process checks passed with the current hot-adoption Controller/Node. No field de
 The 2026-11-09 field issue/branch audit is docs/development/rg-experiment-maintenance.md.
 ThinkPad main was clean; deployed lab sources are separate from that Git checkout. Preserve
 the primary Windows worktree's uncommitted phone probe. The three hot-enrollment gaps in
-that ledger have independent statuses; gap 1 is software-accepted, gaps 2/3 remain open.
+that ledger have independent statuses; all three are software-accepted, field deployment separate.
 The maintenance branch merges delegation@89dca456's five historical mobile documentation
 commits, with a current-contract note. It does not include the primary checkout's phone probe
 or constitute Android acceptance; main and field deployments have not been changed.
