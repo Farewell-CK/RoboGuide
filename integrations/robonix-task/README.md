@@ -8,6 +8,10 @@ RG 的日常姿态检查使用 [reported posture 读取器](robonix_task/posture
 该诊断读取器不自动为所有 Controller 任务增加姿态准入规则，也不授予运动权限。
 见 [ADR-0239](../../docs/decisions/0239-reported-chassis-posture-state.md)。
 
+后续真实 MI 起身重试已由用户确认站稳，RG State 也报告 standing。用户另行授权的
+单次趴下仅出现原地踏步，RG State 仍 standing；原生停止/报告分支及 RG 的 Completed
+不能当作趴下成功。见[姿态接入与动作重试验收](../../docs/development/acceptance/2026-11-09-dog2-posture-state-and-remote-retry.md)。
+
 ```bash
 PYTHONPATH=integrations/robonix-task python3 -m robonix_task.posture \
   --controller-origin https://127.0.0.1:8080 --node-id lite3-dog2 \

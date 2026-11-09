@@ -13,6 +13,14 @@ who changed its posture. Real Connector-stop expiry/refusal/recovery passed with
 events unchanged; no extra Node, adapter process or Pilot task was needed for state polling.
 The reader is diagnostic; no universal Controller posture admission rule or MI World schema
 is added. For this experiment the operator approval flow explicitly calls the RG reader.
+The new real MI stand Mission mission-eb543d2500dd4bfb900fa15ddc9f271a completed through
+Pilot with state/one stand/state, fresh standing and user-confirmed stable standing. A separately
+authorized structured down Mission dog2-down-after-mi-stand-20261109T031448Z called down once,
+returned down/unknown then fresh standing; the user saw one in-place stepping motion and no
+lie-down. Pilot marked the stop/report branch done and RG Completed under execution-report.
+Preserve that lifecycle but report the down physical goal as not achieved. State reads alone
+do not install a Controller goal verifier. No down retry is authorized by this observation.
+Final ownership/Unknown are zero; native history is 36 runs/641 events with original 32/555 intact.
 ADR-0238 keeps RG selection, identity/tenant authorization, approval and dispatch out of
 Local EAIOS execution objectives. Planner/Reviewer/Repairer and experiment catalog metadata
 retain all local goals/action limits, without making Pilot prove cluster uniqueness or match
