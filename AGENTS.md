@@ -1,7 +1,17 @@
+ADR-0239 adds explicit recovery-admin static Node identity adoption in the existing
+application/node_identity writer. Domain node_identity_adoption owns the exact original
+map/explicit ownership and required v0.2 receipt. Control also checks pre-Bind reservations;
+Integration validates actual current transport and cold original-map reattachment. Never infer
+tenants, drop old bindings, relax MI scope or create device facts. Run affected identity/core
+tests, workspace Clippy, Ruff/mypy/function docs and check_hot_node_enrollment_processes.py
+with actual current Controller/Node and an archived prior Controller. The 2026-11-09 isolated
+process gate passed, including hot existing-session/task preservation, new Node execution,
+cold original-map restore and actual old-writer refusal; see hot-node-enrollment acceptance.
+Field deployment is separate.
 The 2026-11-09 field issue/branch audit is docs/development/rg-experiment-maintenance.md.
 ThinkPad main was clean; deployed lab sources are separate from that Git checkout. Preserve
 the primary Windows worktree's uncommitted phone probe. The three hot-enrollment gaps in
-that ledger are source-verified open issues, not completed fixes or blanket Node blockers.
+that ledger have independent statuses; gap 1 is software-accepted, gaps 2/3 remain open.
 ADR-0238 keeps RG selection, identity/tenant authorization, approval and dispatch out of
 Local EAIOS execution objectives. Planner/Reviewer/Repairer and experiment catalog metadata
 retain all local goals/action limits, without making Pilot prove cluster uniqueness or match

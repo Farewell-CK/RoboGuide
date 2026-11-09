@@ -12,6 +12,9 @@ mod write_recovery_tests;
 #[path = "readiness_tests.rs"]
 mod readiness_tests;
 
+#[path = "identity_adoption_tests.rs"]
+mod identity_adoption_tests;
+
 /// Metrics-only identity is explicitly global yet cannot read business projections or any mutation.
 #[tokio::test]
 async fn metrics_reader_cannot_read_business_or_acquire_mutation_authority() {
@@ -853,16 +856,29 @@ async fn actual_mtls_viewer_and_unmapped_certificate_cannot_submit() {
 /// Builds an empty application whose registry and transport use the same explicit lifecycle profile.
 fn identity_controller(log: &state::SqliteEventLog) -> Arc<Mutex<ControllerState>> {
     let registry = domain::NodeIdentityRegistry::new("test-deployment");
+    identity_controller_with_policy(
+        log,
+        integration::NodeIdentityPolicy::require_lifecycle(registry).unwrap(),
+    )
+}
+
+/// Creates an otherwise empty application with an exact explicit transport identity profile.
+fn identity_controller_with_policy(
+    log: &state::SqliteEventLog,
+    policy: integration::NodeIdentityPolicy,
+) -> Arc<Mutex<ControllerState>> {
     let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
     let (_service, router) = integration::GrpcIntegrationService::new_with_observer_and_identity(
         events,
         ports::NodeProtocolPolicy::default(),
         Arc::new(runtime::SystemMonotonicClock::new()),
         ports::DiagnosticHandle::default(),
-        integration::NodeIdentityPolicy::require_lifecycle(registry.clone()).unwrap(),
+        policy.clone(),
     );
     let mut control = control::ControlPlane::new();
-    control.bootstrap_node_identity_registry(registry).unwrap();
+    if let integration::NodeIdentityPolicy::CertificateLifecycle(registry) = policy {
+        control.bootstrap_node_identity_registry(registry).unwrap();
+    }
     Arc::new(Mutex::new(ControllerState {
         federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(

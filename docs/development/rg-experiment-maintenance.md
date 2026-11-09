@@ -67,13 +67,14 @@ RG 与 Robonix，但物理站立失败；完整记录见
 
 ### RG-HOT-001：静态 Node mTLS 到生命周期 registry 缺少显式在线采用入口
 
-状态：源码缺口已确认，框架修复待做。此前现场通过完整备份、副本软件验证后更改启动
+状态：已在 `codex/rg-hot-enrollment-maintenance` 修复并完成隔离软件进程验收，未部署现场。
+详见[验收记录](hot-node-enrollment-acceptance-20261109.md)。此前现场通过完整备份、副本软件验证后更改启动
 profile 并重启 Controller 才解决 MI 的租户接入，属于部署处理，不是此缺口已修复。
 
 证据：
 
 - `core/integration/src/grpc_server/mod.rs:61` 将静态字典与生命周期 JSON 分别解析；
-  `publish_identity_registry:448` 在当前 profile 不是 CertificateLifecycle 时拒绝。
+  修复前 publish_identity_registry 在当前 profile 不是 CertificateLifecycle 时拒绝。
 - `core/control/src/node_identity.rs:52` 的 apply_node_identity_command 在 registry=None
   时拒绝。application/node_identity::submit 持久化后热发布的正常链路已经存在。
 - 完整生命周期部署下，register 可热更新；不能概括成 RG 完全不支持节点热加入。

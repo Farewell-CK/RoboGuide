@@ -82,6 +82,13 @@ pub use mission_goal_verification::{
 mod mission_plan;
 mod node_health;
 mod node_identity;
+mod node_identity_adoption;
+pub use node_identity_adoption::{
+    ADOPTED_NODE_IDENTITY_REGISTRY_SCHEMA, NODE_IDENTITY_ADOPTION_SCHEMA,
+    NodeIdentityAdoptionCommand, NodeIdentityAdoptionOwner, NodeIdentityAdoptionReceipt,
+};
+#[cfg(test)]
+mod node_identity_adoption_tests;
 #[cfg(test)]
 mod node_identity_tests;
 mod node_liveness_evidence;

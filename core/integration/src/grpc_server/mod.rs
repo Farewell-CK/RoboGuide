@@ -71,6 +71,46 @@ impl NodeIdentityPolicy {
         )
     }
 
+    /// Checks a committed projection, including exact original static adoption on cold restore.
+    pub fn validate_registry_projection(
+        &self,
+        registry: &crate::NodeIdentityRegistry,
+    ) -> Result<(), String> {
+        registry.validate().map_err(|error| error.to_string())?;
+        match self {
+            Self::TrustedLoopback => {
+                Err("static certificate identity profile is required for adoption".into())
+            }
+            Self::RequirePeerCertificate(bindings) => {
+                if registry
+                    .adoption
+                    .as_deref()
+                    .is_some_and(|receipt| &receipt.command.expected_bindings == bindings)
+                {
+                    Ok(())
+                } else {
+                    Err("Node identity adoption does not match the original static certificate profile".into())
+                }
+            }
+            Self::CertificateLifecycle(previous) => {
+                if previous.registry_id != registry.registry_id
+                    || previous.schema != registry.schema
+                    || previous.adoption != registry.adoption
+                    || previous.records.iter().any(|(node, admitted)| {
+                        registry.records.get(node).is_none_or(|next| {
+                            next.revision < admitted.revision
+                                || (next.revision == admitted.revision && next != admitted)
+                        })
+                    })
+                {
+                    Err("Node identity projection rollback/conflict".into())
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
     /// Verifies the peer certificate digest for one negotiated Node identity.
     fn validate_peer(&self, node_id: &str, certificate_digest: Option<&str>) -> Result<(), Status> {
         self.validate_peer_at(node_id, certificate_digest, identity_wall_time())
@@ -456,26 +496,23 @@ impl GrpcNodeRouter {
             .identity_policy
             .lock()
             .map_err(|_| Status::internal("identity projection unavailable"))?;
-        if !matches!(*policy, NodeIdentityPolicy::CertificateLifecycle(_)) {
-            return Err(Status::failed_precondition(
-                "dynamic identity profile is not enabled",
-            ));
-        }
-        if let NodeIdentityPolicy::CertificateLifecycle(previous) = &*policy
-            && (previous.registry_id != registry.registry_id
-                || previous.records.iter().any(|(node, admitted)| {
-                    registry.records.get(node).is_none_or(|next| {
-                        next.revision < admitted.revision
-                            || (next.revision == admitted.revision && next != admitted)
-                    })
-                }))
-        {
-            return Err(Status::failed_precondition(
-                "Node identity projection rollback/conflict",
-            ));
-        }
+        policy
+            .validate_registry_projection(&registry)
+            .map_err(Status::failed_precondition)?;
         *policy = NodeIdentityPolicy::CertificateLifecycle(registry);
         Ok(())
+    }
+
+    /// Validates a private registry before persistence without changing current transport policy.
+    pub fn validate_identity_registry_projection(
+        &self,
+        registry: &crate::NodeIdentityRegistry,
+    ) -> Result<(), Status> {
+        self.identity_policy
+            .lock()
+            .map_err(|_| Status::internal("identity projection unavailable"))?
+            .validate_registry_projection(registry)
+            .map_err(Status::failed_precondition)
     }
 
     /// Rechecks the exact TLS leaf against the current committed deployment identity projection.

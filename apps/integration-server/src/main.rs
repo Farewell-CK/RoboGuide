@@ -1218,6 +1218,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => return Err("ROBOGUIDE_INITIAL_OPERATION_ASSESSMENT must be 0 or 1".into()),
     }
     let deployment_feasibility = deployment_feasibility.map(Arc::new);
+    let startup_node_identity_policy = node_identity_policy.clone();
     let bootstrap_identity_registry = match &node_identity_policy {
         NodeIdentityPolicy::CertificateLifecycle(registry) => Some(registry.clone()),
         _ => None,
@@ -1490,6 +1491,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             true
         }
         (None, None) => false,
+        (None, Some(saved))
+            if startup_node_identity_policy
+                .validate_registry_projection(saved)
+                .is_ok() =>
+        {
+            false
+        }
         _ => {
             return Err(
                 "restored Node identity registry requires its original lifecycle mTLS profile"

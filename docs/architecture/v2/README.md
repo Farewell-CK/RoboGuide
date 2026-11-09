@@ -1,5 +1,9 @@
 # RoboGuide V2 现行架构
 
+[ADR-0239](../../decisions/0239-online-static-node-identity-adoption.md)将静态 Node 证书到
+生命周期管理的在线采用归于原管理员写入/Commit/传输发布通路；显式完整归属与
+v0.2 原采用凭证保持历史绑定、活跃会话和冷恢复边界，不自动推断身份或硬件信任。
+
 [ADR-0238](../../decisions/0238-local-eaios-delegation-objective-boundary.md)约束任务级委派的
 MI 解释边界：RG 承担选机、身份与租户授权、审批及派发，本机 EAIOS 接收完整本机目标和
 动作限制。不得要求 Pilot 反查 RG 集群或再次执行 RG 委派；适配器不删改模型生成目标。

@@ -1,5 +1,9 @@
 # RoboGuide
 
+[ADR-0239](docs/decisions/0239-online-static-node-identity-adoption.md)增加显式在线采用原静态
+Node 证书映射的管理入口，保留原凭据和任务归属后进入生命周期热注册；原采用凭证
+进入 v0.2 registry 并用于冷恢复。接口与独立进程验收见[接入合同](docs/development/hot-node-enrollment-v0.1.md)。
+
 [ADR-0235](docs/decisions/0235-origin-memory-grounding.md)增加显式启用的起点记录操作和
 MI 起点内容解码。正常 Task 调用统一 Connector 的只读观察，现有 Node provider 发布
 Memory/Artifact；MI 校验原始 bytes、摘要、大小及任务来源后冻结到 grounding v0.4。

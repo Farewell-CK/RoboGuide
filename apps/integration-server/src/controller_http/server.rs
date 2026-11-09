@@ -302,7 +302,7 @@ fn authorize_operator_request(
         ("POST", path) if path.starts_with("/v1/memory/handoffs/") && path.ends_with("/commit") => {
             2
         }
-        ("POST", "/v1/node-identities/commands") => 2,
+        ("POST", "/v1/node-identities/commands" | "/v1/node-identities/adopt") => 2,
         ("POST", "/v1/tenant-migrations") => 2,
         (
             "POST",
@@ -1479,6 +1479,26 @@ where
             tenant.as_deref(),
         ) {
             Ok(result) => write_http_response(stream, "200 OK", result).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
+    if method == "POST" && path == "/v1/node-identities/adopt" {
+        let result = application::node_identity::adopt(
+            controller,
+            event_log,
+            event_write_gate,
+            clock,
+            &request.body,
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("loopback:recovery-admin"),
+        );
+        return match result {
+            Ok(receipt) => write_http_response(stream, "200 OK", receipt).await,
             Err(error) => {
                 write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
                     .await
