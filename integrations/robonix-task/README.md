@@ -5,6 +5,11 @@ RG 承担选机、身份/租户授权与审批。Pilot 只接收完整本机目�
 不被要求反查 RG 集群、证明自己是唯一候选或将本机名称匹配为 RG 部署别名。
 适配器原样传递生成的目标；这些提示不替代 RG 的准入检查或 Robonix 的本机安全职责。
 
+2026-11-09 已通过真实 `gpt-6.1-sol` MI 完成解释、规划、审阅与审批，再由原 Controller
+派发狗2的一次站立实验。真实链路完成了失败回传；本机 stand 返回 standing/unknown，
+实时仍 down，用户确认完全没有起身，RG 如实 Failed 并释放资源。
+完整过程及保留的早期拒绝见[真实 MI 与站立实验](../../docs/development/acceptance/2026-11-09-dog2-real-mi-stand.md)。
+
 2026-11-09 两台 Thor 已以 `lite3-dog1`、`lite3-dog2` 独立接入同一现场 Controller，
 完成一个包含两个角色的正式只读任务。见[双主机接入验收](../../docs/development/acceptance/2026-11-09-two-host-enrollment.md)。
 这次两台底盘尚未上电，不代表两只狗的运动能力已同时就绪。

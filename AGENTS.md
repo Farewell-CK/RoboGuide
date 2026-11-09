@@ -11,6 +11,13 @@ local ownership; zero migrations were needed. Original attempts and leafs remain
 Robonix restart was issued. This is lifecycle software authority, not hardware attestation.
 The next MI Task was Failed because Pilot could not prove RG identity/uniqueness; its original
 native record contains no plan. Retain both failures; only a new Request may test the boundary fix.
+The final actual MI Request request-0a6d8da23fa74c05a8e411b4e62aaf27 passed Review/approval
+after a new dialogue fixed Interpreter participant scope. Its Mission bb7896922a4f4fdebb478c6a682cf17d
+dispatched only to dog2, with one native stand. Native returned standing/unknown, then fresh down
+at 82 percent; the user confirmed no stand-up. Pilot and RG correctly Failed, allocations and
+Unknown are zero, no motion retry. Full MI transport is exercised, physical standing failed.
+Do not relabel an earlier conditional Completed/read-only branch as standing success. User's
+confirmed onsite facts belong to this one stand experiment; do not invent future confirmations.
 ADR-0237 separates host enrollment from Local EAIOS and chassis readiness. The optional
 host GET in the existing combined Connector uses a normal two-role Task and typed Compute
 pools; no new adapter process or Pilot submission is involved. Use unique Node leaf keys,
