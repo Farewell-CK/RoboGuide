@@ -33,7 +33,7 @@
         "name": "delegate",
         "version": "v1"
       },
-      "description": "Submit the intact objective to a local task runtime and track its attributed result.",
+      "description": "Submit the complete local outcome and all local action limits to the already selected local task runtime, then track its attributed result. RG owns participant selection, authorization, approval and dispatch. The receiver executes this robot's goal; it must not be asked to inspect RG inventory, prove cluster uniqueness, match a local robot name to an RG alias, or recursively call this RG operation. Preserve participant scope in Mission/Role requirements; never invent a physical binding or waive unresolved selection.",
       "parameters": [
         {
           "name": "profile",

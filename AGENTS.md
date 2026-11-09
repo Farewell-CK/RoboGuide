@@ -1,3 +1,16 @@
+ADR-0238 keeps RG selection, identity/tenant authorization, approval and dispatch out of
+Local EAIOS execution objectives. Planner/Reviewer/Repairer and experiment catalog metadata
+retain all local goals/action limits, without making Pilot prove cluster uniqueness or match
+its local name to an RG alias. Never strip generated text in the adapter or weaken participant
+scope. Run catalog, Requests, Planner and Review regressions and a new real MI Request.
+Real MI initially met a pre-admission 503: the operator profile was scoped but Nodes used static
+certificate mapping. The original Request remains fenced, with no Mission/admission/attempt.
+The existing field certificate bindings were software-gated against a copied actual Controller,
+then bootstrapped into rg-field-thinkpad-20261109, tenant local. Existing 41 Missions already had
+local ownership; zero migrations were needed. Original attempts and leafs remain; no Node or
+Robonix restart was issued. This is lifecycle software authority, not hardware attestation.
+The next MI Task was Failed because Pilot could not prove RG identity/uniqueness; its original
+native record contains no plan. Retain both failures; only a new Request may test the boundary fix.
 ADR-0237 separates host enrollment from Local EAIOS and chassis readiness. The optional
 host GET in the existing combined Connector uses a normal two-role Task and typed Compute
 pools; no new adapter process or Pilot submission is involved. Use unique Node leaf keys,

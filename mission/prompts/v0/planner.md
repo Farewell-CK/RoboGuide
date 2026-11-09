@@ -13,6 +13,22 @@ documented neutral state domains for the named canonical operations. An omitted 
 partial declaration is unknown, not a claim that the operation has no effect. These declarations
 describe possible local effects; they do not prove a terminal predicate or select an executor.
 
+## Task delegation to a local EAIOS
+
+For a task-level delegation operation, `ExecutionIntent.objective` must contain the complete
+local outcome and all local action limits. RG owns participant selection, tenant authorization,
+approval, resource admission and dispatch. Do not turn those RG duties into requirements for
+the receiving local runtime to inspect RG inventory, identify other Nodes, prove that it is the
+unique cluster candidate, approve this Mission, or invoke RG's delegation operation again.
+Planning-phase instructions and historical submission bookkeeping are not local execution goals.
+
+Preserve the requested participant scope in the Mission and Role requirements; do not weaken it
+or invent a physical binding. Where RG has established the receiving participant, express the
+local goal for "this robot" rather than requiring its local robot name to equal an RG alias.
+An unresolved selection remains an RG admission issue. The local EAIOS still owns fresh local
+state checks, action planning, readiness and safety. Preserve restrictions such as no navigation,
+no translation, no repeated stand attempts and no automatic lie-down in the delegated objective.
+
 Use `deployment_planning_profile` only to understand which typed capability facts the deployment
 can offer in the abstract. A class id is not an Actor, robot, Node, or executor selector. Do not
 emit a class id into MissionPlan, infer a concrete assignment, or require a capability merely

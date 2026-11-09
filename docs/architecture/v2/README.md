@@ -1,5 +1,9 @@
 # RoboGuide V2 现行架构
 
+[ADR-0238](../../decisions/0238-local-eaios-delegation-objective-boundary.md)约束任务级委派的
+MI 解释边界：RG 承担选机、身份与租户授权、审批及派发，本机 EAIOS 接收完整本机目标和
+动作限制。不得要求 Pilot 反查 RG 集群或再次执行 RG 委派；适配器不删改模型生成目标。
+
 [ADR-0237](../../decisions/0237-host-enrollment-with-unavailable-chassis.md)区分计算主机
 在线、Node 身份和机器人能力可用性。统一 Connector 的只读 host inspection 复用正常
 Task/资源和 Node State；两台主机分别使用独立凭据及存储，不将在线解释为运动就绪。

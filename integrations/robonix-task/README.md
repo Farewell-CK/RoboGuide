@@ -1,5 +1,10 @@
 # Robonix 本机任务接入
 
+任务级委派的 MI 目标须遵循 [ADR-0238](../../docs/decisions/0238-local-eaios-delegation-objective-boundary.md)：
+RG 承担选机、身份/租户授权与审批。Pilot 只接收完整本机目标、实时前提和动作限制，
+不被要求反查 RG 集群、证明自己是唯一候选或将本机名称匹配为 RG 部署别名。
+适配器原样传递生成的目标；这些提示不替代 RG 的准入检查或 Robonix 的本机安全职责。
+
 2026-11-09 两台 Thor 已以 `lite3-dog1`、`lite3-dog2` 独立接入同一现场 Controller，
 完成一个包含两个角色的正式只读任务。见[双主机接入验收](../../docs/development/acceptance/2026-11-09-two-host-enrollment.md)。
 这次两台底盘尚未上电，不代表两只狗的运动能力已同时就绪。
