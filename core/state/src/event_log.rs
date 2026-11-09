@@ -53,6 +53,7 @@ mod authority_journal;
 #[path = "catalog_archive.rs"]
 mod catalog_archive;
 pub use archive_operation::{ArchiveContent, ArchiveIntent, ArchiveRequest};
+pub use catalog_archive::CatalogRecoveryEvents;
 #[path = "timer_transaction.rs"]
 mod timer_transaction;
 #[path = "write_availability.rs"]

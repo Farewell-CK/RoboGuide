@@ -104,7 +104,7 @@ pub use event_log::{
     ArchiveAbortRequest, ArchiveAbortSink, ArchiveContent, ArchiveContentKey, ArchiveCopierFence,
     ArchiveIntent, ArchiveLeaseIdentity, ArchiveManifest, ArchiveRequest, ArchiveSink,
     AuthorityWriteStatus, COORDINATED_ARCHIVE_RECOVERY_SCHEMA, COORDINATED_ARCHIVE_STORAGE_SCHEMA,
-    CheckpointStoragePolicy, CheckpointWriteStats, CompleteReplicaState,
+    CatalogRecoveryEvents, CheckpointStoragePolicy, CheckpointWriteStats, CompleteReplicaState,
     ControlCommandJournalEntry, CoordinatedArchiveAbort, CoordinatedArchiveIntent,
     CoordinatedArchivePackage, CoordinatedArchiveRecord, CoordinatedArchiveRequest,
     CoordinatedArchiveSink, FileArchiveSink, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_EVENTS,

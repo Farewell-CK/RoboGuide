@@ -252,6 +252,31 @@ async fn spatial_map_cross_node_exchange_reaches_strong_verification() {
     );
     assert_eq!(checkpoint.schema, TEST_CHECKPOINT_SCHEMA);
     assert_eq!(checkpoint.checkpoint_json, TEST_CHECKPOINT_JSON);
+    let restored = ArtifactCatalog::replay_with_gate(
+        &reopened,
+        Arc::new(crate::application::ApplicationWriter::default()),
+    )
+    .unwrap();
+    let expected: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event.payload() {
+            EventPayload::MapLocalizationEvidenceRecorded { evidence } => {
+                Some((evidence.clone(), event.timestamp()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(!expected.is_empty());
+    assert_eq!(
+        restored.take_restored_localization_evidence().unwrap(),
+        expected
+    );
+    assert!(
+        restored
+            .take_restored_localization_evidence()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 /// Publishing a manifest without a finalized CAS blob is rejected before catalog mutation.

@@ -1536,7 +1536,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut restored_localization_evidence = false;
     for (evidence, received_at) in artifact_catalog
-        .localization_evidence()
+        .take_restored_localization_evidence()
         .map_err(|error| format!("localization evidence replay failed: {error}"))?
     {
         restored_localization_evidence |= controller

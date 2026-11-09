@@ -9,6 +9,18 @@ const MAX_BYTES: usize = 64 * 1024 * 1024;
 /// Maximum original records retained by this bootstrap projection.
 const MAX_EVENTS: usize = 16_384;
 
+/// Validated Catalog recovery input without retaining unrelated telemetry in memory.
+pub struct CatalogRecoveryEvents {
+    /// Original protected Catalog/localization records, in their original sequence order.
+    pub events: Vec<EventRecord>,
+    /// Clock floor across all scanned history, including non-Catalog telemetry.
+    pub timestamp_high_water: TimestampMs,
+    /// Number of original archived-prefix and live-tail records validated by this scan.
+    pub scanned_events: u64,
+    /// Original JSON payload bytes read; this is a measurement, not a memory allocation budget.
+    pub scanned_payload_bytes: u64,
+}
+
 /// Exact persisted recovery head; rows cannot disappear under a still-valid aggregate digest.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -231,25 +243,55 @@ impl SqliteEventLog {
 
     /// Replays the independent original Catalog prefix before the current unarchived event tail.
     pub fn catalog_replay_events(&self) -> Result<Vec<EventRecord>, SqliteEventLogError> {
-        let records = self.catalog_replay_stored_events()?;
-        let mut result = Vec::with_capacity(records.len());
-        for event in records {
-            validate_persisted_event(&event)?;
-            let payload = serde_json::from_str(&event.payload_json)
-                .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?;
-            result.push(EventRecord::new(
-                EventId::new(event.event_id)
-                    .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?,
-                TimestampMs::new(event.timestamp_ms),
-                CorrelationId::new(event.correlation_id)
-                    .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?,
-                event
-                    .causation_id
-                    .map(EventId::new)
-                    .transpose()
-                    .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?,
-                payload,
-            ));
+        Ok(self.scan_catalog_replay(false)?.events)
+    }
+
+    /// Validates the complete original history but retains only records needed by Catalog recovery.
+    ///
+    /// Legacy histories still receive a full integrity scan. Each live row is decoded once and
+    /// discarded immediately when irrelevant; corrupt telemetry remains a recovery error. This
+    /// changes neither durable history nor the archive/source authentication contract.
+    pub fn catalog_recovery_events(&self) -> Result<CatalogRecoveryEvents, SqliteEventLogError> {
+        self.scan_catalog_replay(true)
+    }
+
+    /// Streams one consistent SQL view with source validation and no externally effectful callback.
+    fn scan_catalog_replay(
+        &self,
+        protected_only: bool,
+    ) -> Result<CatalogRecoveryEvents, SqliteEventLogError> {
+        self.ensure_no_open_batch()?;
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteEventLogError::LockPoisoned)?;
+        let prefix = read(&connection)?;
+        let mut statement = connection.prepare(
+            "SELECT sequence,event_id,timestamp_ms,correlation_id,causation_id,payload_schema,payload_json FROM events ORDER BY sequence"
+        )?;
+        let tail = statement.query_map([], event_from_row)?;
+        let mut validator = crate::artifact_retention::AdoptionSourceValidator::default();
+        let mut result = CatalogRecoveryEvents {
+            events: Vec::new(),
+            timestamp_high_water: TimestampMs::new(0),
+            scanned_events: 0,
+            scanned_payload_bytes: 0,
+        };
+        for row in prefix.into_iter().map(Ok).chain(tail) {
+            let row = row?;
+            let event = super::application_replication::decode_persisted_event(&row)?;
+            validator
+                .observe(&row, event.payload())
+                .map_err(SqliteEventLogError::Codec)?;
+            result.scanned_events += 1;
+            result.scanned_payload_bytes = result
+                .scanned_payload_bytes
+                .checked_add(row.payload_json.len() as u64)
+                .ok_or_else(|| SqliteEventLogError::Codec("Catalog scan byte overflow".into()))?;
+            result.timestamp_high_water = result.timestamp_high_water.max(event.timestamp());
+            if !protected_only || super::archive::requires_catalog_history(event.payload()) {
+                result.events.push(event);
+            }
         }
         Ok(result)
     }
@@ -473,6 +515,9 @@ mod tests {
         assert_eq!(log.len().unwrap(), 0);
         assert_eq!(log.archived_catalog_events().unwrap(), originals);
         let replay = log.catalog_replay_events().unwrap();
+        let recovered = log.catalog_recovery_events().unwrap();
+        assert_eq!(recovered.events, replay);
+        assert_eq!(recovered.scanned_events, 1);
         assert_eq!(replay[0].timestamp(), TimestampMs::new(7));
         assert_eq!(
             replay[0].payload(),
@@ -482,6 +527,7 @@ mod tests {
             .execute("DELETE FROM catalog_archive_events", [])
             .unwrap();
         assert!(log.catalog_replay_events().is_err());
+        assert!(log.catalog_recovery_events().is_err());
         connection
             .execute(
                 "DELETE FROM event_log_metadata WHERE key='catalog_archive_checkpoint'",
@@ -489,6 +535,82 @@ mod tests {
             )
             .unwrap();
         assert!(log.catalog_replay_events().is_err());
+        assert!(log.catalog_recovery_events().is_err());
+    }
+
+    /// Repeated telemetry is validated and advances time without joining the Catalog output array.
+    #[test]
+    fn recovery_discards_telemetry_but_preserves_clock_and_original_publication() {
+        let directory = tempfile::tempdir().unwrap();
+        let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+        let manifest = original(&log);
+        log.begin_batch().unwrap();
+        let mut writer = log.clone();
+        for index in 0..2000 {
+            writer.append(
+                TimestampMs::new(10 + index),
+                &CorrelationId::new("heartbeat").unwrap(),
+                None,
+                EventPayload::NodeHeartbeatAccepted {
+                    node_id: NodeId::new("node").unwrap(),
+                    lease_id: LeaseId::new("lease").unwrap(),
+                },
+            );
+        }
+        log.commit_batch().unwrap();
+        let before = log.events().unwrap();
+        let recovered = log.catalog_recovery_events().unwrap();
+        assert_eq!(recovered.scanned_events, 2001);
+        assert_eq!(recovered.timestamp_high_water, TimestampMs::new(2009));
+        assert_eq!(
+            recovered.scanned_payload_bytes,
+            before
+                .iter()
+                .map(|row| row.payload_json.len() as u64)
+                .sum::<u64>()
+        );
+        assert_eq!(recovered.events.len(), 1);
+        assert_eq!(
+            recovered.events[0].payload(),
+            &EventPayload::MemoryManifestPublished { manifest }
+        );
+        assert_eq!(recovered.events[0].timestamp(), TimestampMs::new(7));
+        assert_eq!(log.events().unwrap(), before);
+        assert_eq!(log.catalog_replay_events().unwrap().len(), 2001);
+    }
+
+    /// Filtering retention cannot conceal corrupt or wrongly-versioned unrelated telemetry.
+    #[test]
+    fn recovery_still_refuses_invalid_non_catalog_events() {
+        for (column, invalid) in [
+            ("payload_json", "{broken"),
+            ("payload_schema", "future-event-schema"),
+            ("event_id", ""),
+            ("causation_id", ""),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+            original(&log);
+            log.clone().append(
+                TimestampMs::new(20),
+                &CorrelationId::new("heartbeat").unwrap(),
+                None,
+                EventPayload::NodeHeartbeatAccepted {
+                    node_id: NodeId::new("node").unwrap(),
+                    lease_id: LeaseId::new("lease").unwrap(),
+                },
+            );
+            assert!(log.take_error().unwrap().is_none());
+            log.connection
+                .lock()
+                .unwrap()
+                .execute(
+                    &format!("UPDATE events SET {column}=?1 WHERE sequence=2"),
+                    [invalid],
+                )
+                .unwrap();
+            assert!(log.catalog_recovery_events().is_err(), "{column}");
+        }
     }
 
     /// Context-bound snapshot validation preserves real SQL; this sink fixture proves no bytes/quorum.

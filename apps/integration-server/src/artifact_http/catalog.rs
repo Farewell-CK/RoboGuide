@@ -238,6 +238,8 @@ pub struct ArtifactCatalog {
     pub(super) timestamp_high_water: Arc<Mutex<TimestampMs>>,
     /// Process-local recovery fence set when a durable catalog commit outcome is uncertain.
     pub(super) recovery_fence: Arc<Mutex<Option<String>>>,
+    /// One-shot original localization replay output, consumed before any listener serves requests.
+    restored_localization: Arc<Mutex<Vec<(domain::LocalizationVerificationEvidence, TimestampMs)>>>,
 }
 
 impl ArtifactCatalog {
@@ -472,8 +474,10 @@ impl ArtifactCatalog {
         let mut upload_retirements = BTreeMap::new();
         let mut upload_recoveries = BTreeMap::new();
         let mut retention = state::ArtifactRetentionProjection::default();
-        let mut timestamp_high_water = TimestampMs::new(0);
-        for event in event_log.catalog_replay_events()? {
+        let recovery = event_log.catalog_recovery_events()?;
+        let timestamp_high_water = recovery.timestamp_high_water;
+        let mut restored_localization = Vec::new();
+        for event in recovery.events {
             if let EventPayload::ArtifactCatalogReferenceTransition { record } = event.payload() {
                 retention.apply(record)?;
             }
@@ -493,7 +497,9 @@ impl ArtifactCatalog {
                 state::validate_upload_retirement(&upload_records, &upload_retirements, receipt)?;
                 upload_retirements.insert(receipt.upload.upload_id.clone(), receipt.clone());
             }
-            timestamp_high_water = timestamp_high_water.max(event.timestamp());
+            if let EventPayload::MapLocalizationEvidenceRecorded { evidence } = event.payload() {
+                restored_localization.push((evidence.clone(), event.timestamp()));
+            }
             if let Err(error) = projection.apply_event(&event) {
                 return Err(format!("spatial catalog replay failed: {error}").into());
             }
@@ -556,6 +562,7 @@ impl ArtifactCatalog {
             write_gate,
             timestamp_high_water: Arc::new(Mutex::new(timestamp_high_water)),
             recovery_fence: Arc::new(Mutex::new(None)),
+            restored_localization: Arc::new(Mutex::new(restored_localization)),
         })
     }
 
@@ -1048,25 +1055,16 @@ impl ArtifactCatalog {
         Ok(timestamp)
     }
 
-    /// Returns durable strong localization evidence in event order for restart rehydration.
-    pub fn localization_evidence(
+    /// Consumes validated startup evidence once, avoiding a second scan of unrelated history.
+    pub(crate) fn take_restored_localization_evidence(
         &self,
     ) -> Result<Vec<(domain::LocalizationVerificationEvidence, TimestampMs)>, String> {
         self.ensure_available().map_err(|error| error.message)?;
-        self.event_log
-            .catalog_replay_events()
-            .map_err(|error| error.to_string())
-            .map(|events| {
-                events
-                    .into_iter()
-                    .filter_map(|event| match event.payload() {
-                        EventPayload::MapLocalizationEvidenceRecorded { evidence } => {
-                            Some((evidence.clone(), event.timestamp()))
-                        }
-                        _ => None,
-                    })
-                    .collect()
-            })
+        let mut evidence = self
+            .restored_localization
+            .lock()
+            .map_err(|_| "startup localization evidence lock is poisoned".to_string())?;
+        Ok(std::mem::take(&mut *evidence))
     }
 
     /// Allocates one process-local receive timestamp monotonically under the durable write gate.

@@ -1,5 +1,9 @@
 # RoboGuide
 
+[Controller 启动优化](docs/development/controller-startup-streaming-2026-11-09.md)先将
+Catalog 恢复改为单次流式校验，只保留相关事件，并复用同轮定位证据。
+原日志及权限校验不变；旧历史仍需线性扫描，持久投影和高频历史保留策略分阶段实施。
+
 [ADR-0239](docs/decisions/0239-online-static-node-identity-adoption.md)增加显式在线采用原静态
 Node 证书映射的管理入口，保留原凭据和任务归属后进入生命周期热注册；原采用凭证
 进入 v0.2 registry 并用于冷恢复。接口与独立进程验收见[接入合同](docs/development/hot-node-enrollment-v0.1.md)。
