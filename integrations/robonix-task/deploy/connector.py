@@ -13,6 +13,7 @@ from camera_adapter import Captures
 from camera_adapter import handler_type as camera_handler
 from robonix_task.adapter import Adapter, Server
 from robonix_task.adapter import Handler as PilotHandler
+from robonix_task.chassis_state import ChassisStateObserver
 from robonix_task.host import inspect_host
 from robonix_task.origin import OriginStore
 from robonix_task.position import annotate_mapping_age
@@ -21,10 +22,17 @@ from status_bridge import Status
 from status_bridge import handler_type as observer_handler
 
 
-def combined_handler(captures, observer, origins=None, node_id=None):
+def combined_handler(captures, observer, origins=None, node_id=None, chassis=None):
     """Keep the existing route implementations and disambiguate readiness paths."""
     camera = camera_handler(captures)
     state = observer_handler(observer)
+
+    def snapshot():
+        """Attach the optional original chassis observation to the normal Node State snapshot."""
+        value = observer.read()
+        if chassis is not None:
+            value["chassis"] = chassis.read()
+        return value
 
     class Handler(PilotHandler, camera):
         """Share a bounded HTTP listener while each module retains its own data."""
@@ -35,7 +43,7 @@ def combined_handler(captures, observer, origins=None, node_id=None):
                 if node_id is None:
                     self.reply(404, {"error": "host inspection profile disabled"})
                 else:
-                    self.reply(200, inspect_host(node_id, observer.read()))
+                    self.reply(200, inspect_host(node_id, snapshot()))
             elif self.path.startswith("/v1/origins/"):
                 if origins is None:
                     self.reply(404, {"error": "origin profile disabled"})
@@ -52,7 +60,7 @@ def combined_handler(captures, observer, origins=None, node_id=None):
                 self.path = "/v1/" + self.path.removeprefix("/v1/pilot/")
                 PilotHandler.do_GET(self)
             elif self.path == "/v1/state":
-                value = annotate_mapping_age(observer.read(), time.time_ns())
+                value = annotate_mapping_age(snapshot(), time.time_ns())
                 value["atlas"]["providers"] = [
                     {"id": p["id"], "state": p["state"]}
                     for p in value["atlas"].get("providers", [])
@@ -135,6 +143,7 @@ def main():
     parser.add_argument("--origin-root", type=Path)
     parser.add_argument("--origin-node-id")
     parser.add_argument("--node-id")
+    parser.add_argument("--chassis-state", action="store_true")
     args = parser.parse_args()
     if (args.origin_root is None) != (args.origin_node_id is None):
         parser.error("origin-root and origin-node-id must be supplied together")
@@ -161,6 +170,8 @@ def main():
         """Refresh robot observations independently of request handlers."""
         while not stopping.is_set():
             observer.sample()
+            if chassis is not None:
+                chassis.sample()
             stopping.wait(3)
 
     signal.signal(signal.SIGTERM, request_stop)
@@ -179,6 +190,9 @@ def main():
         server = Server(args.port, pilot)
         try:
             observer = Status(args.codegen)
+            chassis = ChassisStateObserver() if args.chassis_state else None
+            if chassis is not None:
+                cleanup.callback(chassis.close)
             captures = Captures(args.capture_root, publisher=publish)
             cleanup.callback(stop_captures, captures)
             origins = (
@@ -188,7 +202,9 @@ def main():
             )
             if origins is not None:
                 cleanup.callback(origins.close)
-            server.RequestHandlerClass = combined_handler(captures, observer, origins, args.node_id)
+            server.RequestHandlerClass = combined_handler(
+                captures, observer, origins, args.node_id, chassis
+            )
             server.timeout = 0.5
             observer_thread = threading.Thread(target=observe, name="robonix-observer")
             observer_thread.start()

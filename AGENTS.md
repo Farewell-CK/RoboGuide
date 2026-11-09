@@ -15,6 +15,32 @@ that ledger have independent statuses; gap 1 is software-accepted, gaps 2/3 rema
 The maintenance branch merges delegation@89dca456's five historical mobile documentation
 commits, with a current-contract note. It does not include the primary checkout's phone probe
 or constitute Android acceptance; main and field deployments have not been changed.
+The same maintenance line also integrates dog2-origin-memory-grounding@1cec0b46,
+retaining both parent histories. Resolve the duplicate posture ADR as 0240 while identity
+adoption keeps 0239. Merge acceptance is docs/development/branch-merge-acceptance-20261109.md.
+Planner/Reviewer/Repairer tests compare original UTF-8 bytes just like the frozen production
+asset reader; do not normalize production Prompt bytes or weaken provider identity checks.
+ADR-0240 adds opt-in --chassis-state in the existing combined Connector. It samples only the
+fixed Robonix chassis/state tool through Atlas/MCP, closes its own session/channel and adds
+cached chassis evidence to the existing robot-state export. Central posture inspection GETs
+only authenticated Controller State/inventory and refuses expired/unknown/foreign evidence.
+Retain the source's shorter stale_ms through Controller retention; evidence output uses a
+new file and unavailable exits 2. Merge review regression reproduces both original failures.
+Do not replace Robonix posture logic with joint-angle inference or infer damping/remote state.
+63 integration tests, strict package mypy, Ruff and function docs pass. The dog2 field check
+read standing via an earlier readonly Task, then down via the new State source; do not infer
+who changed its posture. Real Connector-stop expiry/refusal/recovery passed with 33 runs/569
+events unchanged; no extra Node, adapter process or Pilot task was needed for state polling.
+The reader is diagnostic; no universal Controller posture admission rule or MI World schema
+is added. For this experiment the operator approval flow explicitly calls the RG reader.
+The new real MI stand Mission mission-eb543d2500dd4bfb900fa15ddc9f271a completed through
+Pilot with state/one stand/state, fresh standing and user-confirmed stable standing. A separately
+authorized structured down Mission dog2-down-after-mi-stand-20261109T031448Z called down once,
+returned down/unknown then fresh standing; the user saw one in-place stepping motion and no
+lie-down. Pilot marked the stop/report branch done and RG Completed under execution-report.
+Preserve that lifecycle but report the down physical goal as not achieved. State reads alone
+do not install a Controller goal verifier. No down retry is authorized by this observation.
+Final ownership/Unknown are zero; native history is 36 runs/641 events with original 32/555 intact.
 ADR-0238 keeps RG selection, identity/tenant authorization, approval and dispatch out of
 Local EAIOS execution objectives. Planner/Reviewer/Repairer and experiment catalog metadata
 retain all local goals/action limits, without making Pilot prove cluster uniqueness or match

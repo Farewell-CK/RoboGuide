@@ -445,7 +445,7 @@ def test_responses_planner_uses_strict_output_without_hiding_review() -> None:
     assert planning_payload["model"] == "gpt-5.6-luna"
     assert (
         planning_payload["instructions"]
-        == Path("mission/prompts/v0/planner.md").read_text(encoding="utf-8").strip()
+        == Path("mission/prompts/v0/planner.md").read_bytes().decode("utf-8").strip()
     )
     assert planning_payload["store"] is False
     planning_input = json.loads(cast(str, planning_payload["input"]))
@@ -677,7 +677,7 @@ def test_responses_reviewer_returns_structured_findings_with_independent_model()
     assert payload["model"] == "reviewer-model"
     assert (
         payload["instructions"]
-        == Path("mission/prompts/v0/reviewer.md").read_text(encoding="utf-8").strip()
+        == Path("mission/prompts/v0/reviewer.md").read_bytes().decode("utf-8").strip()
     )
     assert json.loads(cast(str, payload["input"])) == {
         "grounded_intent": grounded_intent.to_json(),
@@ -760,7 +760,7 @@ def test_responses_repairer_receives_exact_rejection_and_returns_complete_plan()
     payload = transport.requests[0][2]
     assert (
         payload["instructions"]
-        == Path("mission/prompts/v0/repairer.md").read_text(encoding="utf-8").strip()
+        == Path("mission/prompts/v0/repairer.md").read_bytes().decode("utf-8").strip()
     )
     assert json.loads(cast(str, payload["input"])) == {
         "mission_id": mission_id,

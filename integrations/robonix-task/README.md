@@ -1,5 +1,26 @@
 # Robonix 本机任务接入
 
+RG 的日常姿态检查使用 [reported posture 读取器](robonix_task/posture.py)：统一 Connector
+启用 `--chassis-state` 后，固定采集 Robonix 的只读 `chassis/state`，复用已有 Node
+`robot-state` 周期回传。中央只需 GET RG 的 State 和 inventory，无需每次创建 Pilot 任务。
+读取器保留来源/会话/序号及原始数据，过期、未知或失联时拒绝给出当前姿态。
+数据未提供单独姿态测量时间、阻尼模式或遥控器连接状态，不能据此推导这些信息。
+该诊断读取器不自动为所有 Controller 任务增加姿态准入规则，也不授予运动权限。
+见 [ADR-0240](../../docs/decisions/0240-reported-chassis-posture-state.md)。
+读取器同时扣减 Controller 缓存期间的数据源 `stale_ms` 和 5 秒上限；缺少或过期时
+不输出姿态。`--output` 仅创建新证据文件；reported 退出码为 0，unavailable 为 2。
+
+后续真实 MI 起身重试已由用户确认站稳，RG State 也报告 standing。用户另行授权的
+单次趴下仅出现原地踏步，RG State 仍 standing；原生停止/报告分支及 RG 的 Completed
+不能当作趴下成功。见[姿态接入与动作重试验收](../../docs/development/acceptance/2026-11-09-dog2-posture-state-and-remote-retry.md)。
+
+```bash
+PYTHONPATH=integrations/robonix-task python3 -m robonix_task.posture \
+  --controller-origin https://127.0.0.1:8080 --node-id lite3-dog2 \
+  --ca /path/to/operator/ca.crt --cert /path/to/operator/admin.crt \
+  --key /path/to/operator/admin.key --output /path/to/posture-evidence.json
+```
+
 任务级委派的 MI 目标须遵循 [ADR-0238](../../docs/decisions/0238-local-eaios-delegation-objective-boundary.md)：
 RG 承担选机、身份/租户授权与审批。Pilot 只接收完整本机目标、实时前提和动作限制，
 不被要求反查 RG 集群、证明自己是唯一候选或将本机名称匹配为 RG 部署别名。

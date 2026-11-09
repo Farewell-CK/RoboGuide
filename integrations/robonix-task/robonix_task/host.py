@@ -77,7 +77,14 @@ def inspect_host(
         },
         "robot_observation": {
             key: copy.deepcopy(observations.get(key))
-            for key in ("observed_at_ns", "atlas", "mapping", "sensors", "navigation_readiness")
+            for key in (
+                "observed_at_ns",
+                "atlas",
+                "mapping",
+                "sensors",
+                "navigation_readiness",
+                "chassis",
+            )
         },
         "chassis_power": "not_observed",
         "motion_authorized": False,

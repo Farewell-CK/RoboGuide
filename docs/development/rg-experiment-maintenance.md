@@ -1,5 +1,12 @@
 # RoboGuide 真机实验问题与分支维护
 
+2026-11-09 第二次整合：将实验线 `1cec0b46`（含 `09192dd3` reported posture）合入
+维护线。保留 `9d498728` 的热采用及两侧实验历史；解决 AGENTS/V2 索引冲突，
+姿态 ADR 改为 0240，热采用继续使用 0239。合并审阅另补数据源短时效的缓存过期检查、
+只创建新姿态证据文件及 unavailable 退出码，并修正 MI 测试对原提示词字节的核对。
+验证及其他分支的去重边界见[本次合并记录](branch-merge-acceptance-20261109.md)。
+手机探针仍未纳入；main 和 ThinkPad/机器狗部署未更新。
+
 2026-11-09 后续维护：`codex/rg-hot-enrollment-maintenance` 从 `1d9a9ad5` 建立，
 `9d498728` 修复并软件验收 RG-HOT-001。另以保留原提交的 merge 整合
 `codex/local-eaios-task-delegation@89dca456` 的五个手机文档提交（仅四个 Markdown
