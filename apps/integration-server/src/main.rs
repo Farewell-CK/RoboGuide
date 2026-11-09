@@ -1525,7 +1525,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     application::memory_import::validate_restored(&controller)?;
     application::memory_handoff::validate_restored(&controller)?;
     application::deployment_management::validate_restored(
-        &controller,
+        &mut controller,
         deployment_feasibility.as_deref(),
     )?;
     application::plan_revision::attach_deployment(&mut controller, deployment_feasibility.clone())?;

@@ -9,6 +9,11 @@ Never renew reset/preference/measurement clocks or reinterpret declarations as N
 Run affected deployment/runtime/Control tests, workspace all-target/all-feature Clippy and
 check_online_deployment_processes.py with actual current Controller/Node and a genuine prior
 Controller; also retain identity-adoption and posture-goal process regression boundaries.
+ADR-0242 maintenance keeps unchanged Mission/Group retries on original accepted authority,
+under current authorization/exact tenant and the original writer, without new dispatch or clocks.
+Published profiles share nonserialized immutable caches; cold restore validates all original
+documents/receipts/lineage before installing caches. Unrelated HTTP routes never resolve them.
+Run hot/completed/cold Mission replay and conflicting-plan process checks plus cache/restore tests.
 ADR-0239 adds explicit recovery-admin static Node identity adoption in the existing
 application/node_identity writer. Domain node_identity_adoption owns the exact original
 map/explicit ownership and required v0.2 receipt. Control also checks pre-Bind reservations;

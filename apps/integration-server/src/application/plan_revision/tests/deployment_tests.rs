@@ -74,6 +74,7 @@ fn online_deployment_keeps_original_runtime_policy_on_publication_and_cold_reatt
     live.runtime_revisions = saved.runtime_revisions;
     live.published_deployments = saved.published_deployments;
     assert!(live.runtime_revisions[mission].deployment.is_none());
+    application::deployment_management::validate_restored(&mut live, None).unwrap();
     attach_deployment(&mut live, None).unwrap();
     assert_eq!(
         original.as_deref(),
@@ -82,6 +83,5 @@ fn online_deployment_keeps_original_runtime_policy_on_publication_and_cold_reatt
             .as_ref()
             .map(|p| p.digest())
     );
-    application::deployment_management::validate_restored(&live, None).unwrap();
     validate_restored(&live).unwrap();
 }

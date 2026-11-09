@@ -68,3 +68,53 @@ Node 为 `35a20fc7dd0d0bf66e61cb606d943e62471ad1ec3fc77f6f4dda7070f5061f3d`。
 
 这是单主机隔离软件验收，不代表现场已升级、真实定位/运动成功、完整 MI World
 输入或跨主机 HA/长期 SLO 已验收。历史真实任务及 Robonix 本机控制/安全职责保持原样。
+
+## e07237ad 再审后的两项修复
+
+P1 原 Mission 重传：新增的实际进程回归先在原程序上失败，在线发布新 feasibility 后，
+原请求返回 409 `mission actor already has a different candidate restriction`。记录保留在
+`deployment-replay-red.log`。现在在原 writer 内先核对已存在的 typed plan、Group、
+确切租户及存在时的原 HTTP 回执。相同请求确认原接受结果，不进入新来源/verifier/
+容量准入，也不写 checkpoint、更新原准入时间或再次 dispatch。不同排版可重传，
+同 ID 改目标或 Group 仍拒绝；缺失的原 HTTP 回执或租户不补造。运行期已改为另一
+plan/Group 的 Mission 仍按原冲突语义拒绝，不通过旧 POST 复活。
+
+P2 普通查询：移除 HTTP 总入口对 feasibility 的无条件解析。发布阶段验证并建立
+不可变 Arc 缓存，Controller clone/查询共享它。缓存不序列化，冷恢复完整检查所有
+原文、Control 摘要和启动 lineage 后才一次性安装；后续历史损坏时不保留部分缓存。
+持久格式、原证据时钟和旧 writer 拒绝边界保持不变。
+
+最终验证：
+
+- 324 项 integration-server 和 201 项 Control 测试通过，共 525 项；2 项原有 Control
+  测试保持忽略。包含重传后完整 checkpoint 不变、不同 JSON 排版、跨租户拒绝、
+  不补造旧回执、缓存共享、冷缓存重建及后续历史损坏拒绝。
+- workspace all-target/all-feature Clippy `-D warnings`、Rust 格式、Python Ruff/format、
+  strict mypy、函数文档及 git diff 检查通过。
+- 扩展的 `check_online_deployment_processes.py` 验证发布前后、完成后、冷恢复后
+  重传仍为 202；原准入回执/时间、Attempt 和资源保留，相同 ID 换目标为 409，viewer
+  重传为 403。仍完成两真实软件 Node 的匹配/Commit/Bind、旧文件拒绝及真正旧 writer
+  拒绝。身份热采用进程门禁与姿态目标 17 项进程回归也全部通过。
+
+另用同一私有 Controller 进程、相同 mTLS 主体及端点，在发布前后各测八次请求。
+来源为 1,250 条 synthetic 记录，POST 为 965,904 字节。各自中位耗时如下：
+
+| 测量 | health | inventory |
+| --- | ---: | ---: |
+| 审阅旧版本：发布前 | 7.69 ms | 6.91 ms |
+| 审阅旧版本：发布后 | 137.76 ms | 116.20 ms |
+| 修复版本：发布前 | 7.01 ms | 7.35 ms |
+| 修复版本：发布后 | 8.17 ms | 6.77 ms |
+
+这仅是 debug 构建的本机软件对比，不是生产 SLO 或跨主机性能承诺。新结果保存在
+`deployment-repair-readpath-performance.json`，原审阅结果未覆盖。实际进程回执和源码/
+二进制摘要见 `deployment-repair-process.log`；身份、姿态回归分别见
+`deployment-repair-identity.log`、`deployment-repair-posture.log`。测试及最终 Clippy 为
+`deployment-repair-tests-isolated.log` 和 `deployment-repair-clippy-final.log`，均位于上面的
+公共证据目录。初次构建遇到其他 checkout 共用 target 的旧缓存，相关失败日志保留；
+最终全程使用独立 `/home/aios/.cache/rg-deployment-repair-target-20261109`，三项门禁
+及性能测量使用同一最终二进制，未操作其他任务进程或现场部署。
+
+最终 Controller SHA-256：`67bb400e546f7e0f1f10d9af46b0a6e777cc66a180fda275ee127a368990bcf7`；
+Node：`9a2a9ce892908f15aec91a03e23cf46a41c3716147e4a0f667db711322043b36`。
+本次未连接 ThinkPad/机器狗、未重启现场服务、未下发任何动作，main 未变更。

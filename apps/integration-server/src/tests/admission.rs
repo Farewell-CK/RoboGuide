@@ -109,6 +109,26 @@ async fn admission_http_and_checkpoint_preserve_exact_accepted_input() {
         format!("sha256:{:x}", Sha256::digest(body))
     );
     assert_eq!(evidence["group_id"], accepted["group_id"]);
+    let accepted_checkpoint = server_checkpoint_json(&controller.lock().expect("lock")).unwrap();
+    let decoded: serde_json::Value = serde_json::from_slice(body).unwrap();
+    let reformatted = serde_json::to_vec_pretty(&decoded).unwrap();
+    for replay in [body.as_slice(), reformatted.as_slice()] {
+        let (status, repeated) = request(&controller, &log, "POST", "/v1/missions", replay).await;
+        assert!(status.contains("202"), "{status}: {repeated}");
+        assert_eq!(repeated, accepted);
+        assert_eq!(
+            accepted_checkpoint,
+            server_checkpoint_json(&controller.lock().expect("lock")).unwrap()
+        );
+    }
+    {
+        let live = controller.lock().expect("lock");
+        let plan = decode_mission_plan(std::str::from_utf8(body).unwrap()).unwrap();
+        let group = domain::ExecutionGroupId::new(accepted["group_id"].as_str().unwrap()).unwrap();
+        assert!(
+            controller_http::MissionAdmission::replay(&live, &plan, &group, "foreign").is_err()
+        );
+    }
     let mut changed: serde_json::Value = serde_json::from_slice(body).expect("plan JSON");
     changed["mission"]["objective"] = serde_json::json!("different objective");
     let changed_body = serde_json::to_vec(&changed).expect("serializes");
@@ -150,7 +170,24 @@ async fn admission_http_and_checkpoint_preserve_exact_accepted_input() {
         request(&restored, &log, "GET", &path, b"").await.1,
         evidence
     );
+    let frozen = server_checkpoint_json(&restored.lock().unwrap()).unwrap();
+    assert!(
+        request(&restored, &log, "POST", "/v1/missions", body)
+            .await
+            .0
+            .contains("202")
+    );
+    assert_eq!(
+        frozen,
+        server_checkpoint_json(&restored.lock().unwrap()).unwrap()
+    );
     restored.lock().expect("lock").mission_admissions.clear();
+    assert!(
+        request(&restored, &log, "POST", "/v1/missions", body)
+            .await
+            .0
+            .contains("202")
+    );
     assert!(
         request(&restored, &log, "GET", &path, b"")
             .await

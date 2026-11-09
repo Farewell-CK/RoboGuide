@@ -2,6 +2,15 @@
 
 Status: Implemented and isolated-process accepted on 2026-11-09; field deployment pending.
 
+Maintenance review fixes preserve the same durable format. Unchanged typed Mission/Group
+retries are recognized under the original writer, after current authorization and exact tenant
+checks, before new-admission feasibility/verifier/capacity checks. They acknowledge prior
+acceptance without SQL, dispatch, clock renewal or a fabricated missing admission receipt.
+Changed plans/Groups remain conflicts, including after a runtime revision. POST retains its
+acceptance response; current lifecycle remains a GET projection. Published documents compile
+once per accepted candidate and share immutable Arc interpretations. Nonserialized caches
+rebuild only after complete cold evidence validation; health/inventory do not resolve profiles.
+
 The existing HTTP Controller lacked physical registry publication and froze optional
 feasibility at process startup. Use the original global recovery-admin authorization,
 FIFO application writer, Control provenance, checkpoint and command journal. No second

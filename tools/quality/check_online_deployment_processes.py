@@ -40,6 +40,7 @@ def run(output: Path, controller: Path, node: Path, previous: Path) -> dict[str,
                 "apps/integration-server/src/application/physical_entity_registry.rs",
                 "apps/integration-server/src/application/plan_revision/checkpoint.rs",
                 "apps/integration-server/src/controller_http/server.rs",
+                "apps/integration-server/src/controller_http/admission.rs",
                 "apps/integration-server/src/main.rs",
                 "core/control/src/deployment_publication.rs",
                 "core/control/src/decision_policy.rs",
@@ -263,6 +264,12 @@ def run(output: Path, controller: Path, node: Path, previous: Path) -> dict[str,
             lambda v: v["tasks"][0]["status"] == "Active",
         )
         allocations = exchange("/v1/resource-allocations")[1]["allocations"]
+        admission_path = "/v1/missions/online-existing/admission"
+        original_admission = exchange(admission_path)
+        original_attempts = exchange("/v1/execution-attempts")[1]["attempts"]
+        assert exchange("/v1/missions", mission("existing"))[0] == 202
+        assert exchange(admission_path) == original_admission
+        assert exchange("/v1/execution-attempts")[1]["attempts"] == original_attempts
         original_epoch = wait(epoch, bool)
         new = start_node("new", "enrolment-next")
         wait(
@@ -301,6 +308,15 @@ def run(output: Path, controller: Path, node: Path, previous: Path) -> dict[str,
         status, published = exchange("/v1/deployment-feasibility", publication)
         assert status == 200, published
         assert exchange("/v1/deployment-feasibility", publication) == (200, published)
+        # Replayed acceptance uses original authority, never the newly published source.
+        assert exchange("/v1/missions", mission("existing"), viewer)[0] == 403
+        status, replay = exchange("/v1/missions", mission("existing"))
+        assert status == 202, replay
+        conflicting_plan = mission("existing")
+        conflicting_plan["mission"]["objective"] = "changed accepted objective"
+        assert exchange("/v1/missions", conflicting_plan)[0] == 409
+        assert exchange(admission_path) == original_admission
+        assert exchange("/v1/execution-attempts")[1]["attempts"] == original_attempts
         status, response = exchange("/v1/missions", mission("new"))
         assert status == 202, response
         wait(lambda: exchange("/v1/missions/online-new")[1], lambda v: v["status"] == "Completed")
@@ -320,6 +336,9 @@ def run(output: Path, controller: Path, node: Path, previous: Path) -> dict[str,
             ("online-new", "new"),
         }
         assert exchange("/v1/resource-allocations")[1]["allocations"] == []
+        assert exchange("/v1/missions", mission("existing"))[0] == 202
+        assert exchange(admission_path) == original_admission
+        assert exchange("/v1/execution-attempts")[1]["attempts"] == attempts
         stop(current)
         children.remove(current)
         # Cold recovery requires the explicit current physical document, never checkpoint routing.
@@ -353,6 +372,10 @@ def run(output: Path, controller: Path, node: Path, previous: Path) -> dict[str,
         assert exchange("/v1/deployment-feasibility", publication) == (200, published)
         assert exchange("/v1/deployment-feasibility")[1]["digest"] == sources[1]["digest"]
         assert exchange("/v1/resource-allocations")[1]["allocations"] == []
+        assert exchange("/v1/missions", mission("existing"))[0] == 202
+        assert exchange("/v1/missions", conflicting_plan)[0] == 409
+        assert exchange(admission_path) == original_admission
+        assert exchange("/v1/execution-attempts")[1]["attempts"] == attempts
         result = {
             "passed": True,
             "physical_robot_used": False,
@@ -362,6 +385,8 @@ def run(output: Path, controller: Path, node: Path, previous: Path) -> dict[str,
             "stale_physical_cold_source_refused": True,
             "actual_prior_writer_refused": True,
             "original_attempts_retained_after_cold_restart": True,
+            "mission_replay_preserves_original_admission_hot_and_cold": True,
+            "changed_same_id_mission_refused": True,
             "original_session_preserved_during_publication": original_epoch,
             "replaced_startup_source_refused": True,
             "attempts": attempts,

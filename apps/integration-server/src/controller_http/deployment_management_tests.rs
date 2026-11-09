@@ -194,6 +194,12 @@ async fn online_feasibility_versions_keep_original_interpretations_and_validate_
     let old = application::deployment_management::current(&controller.lock().unwrap(), None)
         .unwrap()
         .unwrap();
+    assert!(Arc::ptr_eq(
+        &old,
+        &application::deployment_management::current(&controller.lock().unwrap().clone(), None)
+            .unwrap()
+            .unwrap()
+    ));
     let input2 = feasibility(2);
     let before = server_checkpoint_json(&controller.lock().unwrap()).unwrap();
     for change in [
@@ -250,14 +256,13 @@ async fn online_feasibility_versions_keep_original_interpretations_and_validate_
             .unwrap()
             .digest()
     );
-    assert_eq!(
-        old.digest(),
-        application::deployment_management::original(&cold, Some(old.digest()), None)
+    assert!(Arc::ptr_eq(
+        &old,
+        &application::deployment_management::original(&cold, Some(old.digest()), None)
             .unwrap()
             .unwrap()
-            .digest()
-    );
-    application::deployment_management::validate_restored(&cold, None).unwrap();
+    ));
+    application::deployment_management::validate_restored(&mut cold, None).unwrap();
     let saved: ServerCheckpoint =
         serde_json::from_str(&server_checkpoint_json(&cold).unwrap()).unwrap();
     application::deployment_management::validate_wrapper(&saved).unwrap();
@@ -265,12 +270,33 @@ async fn online_feasibility_versions_keep_original_interpretations_and_validate_
     hidden.schema = PRE_OBSERVABILITY_SERVER_CHECKPOINT_SCHEMA.into();
     assert!(application::deployment_management::validate_wrapper(&hidden).is_err());
     cold.published_deployments = saved.published_deployments;
-    application::deployment_management::validate_restored(&cold, None).unwrap();
+    assert!(application::deployment_management::current(&cold, None).is_err());
+    assert!(application::deployment_management::original(&cold, Some(old.digest()), None).is_err());
+    let frozen_checkpoint = server_checkpoint_json(&cold).unwrap();
+    application::deployment_management::validate_restored(&mut cold, None).unwrap();
+    assert_eq!(frozen_checkpoint, server_checkpoint_json(&cold).unwrap());
+    let restored_current = application::deployment_management::current(&cold, None)
+        .unwrap()
+        .unwrap();
+    assert!(Arc::ptr_eq(
+        &restored_current,
+        &application::deployment_management::current(&cold, None)
+            .unwrap()
+            .unwrap()
+    ));
+    assert!(!Arc::ptr_eq(
+        &old,
+        &application::deployment_management::original(&cold, Some(old.digest()), None)
+            .unwrap()
+            .unwrap()
+    ));
     let mut corrupt = serde_json::to_value(cold.published_deployments.as_ref().unwrap()).unwrap();
-    corrupt["history"]["1"]["identity"]["run_id"] = "changed-original-evidence".into();
+    corrupt["history"]["2"]["identity"]["run_id"] = "changed-original-evidence".into();
     cold.published_deployments = Some(serde_json::from_value(corrupt).unwrap());
-    assert!(application::deployment_management::validate_restored(&cold, None).is_err());
+    assert!(application::deployment_management::validate_restored(&mut cold, None).is_err());
+    assert!(application::deployment_management::current(&cold, None).is_err());
+    assert!(application::deployment_management::original(&cold, Some(old.digest()), None).is_err());
     cold.published_deployments = None;
-    assert!(application::deployment_management::validate_restored(&cold, None).is_err());
+    assert!(application::deployment_management::validate_restored(&mut cold, None).is_err());
     assert!(controller.lock().unwrap().bridge.state().nodes().is_empty());
 }

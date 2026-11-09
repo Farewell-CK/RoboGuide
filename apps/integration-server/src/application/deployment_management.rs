@@ -19,6 +19,9 @@ pub(crate) struct PublishedDeployments {
     history: BTreeMap<u64, serde_json::Value>,
     /// Original physical provenance checked by each publication's original application transaction.
     physical_revisions: BTreeMap<u64, u64>,
+    /// Validated immutable interpretations, rebuilt from original evidence before cold service.
+    #[serde(skip)]
+    compiled: BTreeMap<u64, Arc<DeploymentFeasibility>>,
 }
 
 /// Historical application wrappers cannot conceal opted-in online publication authority.
@@ -86,13 +89,16 @@ pub(crate) fn current(
     let Some(published) = &controller.published_deployments else {
         return Ok(startup.map(|p| Arc::new(p.clone())));
     };
-    let (_, document) = published
+    let (revision, _) = published
         .history
         .last_key_value()
         .ok_or("empty deployment publication history")?;
-    Ok(Some(Arc::new(DeploymentFeasibility::from_document(
-        document.clone(),
-    )?)))
+    published
+        .compiled
+        .get(revision)
+        .cloned()
+        .map(Some)
+        .ok_or_else(|| "deployment publication has not been validated for service".into())
 }
 
 /// Finds a runtime policy's original retained interpretation instead of replacing it with current.
@@ -108,11 +114,9 @@ pub(crate) fn original(
         return Ok(Some(Arc::new(startup.clone())));
     }
     if let Some(published) = &controller.published_deployments {
-        for document in published.history.values() {
-            if document.get("digest").and_then(serde_json::Value::as_str) == Some(wanted) {
-                return Ok(Some(Arc::new(DeploymentFeasibility::from_document(
-                    document.clone(),
-                )?)));
+        for profile in published.compiled.values() {
+            if profile.digest() == wanted {
+                return Ok(Some(profile.clone()));
             }
         }
     }
@@ -121,9 +125,13 @@ pub(crate) fn original(
 
 /// Validates all online authority and exact startup reattachment before serving any restored work.
 pub(crate) fn validate_restored(
-    controller: &ControllerState,
+    controller: &mut ControllerState,
     startup: Option<&DeploymentFeasibility>,
 ) -> Result<(), String> {
+    if let Some(published) = &mut controller.published_deployments {
+        published.compiled.clear();
+    }
+    let mut compiled = BTreeMap::new();
     let control = controller.bridge.control();
     let history = control.deployment_publications(RegistryCommandKind::DeploymentFeasibility);
     match (&controller.published_deployments, history) {
@@ -162,6 +170,7 @@ pub(crate) fn validate_restored(
                 {
                     return Err("deployment publication original document/receipt mismatch".into());
                 }
+                compiled.insert(*revision, Arc::new(profile));
             }
         }
         _ => {
@@ -169,6 +178,9 @@ pub(crate) fn validate_restored(
                 "deployment history or required Control publication evidence is missing".into(),
             );
         }
+    }
+    if let Some(published) = &mut controller.published_deployments {
+        published.compiled = compiled;
     }
     Ok(())
 }
@@ -396,6 +408,7 @@ pub(crate) fn submit_feasibility(
             original_digest: startup.map(|p| p.digest().into()),
             history: BTreeMap::new(),
             physical_revisions: BTreeMap::new(),
+            compiled: BTreeMap::new(),
         });
     if published.registry_id != input.registry_id
         || published.history.last_key_value().map_or(0, |(r, _)| *r) != input.expected_revision
@@ -409,6 +422,7 @@ pub(crate) fn submit_feasibility(
     let entry = publication_document(published, input.revision, &profile.source_document);
     let registry_digest = digest(&entry)?;
     published.history.insert(input.revision, input.document);
+    published.compiled.insert(input.revision, Arc::new(profile));
     if serde_json::to_vec(published)
         .map_err(|e| e.to_string())?
         .len()
