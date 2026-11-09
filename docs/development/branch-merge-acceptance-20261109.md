@@ -3,6 +3,29 @@
 目标是把已审阅的 RG 实验增量汇入 `codex/rg-hot-enrollment-maintenance`。不纳入用户
 暂缓处理的手机探针，不修改独立 guide-aios 仓库，不更新 main 或任何现场部署。
 
+## 后续增量 d247e03c
+
+实验线在前次合并后新增 `d247e03c`：纯 reported-posture 目标评估器、原证据剩余预算
+以及 Task satisfaction 的隔离进程验收。维护线以 `c0f34db8` 为父合并该提交，保留原历史。
+解决 AGENTS/V2 索引冲突，并将目标评估的重复 ADR-0240 调整为 ADR-0241；已有姿态
+State ADR-0240、在线身份采用 ADR-0239 保持原编号。
+
+两侧都修复了原生时效窗口，合并后统一为原来源合同的整数 `stale_ms`（1–60000），
+继续检查 Controller 保留时间和 RG 上限，新增 remaining_valid_for_ms 使用同一最短预算。
+维护线只创建新证据文件、unavailable 退出 2 的修复完整保留。
+
+独立重跑验证：86 项集成测试及 54 项 subtests 通过；完整集成目录 Ruff/format、
+严格包 mypy（12 个源文件）和函数文档检查通过；posture_goal_process_gate.py 使用
+当前热采用版本 Controller/Node，17 项实际软件检查通过，恰好 4 个唯一 Execute。
+覆盖目标屏障、负证据拒绝、缓存/离线拒绝、原任务及新 epoch 冷恢复、错误计划/attempt
+拒绝、正证据及重复原回执、依赖只执行一次、最终占用归零。
+
+原始输出为 `lab/rg-maintenance-audit-20261109/merge-posture-goal-tests.log` 和
+`merge-posture-goal-process.log`；完整私有软件过程在 WSL
+`/tmp/rg-merge-posture-goal-20261109/`。Controller/Node 二进制仍为上一轮已受检版本，
+本次无 Rust 核心更改。真实 gate 的结果不代表生产姿态 producer 已部署或物理目标已验证。
+没有连接 ThinkPad、机器狗或改写历史现场 execution-report 任务。
+
 ## 合并范围及冲突
 
 合并父版本为维护线 `07f4586b` 和实验线 `1cec0b46`，保留原提交历史。后者的新增

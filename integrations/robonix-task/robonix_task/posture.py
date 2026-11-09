@@ -83,22 +83,22 @@ def inspect_posture(
         return refuse("chassis_state_unavailable")
     age = chassis.get("age_ms")
     value = chassis.get("value")
+    source_ttl = value.get("stale_ms") if isinstance(value, dict) else None
     if (
         chassis.get("availability") != "current"
         or not isinstance(age, int | float)
         or isinstance(age, bool)
         or not math.isfinite(age)
         or age < 0
-        or age + now - received >= MAX_AGE_MS
         or not isinstance(value, dict)
         or value.get("stale") is not False
+        or age + now - received >= MAX_AGE_MS
     ):
         return refuse("chassis_state_stale_or_age_missing")
-    source_window = value.get("stale_ms")
     if (
-        type(source_window) is not int
-        or not 0 < source_window <= 60000
-        or age + now - received >= source_window
+        type(source_ttl) is not int
+        or not 0 < source_ttl <= 60000
+        or age + now - received >= source_ttl
     ):
         return refuse("chassis_source_window_expired_or_missing")
     if value.get("posture") not in {"standing", "down"}:
@@ -118,6 +118,10 @@ def inspect_posture(
             "aggregate_age_plus_controller_retention_ms": age + now - received,
             "provider_id": chassis.get("provider_id"),
             "registration_id": chassis.get("registration_id"),
+            "chassis_received_at_ns": chassis.get("received_at_ns"),
+            "remaining_valid_for_ms": math.floor(
+                min(ttl - (now - received), min(MAX_AGE_MS, source_ttl) - age - (now - received))
+            ),
             "original_value": value,
         },
     )

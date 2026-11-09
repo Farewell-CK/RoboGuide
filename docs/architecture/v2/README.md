@@ -1,5 +1,10 @@
 # RoboGuide V2 现行架构
 
+[ADR-0241](../../decisions/0241-reported-posture-goal-profile.md)将姿态目标的判定接到既有
+Task satisfaction 通路：本机执行完成后等待确切任务的验证证据，更新的报告不符则拒绝目标，
+离线、旧样本与未知状态不推进依赖。纯评估器只证明有来源的 reported-state 谓词；
+身份、结算、持久化与恢复仍由原 Controller 权威负责。本轮仅完成隔离软件验证，未部署现场。
+
 [ADR-0239](../../decisions/0239-online-static-node-identity-adoption.md)将静态 Node 证书到
 生命周期管理的在线采用归于原管理员写入/Commit/传输发布通路；显式完整归属与
 v0.2 原采用凭证保持历史绑定、活跃会话和冷恢复边界，不自动推断身份或硬件信任。
