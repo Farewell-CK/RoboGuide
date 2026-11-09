@@ -1,3 +1,11 @@
+ADR-0240 adds a pure reported-posture goal assessor, not a deployed verifier service.
+Use the existing generic Task satisfaction ingress with exact source/tenant/plan/current
+attempt bindings. Capture the anchor only after local Completed/AwaitingSatisfaction;
+require newer native identity and same source epoch. Unknown/stale/offline cannot satisfy
+a goal. Respect the shortest native stale_ms, RG ceiling and Controller TTL; a publisher
+must additionally budget publication delay. No action/retry or stop authority is created.
+The private posture_goal_process_gate.py validates software only; preserve historical field
+execution-report lifecycles and do not claim physical or production goal verification.
 The 2026-11-09 field issue/branch audit is docs/development/rg-experiment-maintenance.md.
 ThinkPad main was clean; deployed lab sources are separate from that Git checkout. Preserve
 the primary Windows worktree's uncommitted phone probe. The three hot-enrollment gaps in

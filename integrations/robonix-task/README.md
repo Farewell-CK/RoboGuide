@@ -1,5 +1,30 @@
 # Robonix 本机任务接入
 
+姿态任务的“调用结束”与“目标达成”应分开。可选的
+[reported-posture 目标评估器](robonix_task/posture_goal.py)复用既有 RG State 读取，
+要求在确切本机 attempt 完成后记录 anchor，再等到同来源、同 epoch、原生采样标识更新的报告。
+新的姿态不符得到 unsatisfied；离线、缓存重发、过期或未知得到 unknown，不自动重试动作。
+读取时效同时受 RG 上限、Robonix stale_ms 与 Controller TTL 限制。
+
+这只是纯评估器；生产调用方仍须认证读取、核对 AwaitingSatisfaction 与完整当前 attempt，
+经已登记的 verifier source 向 /v1/verifier-evidence 发布，且扣除发布耗时。
+此前现场 execution-report 任务不被事后改写。当前未部署姿态目标 producer，
+不能将此文解释为所有现场任务已经自动启用目标验证。见
+[ADR-0240](../../docs/decisions/0240-reported-posture-goal-profile.md)与
+[无动作验收记录](../../docs/development/acceptance/2026-11-09-posture-goal-and-offline.md)。
+
+维护的真实软件进程检查（所有状态均为 loopback fixture，不连接机器狗）：
+
+```bash
+PYTHONPATH=mission/src:integrations/robonix-task python3 \
+  integrations/robonix-task/tests/posture_goal_process_gate.py \
+  --controller /absolute/path/to/integration-server \
+  --node /absolute/path/to/roboguide-node --output /new/private/ext4/evidence-directory
+```
+
+输出保留计划、State/inventory、原始 HTTP、验证回执、重启日志及二进制摘要。
+WSL 下使用 Linux 文件系统保存运行中的 SQLite；进程全部退出后再复制验收证据到 Windows。
+
 RG 的日常姿态检查使用 [reported posture 读取器](robonix_task/posture.py)：统一 Connector
 启用 `--chassis-state` 后，固定采集 Robonix 的只读 `chassis/state`，复用已有 Node
 `robot-state` 周期回传。中央只需 GET RG 的 State 和 inventory，无需每次创建 Pilot 任务。

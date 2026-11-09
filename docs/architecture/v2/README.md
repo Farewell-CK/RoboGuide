@@ -1,5 +1,10 @@
 # RoboGuide V2 现行架构
 
+[ADR-0240](../../decisions/0240-reported-posture-goal-profile.md)将姿态目标的判定接到既有
+Task satisfaction 通路：本机执行完成后等待确切任务的验证证据，更新的报告不符则拒绝目标，
+离线、旧样本与未知状态不推进依赖。纯评估器只证明有来源的 reported-state 谓词；
+身份、结算、持久化与恢复仍由原 Controller 权威负责。本轮仅完成隔离软件验证，未部署现场。
+
 [ADR-0239](../../decisions/0239-reported-chassis-posture-state.md)使 RG 通过周期 State 检查
 Robonix 报告的底盘姿态。统一 Connector 可选采集固定只读 chassis/state，中央读取器
 校验确切来源及内外层时效，不为每次检查创建 Pilot 任务，也不推导阻尼或遥控器状态。
