@@ -292,3 +292,38 @@ command was issued. Both owned SQL files survived, including the candidate's emp
 The interrupted run has no final phase receipt and must be resumed with fresh boot/process leases,
 full candidate validation and the original frozen source/program identities. No old process tuple
 or unobserved completion is accepted after reboot.
+
+## Compacted copy and legacy Catalog compatibility
+
+The explicit reboot-resume attempt revalidated the original and retained candidate under fresh
+leases, reran the full audit and durably replaced only the owned clone. Its retained replacement
+receipt records 5709590528 -> 2506993664 bytes with every SQL schema/table and all original
+event/checkpoint/command identities equal. The field database was not replaced or vacuumed.
+
+The first complete-profile backup then refused the original Catalog: 24 original v23 upload
+transitions plus one v17 `MemoryManifestPublished` (`dog2-origin-field-20261106/r1`) existed with
+bare CAS, no retained Catalog reference and no adoption. Production legacy Artifact mode explicitly
+allows that history; the recovery tool incorrectly inferred per-publication retained ownership
+from the newer checkpoint wrapper. The failed backup and partial bundle remain preserved.
+
+The compatibility fix admits only an explicitly bound standalone v0.32 legacy Artifact store,
+with an entirely unadopted Memory-only Catalog and actual copied CAS digest/length coverage.
+Mixed retained references, owner-qualified dependencies, adoption, modern stores, Replicas and
+bare Map publications retain their refusal paths. It manufactures no owner/reference. A realistic
+25-envelope/eight-CAS fixture performs complete backup/verify/restore; ten negative cases retain
+missing/corrupt/mixed/qualified evidence checks. An existing qualified-owner fixture initially
+failed earlier because it copied a writer lock into its simulated immutable bundle; only that
+fixture copy was fixed, retaining the original precise owner-refusal assertion.
+
+R9 source SHA-256 is `ad5834328eaf21d39c22e315413b334092887c7d9e85bf4d8d8ffd5dcbd2ba12`,
+3207 individually verified files, commit `8e00fa95`. ThinkPad passed 32 focused legacy tests,
+then 1211 Python tests / 54 subtests. R7 Rust sources and frozen programs are unchanged. A new
+backup-only acceptance uses these source-bound results and the exact existing compacted SQL
+digest, reusing its prior full-audit proof rather than repeating compaction. Full backup/restore
+and the dependent actual 24-hour soak remain pending final original receipts.
+
+The frozen R7 repeat-value storage probes also passed 10000 / 100000 / 1000000 observations,
+including exact original readback and source epoch changes. Body-write reductions were
+99.99% / 99.999% / 99.9999%; subsequent Catalog recovery took 0.002663 / 0.002421 / 0.003933 s.
+The million-observation probe peak RSS was 20356 KiB. These probe results are not full Controller
+readiness, retention plateau or 24-hour performance acceptance.
