@@ -82,6 +82,20 @@ mod decision_policy;
 mod decision_state;
 mod event_log;
 pub use event_log::ControllerStorageFormat;
+pub use event_log::{
+    TELEMETRY_STORAGE_METRICS_SCHEMA, TelemetryStorageCounters, TelemetryStorageMetrics,
+};
+pub use event_log::RetentionDecisionReferences;
+pub use event_log::{ArchiveExpiryCoverage, ArchiveRelocationStatus, CommittedRetentionPolicyWitness, PreparedRetentionContentArchive, PublishedRetentionContentArchive};
+pub use event_log::{
+    EventHistoryArchiveReader, EventHistoryPage, FileHistoryReader, MAX_EVENT_HISTORY_PAGE_BYTES,
+    MAX_EVENT_HISTORY_PAGE_EVENTS, PreparedEventHistoryPage,
+};
+pub use event_log::{
+    MAX_RETENTION_INPUT_BYTES, RETENTION_INTERVAL_MS, RETENTION_POLICY_SCHEMA, RetentionBatch,
+    RetentionMode, RetentionPin, RetentionPolicy, RetentionPolicyCommand, RetentionPolicyReceipt,
+    RetentionPolicyState, RetentionProtection, RetentionStatus,
+};
 mod memory;
 mod node;
 mod spatial_memory;
@@ -104,11 +118,12 @@ pub use event_log::{
     ArchiveAbortRequest, ArchiveAbortSink, ArchiveContent, ArchiveContentKey, ArchiveCopierFence,
     ArchiveIntent, ArchiveLeaseIdentity, ArchiveManifest, ArchiveRequest, ArchiveSink,
     AuthorityWriteStatus, COORDINATED_ARCHIVE_RECOVERY_SCHEMA, COORDINATED_ARCHIVE_STORAGE_SCHEMA,
-    CatalogRecoveryEvents, CheckpointStoragePolicy, CheckpointWriteStats, CompleteReplicaState,
-    ControlCommandJournalEntry, CoordinatedArchiveAbort, CoordinatedArchiveIntent,
-    CoordinatedArchivePackage, CoordinatedArchiveRecord, CoordinatedArchiveRequest,
-    CoordinatedArchiveSink, FileArchiveSink, MAX_ARCHIVE_BYTES, MAX_ARCHIVE_EVENTS,
-    PersistedCheckpoint, PersistedEvent, REPLICA_RECOVERY_PROJECTION_SCHEMA, ReplicaArchiveAbort,
+    CatalogRecoveryEvents, CheckpointStoragePolicy, CheckpointWriteStats, CommandJournalClass,
+    CompleteReplicaState, ControlCommandJournalEntry, CoordinatedArchiveAbort,
+    CoordinatedArchiveIntent, CoordinatedArchivePackage, CoordinatedArchiveRecord,
+    CoordinatedArchiveRequest, CoordinatedArchiveSink, FileArchiveSink, MAX_ARCHIVE_BYTES,
+    MAX_ARCHIVE_EVENTS, PersistedCheckpoint, PersistedEvent, PreparedContentArchive,
+    PublishedContentArchive, REPLICA_RECOVERY_PROJECTION_SCHEMA, ReplicaArchiveAbort,
     ReplicaArchiveManifest, ReplicaArchiveOperation, ReplicaRecoveryProjection, SqliteEventLog,
     SqliteEventLogError, WriteFailure, WriteRecoveryCommand, WriteRecoveryReceipt,
     checkpoint_identity, coordinated_archive_bytes, coordinated_archive_package,

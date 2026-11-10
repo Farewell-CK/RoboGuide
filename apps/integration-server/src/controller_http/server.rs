@@ -32,8 +32,14 @@ mod operator_tests;
 
 #[path = "archive_maintenance.rs"]
 mod archive_maintenance;
+#[path = "content_archive_maintenance.rs"]
+mod content_archive_maintenance;
 #[path = "coordinated_archive.rs"]
 mod coordinated_archive;
+#[path = "retention_maintenance.rs"]
+mod retention_maintenance;
+#[path = "storage_metrics.rs"]
+mod storage_metrics;
 
 /// Operator role permitted to acknowledge a crash-loop quarantine.
 const RECOVERY_ADMIN_ROLE: &str = "recovery-admin";
@@ -73,7 +79,7 @@ fn operator_role(request: &ControlHttpRequest, principal: &OperatorPrincipal) ->
     if header.as_deref().is_some_and(|role| {
         !matches!(
             role,
-            "viewer" | "operator" | "recovery-admin" | "metrics-reader"
+            "viewer" | "operator" | "recovery-admin" | "metrics-reader" | "verifier"
         )
     }) {
         return None;
@@ -209,6 +215,7 @@ fn authorize_tenant_path(
             | "/v1/maintenance/archive"
             | "/v1/maintenance/archive/abort"
             | "/v1/maintenance/archive/operations"
+            | "/v1/maintenance/retention"
             | "/v1/maintenance/coordinated-archive"
             | "/v1/maintenance/coordinated-archive/abort"
             | "/v1/maintenance/coordinated-archive/operations"
@@ -243,6 +250,44 @@ fn authorize_operator_request(
     method: &str,
     path: &str,
 ) -> Result<(), (&'static str, &'static str)> {
+    if operator_role(request, principal).as_deref() == Some("verifier") {
+        let scoped = principal.mtls
+            && principal
+                .subject
+                .as_ref()
+                .is_some_and(|subject| !subject.is_empty())
+            && principal
+                .tenants
+                .as_ref()
+                .is_some_and(|tenants| !tenants.is_empty() && !tenants.contains("*"));
+        let mission_read = path.strip_prefix("/v1/missions/").is_some_and(|tail| {
+            let mut pieces = tail.split('/');
+            pieces.next().is_some_and(|id| !id.is_empty())
+                && matches!(
+                    (pieces.next(), pieces.next()),
+                    (None, None)
+                        | (
+                            Some("status" | "tenant" | "execution-attempts" | "admission"),
+                            None
+                        )
+                )
+        });
+        return if scoped
+            && ((method == "GET"
+                && (matches!(
+                    path,
+                    "/healthz" | "/readyz" | "/v1/inventory" | "/v1/state/records"
+                ) || mission_read))
+                || method == "POST" && path == "/v1/verifier-evidence")
+        {
+            Ok(())
+        } else {
+            Err((
+                "403 Forbidden",
+                "verifier principal cannot access this route or lacks scoped mutual TLS",
+            ))
+        };
+    }
     if operator_role(request, principal).as_deref() == Some("metrics-reader") {
         return if method == "GET" && matches!(path, "/metrics" | "/healthz" | "/readyz") {
             Ok(())
@@ -272,6 +317,7 @@ fn authorize_operator_request(
             | "/v1/resource-quotas"
             | "/v1/resource-topology"
             | "/v1/maintenance/archive/operations"
+            | "/v1/maintenance/retention"
             | "/v1/physical-entities"
             | "/v1/deployment-feasibility"
             | "/v1/maintenance/coordinated-archive/operations",
@@ -289,6 +335,7 @@ fn authorize_operator_request(
         (
             "POST",
             "/v1/maintenance/archive"
+            | "/v1/maintenance/retention"
             | "/v1/maintenance/archive/abort"
             | "/v1/maintenance/coordinated-archive"
             | "/v1/maintenance/coordinated-archive/abort",
@@ -2028,18 +2075,47 @@ where
                 .unwrap_or(100);
             let log = event_log.clone();
             let gate = event_write_gate.clone();
+            let shared = controller.clone();
+            let root =
+                std::env::var_os("ROBOGUIDE_EVENT_ARCHIVE_DIRECTORY").map(std::path::PathBuf::from);
             // The shared connection must never expose an application's uncommitted batch.
             // Wait off the async executor, then hold the existing write gate only for the read.
             let events = tokio::task::spawn_blocking(move || {
-                let _guard = gate.lock()?;
-                log.events_page(after_sequence, limit)
+                let prepared = {
+                    let _guard = gate.lock()?;
+                    log.prepare_event_history_page(after_sequence, limit)
+                        .map_err(|error| error.to_string())?
+                };
+                let source = shared
+                    .lock()
+                    .map_err(|_| "history Controller mutex is poisoned".to_string())?
+                    .memory_preparation
+                    .catalog
+                    .as_ref()
+                    .map(|catalog| catalog.archive_source())
+                    .transpose()?;
+                let current = shared.clone();
+                let permission = gate.clone();
+                let witness = Arc::new(move || {
+                    let live = current
+                        .lock()
+                        .map_err(|_| "history Controller mutex is poisoned".to_string())?;
+                    permission.validate(&live)
+                });
+                let reader = application::archive_content::HistoryReader::new(
+                    root.unwrap_or_default(),
+                    source,
+                    witness,
+                );
+                state::SqliteEventLog::read_prepared_event_history_page(prepared, &reader)
                     .map_err(|error| error.to_string())
             })
             .await
             .unwrap_or_else(|_| Err("event-log reader failed".to_string()));
             match events {
-                Ok(events) => {
-                    let records = events
+                Ok(page) => {
+                    let records = page
+                        .events
                         .iter()
                         .map(|event| {
                             let payload = serde_json::from_str(&event.payload_json)
@@ -2055,7 +2131,11 @@ where
                             })
                         })
                         .collect::<Vec<_>>();
-                    ("200 OK", serde_json::json!({"events": records}))
+                    (
+                        "200 OK",
+                        serde_json::json!({"events": records,"next_after_sequence":page.next_after_sequence,
+                        "has_more":page.has_more,"history_floor":page.history_floor,"through_sequence":page.through_sequence}),
+                    )
                 }
                 Err(error) => (
                     "503 Service Unavailable",
@@ -2117,6 +2197,26 @@ where
             })
             .await
             .map_err(|error| format!("original Archive cleanup worker failed: {error}"))?
+        }
+        ("GET", "/v1/maintenance/retention") => {
+            let log = event_log.clone();
+            let gate = event_write_gate.clone();
+            tokio::task::spawn_blocking(move || {
+                retention_maintenance::observe(&log, &gate, received_at)
+            })
+            .await
+            .map_err(|error| format!("retention observation worker failed: {error}"))?
+        }
+        ("POST", "/v1/maintenance/retention") => {
+            let log = event_log.clone();
+            let gate = event_write_gate.clone();
+            let shared = controller.clone();
+            let body = request.body.clone();
+            tokio::task::spawn_blocking(move || {
+                retention_maintenance::update(&body, &shared, &log, &gate, received_at)
+            })
+            .await
+            .map_err(|error| format!("retention policy worker failed: {error}"))?
         }
         ("GET", "/v1/maintenance/archive") => {
             let log = event_log.clone();
@@ -2216,7 +2316,19 @@ where
                 .clone()
                 .unwrap_or_else(|| "trusted-loopback:recovery-admin".into());
             let original_tenant = tenant.clone().unwrap_or_else(|| "*".into());
-            let result = tokio::task::spawn_blocking(move || {
+            let result = if let Some(command) = content_command {
+                content_archive_maintenance::Context {
+                    controller: shared_controller,
+                    log,
+                    gate,
+                    root: archive_root,
+                    subject,
+                    tenant: original_tenant,
+                }
+                .run(command, clock)
+                .await
+            } else {
+                tokio::task::spawn_blocking(move || {
                 let _write_guard = gate
                     .lock()
                     .map_err(|_| state::SqliteEventLogError::LockPoisoned)?;
@@ -2224,18 +2336,12 @@ where
                 if live.orchestrator.mission_ids().iter().any(|mission| live.orchestrator.execution(mission).is_some_and(|execution| matches!(execution.lifecycle(),orchestration::MissionExecutionLifecycle::Accepted | orchestration::MissionExecutionLifecycle::Running | orchestration::MissionExecutionLifecycle::Cancelling))) || !live.bridge.current_unknown_attempts().is_empty() {
                     return Err(state::SqliteEventLogError::ArchivePolicy("archive maintenance requires no nonterminal Missions or unknown physical attempts".into()));
                 }
-                let source = if content_command.is_some() { Some(live.memory_preparation.catalog.as_ref().ok_or_else(||state::SqliteEventLogError::ArchivePolicy("Archive requires its original Catalog/source backend".into()))?.archive_source().map_err(state::SqliteEventLogError::ArchivePolicy)?) } else { None };
                 drop(live);
-                if let Some(command)=content_command {
-                    let source=source.expect("explicit command resolves its original source under the writer");
-                    let request=state::ArchiveRequest { command_id:command.command_id,principal:subject,tenant:original_tenant,source_owner:source.owner_id().expect("retained source has original identity").into(),destination:archive_root.to_str().ok_or_else(||state::SqliteEventLogError::ArchivePolicy("Archive path must be UTF-8".into()))?.into(),authority_id:log.archive_authority_id()?,budget_ms:command.budget_ms };
-                    let current_gate=gate.clone();
-                    let witness=Arc::new(move || { let live=shared_controller.lock().map_err(|_|"Archive authority mutex is poisoned".to_string())?; current_gate.validate(&live) });
-                    log.archive_and_gc_with_catalog(cutoff,&application::archive_content::ContentArchiveSink::new(source,witness),request)
-                } else { log.archive_and_gc(cutoff, &state::FileArchiveSink::new(archive_root)) }
+                log.archive_and_gc(cutoff, &state::FileArchiveSink::new(archive_root))
             })
             .await
-            .map_err(|error| format!("archive worker failed: {error}"))?;
+            .map_err(|error| format!("archive worker failed: {error}"))?
+            };
             match result {
                 Ok(manifest) => (
                     "200 OK",
@@ -4042,5 +4148,6 @@ fn controller_metrics(
     output.push_str(&crate::observability::render(
         controller.bridge.diagnostics(),
     ));
+    output.push_str(&storage_metrics::render(event_log));
     Ok(output)
 }

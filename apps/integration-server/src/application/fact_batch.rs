@@ -443,8 +443,12 @@ impl<C: Clock> NodeFactDriver<'_, C> {
             &checkpoint,
             event_sequence,
         );
-        self.events
-            .save_checkpoint_with_command(SERVER_CHECKPOINT_SCHEMA, &checkpoint, command)?;
+        self.events.save_checkpoint_with_class(
+            SERVER_CHECKPOINT_SCHEMA,
+            &checkpoint,
+            command,
+            state::CommandJournalClass::NodeFacts,
+        )?;
         drop(save);
         let commit = StageObservation::start(
             self.diagnostics,

@@ -614,6 +614,22 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
     let integration: serde_json::Value =
         serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
+    if isolation_schema != SERVER_CHECKPOINT_SCHEMA
+        && integration
+            .get("control")
+            .and_then(|control| control.get("operator_authorization"))
+            .is_some_and(|profile| {
+                profile["schema_version"] == "roboguide.operator-authorization/v0.3"
+                    || profile
+                        .get("grants")
+                        .and_then(serde_json::Value::as_object)
+                        .is_some_and(|grants| {
+                            grants.values().any(|grant| grant["role"] == "verifier")
+                        })
+            })
+    {
+        return Err("legacy wrapper cannot contain restricted verifier authorization".into());
+    }
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA

@@ -263,7 +263,12 @@ pub(super) fn append(
 
 /// Validates original protected sources and coverage while avoiding every unrelated telemetry payload.
 pub(super) fn read(connection: &Connection) -> Result<CatalogRecoveryEvents, SqliteEventLogError> {
-    controller_storage::validate_version(connection, 2)?;
+    let version: u64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if version == 3 {
+        super::telemetry_storage::validate(connection)?;
+    } else {
+        controller_storage::validate_version(connection, 2)?;
+    }
     let state = head(connection)?;
     if state.through_sequence != high_water(connection)? {
         return Err(invalid(

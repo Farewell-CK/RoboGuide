@@ -12,7 +12,7 @@ pub(crate) fn open_controller_event_log(
             state::ControllerStorageFormat::Legacy
         }
         Ok("1") => state::ControllerStorageFormat::V1,
-        Ok("2") => {
+        Ok(version @ ("2" | "3")) => {
             if std::env::vars_os()
                 .any(|(key, _)| key.to_string_lossy().starts_with("ROBOGUIDE_REPLICA_"))
             {
@@ -21,9 +21,13 @@ pub(crate) fn open_controller_event_log(
                         .into(),
                 );
             }
-            state::ControllerStorageFormat::V2
+            if version == "3" {
+                state::ControllerStorageFormat::V3
+            } else {
+                state::ControllerStorageFormat::V2
+            }
         }
-        _ => return Err("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA must be legacy, 1 or 2".into()),
+        _ => return Err("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA must be legacy, 1, 2 or 3".into()),
     };
     Ok(state::SqliteEventLog::open_controller_with_checkpoint_policy(event_path, policy, format)?)
 }

@@ -14,6 +14,10 @@ pub const MAX_ARCHIVE_BYTES: usize = 16 * 1024 * 1024;
 /// Process-local identity for staging files owned solely by this sink.
 static NEXT_STAGING_ID: AtomicU64 = AtomicU64::new(0);
 
+#[path = "archive_prepared.rs"]
+mod prepared;
+pub use prepared::{PreparedContentArchive, PublishedContentArchive};
+
 /// Checks the closed manifest shape before constructing paths or removing history.
 pub(super) fn validate_manifest(manifest: &ArchiveManifest) -> Result<(), String> {
     let digest_valid = |digest: &str| {
@@ -330,7 +334,9 @@ impl SqliteEventLog {
         request: super::archive_operation::ArchiveRequest,
     ) -> Result<ArchiveManifest, SqliteEventLogError> {
         self.require_writes_enabled()?;
-        self.observe_write_result(self.archive_and_gc_inner(end_sequence, sink, Some(request)))
+        let prepared = self.prepare_content_archive(end_sequence, request)?;
+        let published = Self::publish_prepared_content_archive(prepared, sink)?;
+        self.finish_content_archive(published, sink)
     }
 
     /// Performs only the already-authorized local maintenance transaction and immutable sink check.
@@ -568,13 +574,17 @@ impl SqliteEventLog {
             super::catalog_archive::extend(&transaction, &events, end_sequence)?;
         }
         transaction.execute_batch("CREATE TABLE IF NOT EXISTS event_archive_manifests (start_sequence INTEGER PRIMARY KEY, end_sequence INTEGER UNIQUE NOT NULL, manifest_json TEXT NOT NULL)")?;
-        transaction.execute(
-            &format!(
-                "DELETE FROM {} WHERE sequence > ?1 AND sequence <= ?2",
-                self.events_table
-            ),
-            params![floor, end_sequence],
-        )?;
+        if self.events_table == "controller_v3_events" {
+            super::telemetry_storage::retire_prefix(&transaction, floor, end_sequence)?;
+        } else {
+            transaction.execute(
+                &format!(
+                    "DELETE FROM {} WHERE sequence > ?1 AND sequence <= ?2",
+                    self.events_table
+                ),
+                params![floor, end_sequence],
+            )?;
+        }
         transaction.execute(
             "INSERT INTO event_log_metadata(key,value) VALUES ('history_floor',?1)
                  ON CONFLICT(key) DO UPDATE SET value=excluded.value",

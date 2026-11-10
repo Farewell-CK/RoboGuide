@@ -155,17 +155,26 @@ pub(super) fn read(connection: &Connection) -> Result<Vec<PersistedEvent>, Sqlit
 
 /// Freezes complete current Catalog and accepted proof history for an independent archive checkpoint.
 pub(super) fn current(connection: &Connection) -> Result<Vec<PersistedEvent>, SqliteEventLogError> {
-    let mut records = read(connection)?;
-    let (count, bytes): (u64, u64) = connection.query_row(
-        "SELECT COUNT(*),COALESCE(SUM(length(CAST(payload_json AS BLOB))),0) FROM events",
-        [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    if count > MAX_EVENTS as u64 || bytes > MAX_BYTES as u64 {
-        return Err(SqliteEventLogError::ArchivePolicy(
-            "complete current Archive Catalog exceeds bounded evidence capacity".into(),
-        ));
+    let version: u64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if matches!(version, 2 | 3) {
+        // Original projection validation includes source envelopes, archive coverage and digest.
+        // Unrelated telemetry must not determine whether bounded protected evidence can archive.
+        super::catalog_checkpoint::read(connection)?;
+        let mut statement =
+            connection.prepare("SELECT data FROM catalog_recovery_events ORDER BY sequence")?;
+        return statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .map(|data| {
+                serde_json::from_str(&data?)
+                    .map_err(|error| SqliteEventLogError::Codec(error.to_string()))
+            })
+            .collect();
     }
+    let mut records = read(connection)?;
+    let mut protected_bytes = records
+        .iter()
+        .map(|record| record.payload_json.len())
+        .sum::<usize>();
     let mut statement = connection.prepare("SELECT sequence,event_id,timestamp_ms,correlation_id,causation_id,payload_schema,payload_json FROM events ORDER BY sequence")?;
     for row in statement.query_map([], event_from_row)? {
         let row = row?;
@@ -173,6 +182,12 @@ pub(super) fn current(connection: &Connection) -> Result<Vec<PersistedEvent>, Sq
         let payload: EventPayload = serde_json::from_str(&row.payload_json)
             .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?;
         if super::archive::requires_catalog_history(&payload) {
+            protected_bytes = protected_bytes.saturating_add(row.payload_json.len());
+            if records.len() >= MAX_EVENTS || protected_bytes > MAX_BYTES {
+                return Err(SqliteEventLogError::ArchivePolicy(
+                    "protected current Archive Catalog exceeds bounded evidence capacity".into(),
+                ));
+            }
             records.push(row);
         }
     }
@@ -261,6 +276,18 @@ impl SqliteEventLog {
                 .map_err(|_| SqliteEventLogError::LockPoisoned)?;
             return super::catalog_checkpoint::read(&connection);
         }
+        self.scan_catalog_replay(true)
+    }
+
+    /// Audits every retained original event while materializing only protected Catalog evidence.
+    ///
+    /// This deliberately bypasses the v2/v3 recovery projection: each original archived Catalog
+    /// envelope and every hot event are decoded and checked by the original adoption-source
+    /// validator. Scan counts, original payload-byte counts and timestamp high-water include
+    /// unrelated telemetry. The audit is read-only and never creates recovery coverage or facts.
+    /// Original ordinary events already moved to external archives require their separate verified
+    /// archive audit; this method scans the same complete SQL replay input as catalog_replay_events.
+    pub fn audit_catalog_history(&self) -> Result<CatalogRecoveryEvents, SqliteEventLogError> {
         self.scan_catalog_replay(true)
     }
 
@@ -644,6 +671,72 @@ mod tests {
         assert_eq!(recovered.events[0].timestamp(), TimestampMs::new(7));
         assert_eq!(log.events().unwrap(), before);
         assert_eq!(log.catalog_replay_events().unwrap().len(), 2001);
+    }
+
+    /// V3 normal recovery uses its protected projection; explicit audit decodes all original SQL rows.
+    #[test]
+    fn v3_streaming_full_audit_counts_all_original_rows_and_rejects_unrelated_corruption() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("events.sqlite3");
+        let log = SqliteEventLog::open_controller_with_checkpoint_policy(
+            &path,
+            CheckpointStoragePolicy::Full,
+            ControllerStorageFormat::V3,
+        )
+        .unwrap();
+        let manifest = original(&log);
+        log.begin_batch().unwrap();
+        for index in 0..2000 {
+            log.clone().append(
+                TimestampMs::new(10 + index),
+                &CorrelationId::new("full-audit-heartbeat").unwrap(),
+                None,
+                EventPayload::NodeHeartbeatAccepted {
+                    node_id: NodeId::new("node").unwrap(),
+                    lease_id: LeaseId::new("lease").unwrap(),
+                },
+            );
+        }
+        assert!(log.take_error().unwrap().is_none());
+        log.save_checkpoint(
+            crate::CONTROLLER_AUTHORITY_CHECKPOINT_SCHEMA,
+            "{\"audit\":true}",
+        )
+        .unwrap();
+        log.commit_batch().unwrap();
+        let normal = log.catalog_recovery_events().unwrap();
+        assert_eq!(normal.scanned_events, 1);
+        let audit = log.audit_catalog_history().unwrap();
+        assert_eq!(audit.scanned_events, 2001);
+        assert_eq!(audit.events.len(), 1);
+        assert_eq!(
+            audit.events[0].payload(),
+            &EventPayload::MemoryManifestPublished { manifest }
+        );
+        assert_eq!(audit.timestamp_high_water, TimestampMs::new(2009));
+        assert_eq!(audit.timestamp_high_water, normal.timestamp_high_water);
+        let expected_bytes: u64 = log
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT SUM(length(CAST(payload_json AS BLOB))) FROM events",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(audit.scanned_payload_bytes, expected_bytes);
+        assert_eq!(log.catalog_replay_events().unwrap().len(), 2001);
+        log.connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE controller_v3_events SET payload_json='{broken' WHERE sequence=2001",
+                [],
+            )
+            .unwrap();
+        assert_eq!(log.catalog_recovery_events().unwrap().scanned_events, 1);
+        assert!(log.audit_catalog_history().is_err());
     }
 
     /// Filtering retention cannot conceal corrupt or wrongly-versioned unrelated telemetry.

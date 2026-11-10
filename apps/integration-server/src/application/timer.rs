@@ -174,10 +174,11 @@ fn drive_application_timer_synchronous(
                 &checkpoint,
                 event_sequence,
             );
-            event_log.save_checkpoint_with_command(
+            event_log.save_checkpoint_with_class(
                 SERVER_CHECKPOINT_SCHEMA,
                 &checkpoint,
                 command,
+                state::CommandJournalClass::Timer,
             )?;
             drop(save);
             let commit = StageObservation::start(

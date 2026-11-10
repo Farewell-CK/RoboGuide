@@ -42,7 +42,7 @@ struct Publication {
     checkpoint_digest: String,
 }
 
-/// Actual application adapter; the caller holds the source application writer for its lifetime.
+/// Actual managed source adapter; prepare/finalize hold the writer, publication runs outside it.
 pub(crate) struct ContentArchiveSink {
     /// Original writer-owned source CAS; clones preserve that same root lease.
     source: FileSystemArtifactStore,
@@ -576,6 +576,72 @@ impl ArchiveSink for ContentArchiveSink {
         intent: &ArchiveIntent,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         self.confirm(intent).map_err(Into::into)
+    }
+}
+
+impl state::EventHistoryArchiveReader for ContentArchiveSink {
+    /// Reads history only after the original complete publication and SQL receipt agree.
+    fn read_published_segment(
+        &self,
+        manifest: &ArchiveManifest,
+        original_intent: Option<&ArchiveIntent>,
+        original_receipt: Option<&str>,
+    ) -> Result<Vec<u8>, String> {
+        let intent = original_intent.ok_or("content history lacks original intent")?;
+        let receipt = original_receipt.ok_or("content history lacks original durable receipt")?;
+        if &intent.manifest != manifest || self.inspect(intent)? != receipt {
+            return Err("content history original publication receipt differs".into());
+        }
+        let bytes = read(
+            &self.directory(intent)?.join("events.jsonl"),
+            state::MAX_ARCHIVE_BYTES as u64,
+        )?;
+        if digest(&bytes) != manifest.segment_digest {
+            return Err("content history segment changed after publication verification".into());
+        }
+        Ok(bytes)
+    }
+}
+
+/// Uses the exact historical publication kind without constructing a replacement source owner.
+pub(crate) struct HistoryReader {
+    /// Original deployment root for the retained legacy event-only segments.
+    legacy: state::FileHistoryReader,
+    /// Existing managed source and original current administrator witness for content archives.
+    content: Option<ContentArchiveSink>,
+}
+
+impl HistoryReader {
+    /// Captures already-owned deployment dependencies before releasing the application writer.
+    pub(crate) fn new(
+        root: PathBuf,
+        source: Option<FileSystemArtifactStore>,
+        permission: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
+    ) -> Self {
+        Self {
+            legacy: state::FileHistoryReader::new(root),
+            content: source.map(|source| ContentArchiveSink::new(source, permission)),
+        }
+    }
+}
+
+impl state::EventHistoryArchiveReader for HistoryReader {
+    /// Content segments require their retained CAS/publication evidence; legacy segments use v1 proof.
+    fn read_published_segment(
+        &self,
+        manifest: &ArchiveManifest,
+        intent: Option<&ArchiveIntent>,
+        receipt: Option<&str>,
+    ) -> Result<Vec<u8>, String> {
+        if manifest.schema == "roboguide.event-archive/v1" {
+            self.legacy
+                .read_published_segment(manifest, intent, receipt)
+        } else {
+            self.content
+                .as_ref()
+                .ok_or("content history source Catalog is unavailable")?
+                .read_published_segment(manifest, intent, receipt)
+        }
     }
 }
 
