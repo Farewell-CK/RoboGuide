@@ -18,6 +18,15 @@ For legacy storage, backup holds the real independent writer lease for the compl
 copy; there is no invented retained-owner Snapshot journal. A new-directory restore preserves the
 original bare blob layout and creates only the usual empty writer lock.
 
+The historical Mission/Memory Catalog may contain only original publication envelopes: production
+Catalog emits no retained-reference transition when no retained store is configured. Recovery v0.32
+can preserve this unadopted Memory-only Catalog through one explicitly bound legacy Artifact and no
+retained-owner Artifact or Replica. Each original manifest must match the closed Memory v0.1 shape;
+every published content digest and byte count must resolve to that copied legacy CAS. The original
+SQL/publication bytes remain unchanged, with no adopted owner or inferred historical tenant. Any
+qualified reference/adoption still requires complete original coverage and actual owners. Bare Map
+publications, mixed missing-reference history and incomplete adoption remain explicit refusals.
+
 The profile preserves every v0.31 authority, content, Archive, parent/Root and cold-writer check.
 For standalone deployments, the original application checkpoint must explicitly retain its
 nonreplicated state. A storage marker never proves that a database lacks Replica ownership.

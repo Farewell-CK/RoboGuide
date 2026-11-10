@@ -330,7 +330,9 @@ def test_bare_equal_bytes_cannot_satisfy_an_original_qualified_catalog_owner(
             "base_digest TEXT,digest TEXT);"
         )
     root = tmp_path / "qualified-bundle"
-    shutil.copytree(artifact, root / "stores/artifact")
+    shutil.copytree(
+        artifact, root / "stores/artifact", ignore=shutil.ignore_patterns(".writer.lock")
+    )
     (root / "stores/controller").mkdir()
     shutil.copyfile(controller, root / "stores/controller/events.sqlite3")
     dependency = reference["dependencies"][0]

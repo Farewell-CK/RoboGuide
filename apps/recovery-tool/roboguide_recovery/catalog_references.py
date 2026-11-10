@@ -174,6 +174,8 @@ def _controller(
     profile_schema: str,
     budget: OperationBudget,
     archive_roots: Mapping[str, Path] | None = None,
+    *,
+    allow_unadopted_legacy_memory: bool = False,
 ) -> tuple[
     dict[tuple[str, str], dict[str, Any]], dict[tuple[str, str], tuple[str, dict[str, Any]]]
 ]:
@@ -185,6 +187,7 @@ def _controller(
     original_envelopes: dict[tuple[str, str], dict[str, Any]] = {}
     pending_adoptions: set[tuple[str, str]] = set()
     adoptions: dict[str, dict[str, Any]] = {}
+    qualified_upload_history = False
 
     def progress() -> int:
         """Keep every SQL scan inside the original operation deadline."""
@@ -432,6 +435,8 @@ def _controller(
             payload = json.loads(raw)
             if not isinstance(payload, dict) or len(payload) != 1:
                 raise ValueError("Catalog authority scan found an invalid original event envelope")
+            if {"ArtifactUploadRetired", "ArtifactUploadRecoveryTransition"}.intersection(payload):
+                qualified_upload_history = True
             if "ArtifactCatalogReferenceTransition" in payload:
                 if not current or schema != CODEC:
                     raise ValueError("Catalog reference lacks its original wrapper/codec authority")
@@ -504,7 +509,18 @@ def _controller(
             )
         if publications and not current:
             raise ValueError("legacy Catalog ownership is unaccounted; explicit migration required")
-        if current and set(heads) != set(publications):
+        if (
+            current
+            and set(heads) != set(publications)
+            and not (
+                allow_unadopted_legacy_memory
+                and profile_schema == "roboguide.recovery-profile/v0.32"
+                and not heads
+                and not adoptions
+                and not qualified_upload_history
+                and all(kind == "MemoryManifestPublished" for kind, _ in publications.values())
+            )
+        ):
             raise ValueError("Catalog publications and original retained references are incomplete")
         if profile_schema in {
             "roboguide.recovery-profile/v0.26",
@@ -519,6 +535,121 @@ def _controller(
 
             validate_catalog(connection, publications)
     return heads, publications
+
+
+def _legacy_memory_binding(
+    components: list[dict[str, Any]], controller: dict[str, Any], profile_schema: str
+) -> str | None:
+    """Select one actual bound legacy store without borrowing modern owner or Replica authority."""
+    if profile_schema != "roboguide.recovery-profile/v0.32" or any(
+        component["kind"] in {"replica", "replica-content"}
+        or (
+            component["kind"] == "artifact"
+            and not artifact_layout.is_legacy(component, profile_schema)
+        )
+        for component in components
+    ):
+        return None
+    bound = [
+        component["component_id"]
+        for component in components
+        if artifact_layout.is_legacy(component, profile_schema)
+        and component["component_id"] in controller["depends_on"]
+    ]
+    return bound[0] if len(bound) == 1 else None
+
+
+def _legacy_memory_content(
+    publications: dict[tuple[str, str], tuple[str, dict[str, Any]]],
+    identifier: str,
+    files: dict[str, dict[str, Any]],
+) -> None:
+    """Preserve original unadopted Memory manifests only with their exact copied bare CAS bytes."""
+    fields = {
+        "schema",
+        "selector",
+        "kind",
+        "provider_id",
+        "owner",
+        "scope",
+        "visibility",
+        "payload_schema",
+        "media_type",
+        "artifact",
+        "source_mission_id",
+        "source_execution_id",
+        "source_task_ref",
+        "created_at",
+    }
+    for key, (kind, manifest) in publications.items():
+        if (
+            kind != "MemoryManifestPublished"
+            or set(manifest) != fields
+            or manifest["schema"] != "roboguide.memory-manifest/v0.1"
+            or _key(manifest["selector"]) != key
+            or type(manifest["created_at"]) is not int
+            or not 0 <= manifest["created_at"] < 2**64
+            or any(
+                not isinstance(manifest[name], str) or not manifest[name].strip()
+                for name in ("provider_id", "payload_schema", "media_type")
+            )
+            or not isinstance(manifest["owner"], dict)
+            or not isinstance(manifest["scope"], dict)
+            or manifest["kind"]
+            not in {"execution", "spatial", "semantic", "experience", "artifact"}
+            or manifest["visibility"] not in {"discoverable", "exchangeable"}
+        ):
+            raise ValueError("unadopted legacy Memory manifest has an unsupported original shape")
+        owner, scope = manifest["owner"], manifest["scope"]
+        owner_fields = (
+            {"owner", "component"}
+            if owner.get("owner") == "robo_guide"
+            else {"owner", "node_id", "local_system_id"}
+            if owner.get("owner") == "node"
+            else set()
+        )
+        if (
+            not owner_fields
+            or set(owner) != owner_fields
+            or any(not isinstance(value, str) or not value.strip() for value in owner.values())
+            or (
+                scope not in ({"kind": "local"}, {"kind": "global"})
+                and not (
+                    set(scope) == {"kind", "execution_group_id"}
+                    and scope["kind"] == "execution_group"
+                    and isinstance(scope["execution_group_id"], str)
+                    and bool(scope["execution_group_id"].strip())
+                )
+            )
+        ):
+            raise ValueError("unadopted legacy Memory semantic owner or scope is invalid")
+        artifact = manifest["artifact"]
+        if artifact is None:
+            if manifest["visibility"] == "exchangeable":
+                raise ValueError("unadopted exchangeable Memory lacks its original CAS identity")
+            continue
+        if (
+            not isinstance(artifact, dict)
+            or set(artifact) != {"content_digest", "byte_size"}
+            or not isinstance(artifact["content_digest"], str)
+            or SHA256.fullmatch(artifact["content_digest"]) is None
+            or type(artifact["byte_size"]) is not int
+            or not 0 <= artifact["byte_size"] <= 4 * 1024**3
+        ):
+            raise ValueError(
+                "unadopted legacy Memory CAS identity is incomplete or owner-qualified"
+            )
+        checksum = artifact["content_digest"]
+        name = f"stores/{identifier}/blobs/sha256/{checksum[7:9]}/{checksum[7:]}"
+        record = files.get(name)
+        if (
+            record is None
+            or record.get("kind") != "content"
+            or record.get("content_digest") != checksum
+            or type(record.get("byte_size")) is not int
+            or record["byte_size"] != artifact["byte_size"]
+        ):
+            raise ValueError("unadopted legacy Memory publication lacks its exact copied CAS bytes")
 
 
 def validate(
@@ -560,6 +691,12 @@ def validate(
         name = f"stores/{component['component_id']}/{component['database']}"
         if name not in files:
             raise ValueError("Catalog authority database is missing")
+        legacy_memory = _legacy_memory_binding(components, component, profile_schema)
+        if legacy_memory is not None:
+            legacy_component = next(
+                item for item in components if item["component_id"] == legacy_memory
+            )
+            artifact_layout.validate_bundle(root, legacy_component, files, profile_schema)
         heads, publications = _controller(
             root / name,
             profile_schema,
@@ -569,7 +706,14 @@ def validate(
                 for item in components
                 if item["kind"] == "archive"
             },
+            allow_unadopted_legacy_memory=legacy_memory is not None,
         )
+        if publications and not heads:
+            if legacy_memory is None:
+                raise ValueError(
+                    "unadopted legacy Memory needs its explicit original Artifact binding"
+                )
+            _legacy_memory_content(publications, legacy_memory, files)
         for key, reference in heads.items():
             if key not in publications:
                 raise ValueError("original Catalog reference has no actual publication")

@@ -647,6 +647,16 @@ def validate_bundle(
         if len(legacy) > 1 or (legacy and candidates):
             raise ValueError("bare Artifact inputs have ambiguous declared original storage")
         legacy_required: list[tuple[str, int, str | None]] = []
+        if legacy and (
+            retired
+            or any(
+                "ArtifactUploadRecoveryTransition" in json.loads(row["payload_json"])
+                for row in rows
+            )
+        ):
+            raise ValueError(
+                "legacy Artifact cannot adopt qualified upload retirement or recovery authority"
+            )
         replicated = any(item["kind"] in {"replica", "replica-content"} for item in components)
         required: list[tuple[str, dict[str, dict[str, Any]], str, int, str | None]] = []
         for original in archive_rows:
