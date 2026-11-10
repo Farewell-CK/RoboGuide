@@ -27,6 +27,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.elabrador.mobilenavigation.NavigationRecording
 import com.elabrador.mobilenavigation.archive.NavigationArchive
 import com.seaway.guideassistant.archive.NavigationRecordsActivity
+import com.seaway.guideassistant.navindoor.NaviIndoorActivity
+import com.seaway.guideassistant.navindoor.NaviEntryPolicy
 import com.elabrador.mobilenavigation.GuidanceLevel
 import com.elabrador.mobilenavigation.LocalPlanSnapshot
 import com.elabrador.mobilenavigation.OutdoorNavController
@@ -183,6 +185,18 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         }
         bind.btnNavigationRecords.setOnClickListener {
             startActivity(Intent(requireContext(), NavigationRecordsActivity::class.java))
+        }
+        bind.btnNaviIndoor.setOnClickListener {
+            if (!NaviEntryPolicy.canOpen(routeRequestPending, NavigationArchive.activeSessionId() != null,
+                outdoorNavigationActive.value || NavigationPlanManager.state.value is NavigationPlanManager.PlanState.InProgress)) {
+                Toast.makeText(requireContext(), R.string.navi_indoor_busy, Toast.LENGTH_LONG).show()
+            } else {
+                // The host pauses its idle sensor/camera pipeline in onPause.
+                voiceController?.release()
+                updateIndoorVoiceButton(recording = false)
+                TtsUtils.stop()
+                startActivity(Intent(requireContext(), NaviIndoorActivity::class.java))
+            }
         }
         singleNavigationArchiveSession = NavigationArchive.activeSessionId()?.takeIf {
             NavigationArchive.currentReason() == "outdoor_navigation" && !NavigationPlanManager.archiveTaskActive()

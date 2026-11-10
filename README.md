@@ -1,5 +1,7 @@
 # RoboGuide：导航过程数据记录
 
+本地整合分支增加了 **NAVI 室内导航**：在“导航”页打开同一 APK 内的 Flutter 页面，保留现有地图、定位、路线跟踪和中文语音字幕。源码、构建及验证边界见 [NAVI 整合说明](docs/navi/整合说明.zh-CN.md)。
+
 本分支在 `feat/guide-assistant` 上整合已验证的 Swin-L 384×288 NPU 导航与过程数据归档。点击“开始导航”后记录，结束导航后封存；手机可以导出 ZIP、补填实验标注、删除本机记录，或上传到配套平台。
 
 导航档案包含压缩视频、每次实际推理的 RGB/原始深度/对齐深度、语义结果、点云、完整 OctoMap 历史、定位/规划/播报、千问调用，以及运行配置、随包说明和采集摘要。API Key 在手机私有设置中配置，不属于档案。
@@ -10,13 +12,14 @@
 - [第二轮真机复测](docs/导航数据记录-20261110第二轮复测.zh-CN.md)
 - [不含私密数据的验证摘要](docs/navigation-archive-validation.json)
 
-拉取模型前安装 Git LFS 并运行 `git lfs pull`。使用 JDK 17、Android SDK 35、NDK 27.0.12077973 和 CMake 3.22.1；在本机 `local.properties` 配置 `sdk.dir`。构建同一套源码的独立测试包：
+拉取模型前安装 Git LFS 并运行 `git lfs pull`。整合版使用 JDK 17、Flutter 3.35.7、Android SDK 36、NDK 27.0.12077973 和 CMake 3.22.1；在本机 `local.properties` 配置 `sdk.dir`。先构建 NAVI 模块，再构建同一套源码的独立测试包：
 
 ```bash
-./gradlew :navoutdoor:testSwinlDebugUnitTest :app:assembleDebug -PswinlFast=true -ParchiveTest=true --no-daemon
+bash tools/build_navi_indoor.sh
+./gradlew :app:testDebugUnitTest :navoutdoor:testSwinlDebugUnitTest :app:verifyNaviDebugApk -PswinlFast=true -ParchiveTest=true -PnaviIntegrationTest=true --no-daemon
 ```
 
-测试包名为 `com.seaway.guideassistant.swinl.archive`，可以与既有导航应用并存；不传 `-ParchiveTest=true` 时使用 `com.seaway.guideassistant.swinl`，覆盖安装仍需签名一致。配套平台只需 Python 3 标准库，启动及手机连接方式见平台文档。
+整合测试包名为 `com.seaway.guideassistant.swinl.navi`，名称为“RoboGuide·NAVI”，可以与既有导航应用并存；省略 `-PnaviIntegrationTest=true` 后沿用原分支的归档测试/正式包名规则，覆盖安装仍需签名一致。配套平台只需 Python 3 标准库，启动及手机连接方式见平台文档。
 
 本分支保留底层 Android 工程的原有模板说明：
 

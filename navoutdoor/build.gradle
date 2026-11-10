@@ -23,7 +23,7 @@ if (localPropertiesFile.exists()) {
 
 android {
     namespace 'com.elabrador.mobilenavigation'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         minSdk 29

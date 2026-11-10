@@ -1,0 +1,10 @@
+{
+  "source": "/home/seaway/sdb/niulinqiang/roboguide_demo/Indoor-Navigation-for-visually-impaired/scripts/dinov2_http_gateway.py",
+  "model_revision": "f9e44c814b77203eaa57a6bdbbd535f21ede1415",
+  "files": {
+    "dinov2_http_gateway.py": "43a82a4a661987f351b1ecda30589a1ee18161e61e7ee7017d8ec3b71e07bf09",
+    "config.json": "f7ff4cfa73d2f70647dbf6950541ad25d73082d54c2e7e9bded160c7656b2a70",
+    "preprocessor_config.json": "14e780d86fa1861f8751f868d7f45425b5feb55c38ca26f152ca5097ab30f828",
+    "model.safetensors": "d73036b56966966d07975d696bde331762f37297e2f095de8cea0040c3aa0841"
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "generated_at_utc": "2026-11-10T09:39:09.784225+00:00",
+  "base_branch": "feat/navigation-data-archive",
+  "base_commit": "88a1f0893578dca3414e54490da1b3b8dfebc152",
+  "tests": {
+    "app": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "report_files": 1
+    },
+    "navoutdoor": {
+      "tests": 258,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "report_files": 40
+    },
+    "navi_flutter": {
+      "passed": 68,
+      "all_passed": true
+    }
+  },
+  "device_validation": "not_run",
+  "github_publication": "not_pushed",
+  "analysis": {
+    "blocking_errors": 0,
+    "existing_warnings_and_infos_allowed": true
+  },
+  "aar": {
+    "coordinates": "com.seaway.guideassistant.naviindoor:flutter_release:1.0",
+    "sha256": "11c893099ae78c7f0bde5f07dc743da4df976057f2ac1bf203aaf44d1c570031",
+    "asset_entries": [
+      "assets/",
+      "assets/flutter_assets/",
+      "assets/flutter_assets/.env",
+      "assets/flutter_assets/AssetManifest.bin",
+      "assets/flutter_assets/AssetManifest.json",
+      "assets/flutter_assets/FontManifest.json",
+      "assets/flutter_assets/NOTICES.Z",
+      "assets/flutter_assets/NativeAssetsManifest.json",
+      "assets/flutter_assets/assets/",
+      "assets/flutter_assets/assets/icon.png",
+      "assets/flutter_assets/assets/wakeword.ppn",
+      "assets/flutter_assets/fonts/",
+      "assets/flutter_assets/fonts/MaterialIcons-Regular.otf",
+      "assets/flutter_assets/shaders/",
+      "assets/flutter_assets/shaders/ink_sparkle.frag"
+    ]
+  },
+  "apk": {
+    "filename": "RoboGuide-NAVI-整合测试版.apk",
+    "sha256": "c870d6cbdf3695f50080fccbfbf1f10f9e9af19e51cbe3a551fd5143435b3f49",
+    "bytes": 640702840,
+    "required_entries": {
+      "lib/arm64-v8a/libapp.so": 7930800,
+      "lib/arm64-v8a/libflutter.so": 11037032,
+      "assets/flutter_assets/AssetManifest.bin": 123,
+      "assets/models/swinl-384.plan": 459572610
+    },
+    "flutter_asset_entries": [
+      "assets/flutter_assets/.env",
+      "assets/flutter_assets/AssetManifest.bin",
+      "assets/flutter_assets/AssetManifest.json",
+      "assets/flutter_assets/FontManifest.json",
+      "assets/flutter_assets/NOTICES.Z",
+      "assets/flutter_assets/NativeAssetsManifest.json",
+      "assets/flutter_assets/assets/icon.png",
+      "assets/flutter_assets/assets/wakeword.ppn",
+      "assets/flutter_assets/fonts/MaterialIcons-Regular.otf",
+      "assets/flutter_assets/shaders/ink_sparkle.frag"
+    ],
+    "env_has_configured_values": false,
+    "build_identity": {
+      "schema_version": 1,
+      "build_id": "2026-11-10T09:37:32.598586850Z-03e3de577ab2",
+      "generated_at_utc": "2026-11-10T09:37:32.598586850Z",
+      "source_sha256": "03e3de577ab21b06aa288b91de06d7b93b9f624070f73e8cec62594e81ef88e9",
+      "source_files": 299,
+      "source_scope": "app, navoutdoor and shared source/configuration; excludes model binaries and private properties",
+      "bundled_arm64_libraries_sha256": {
+        "libelabrador_native.so": "cf6006b3dd366788a88febe994302be77d431c62d501feabeaa58a349261ed61",
+        "libvins_estimator.so": "7fa59fb633f9868fdd38f13b6cf006facc18f7147a19bd1f3bb572278f4ae160",
+        "libvins_feature_tracker.so": "9e37b247cdf292de166e03a82c2f09d5f06d6b714714db9eaf913f956e898767"
+      },
+      "gradle_version": "8.11.1",
+      "java_version": "17.0.21",
+      "swinl_fast": true,
+      "archive_test": true
+    },
+    "package": "com.seaway.guideassistant.swinl.navi",
+    "label": "RoboGuide·NAVI",
+    "version_name": "1.4-swinl-npu-384-v17-navi",
+    "signature_verified": true,
+    "signing_certificate_sha256": "becff9f7435d3a3eb0c5ae4191071c6c2d129ecc48dd52b9c1ad1afaef7c5f3e",
+    "download_sha256_verified": true
+  },
+  "logs_sha256": {
+    "module-test.log": "cb26d54de4c71241dda3cf6d4c73ee4ef40ec9285d699acdd73544a8b48e3a92",
+    "host-build.log": "8d051597c6192cc9a98644d88c1193f3acb11cf440a8e5de245fb252226152c2",
+    "host-test.log": "5e79cd526005e6fa9da2ce4fa6ae1e168cbbf5c6f2ad5e6568c857d768ed8fc5",
+    "module-analyze.log": "c3c0c1851f2277b5e8ab06ccde2f036ba2712e2a9d620f1b7334153f83993e69",
+    "module-aar.log": "6a38366aa8b5e98893839656d02b52cc842269966e89aeb1500e5a3c42d26664"
+  },
+  "limitations": [
+    "No physical Android device validation in this integration build.",
+    "Native hardware/robot/outdoor pipelines are retained but not revalidated with hardware.",
+    "NAVI and RoboGuide login sessions and diagnostic archives remain separate.",
+    "NAVI continues to use the configured remote GPU and Supabase services.",
+    "Flutter analysis contains pre-existing warnings/infos, with no blocking errors."
+  ]
+}

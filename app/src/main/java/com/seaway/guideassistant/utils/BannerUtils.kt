@@ -24,7 +24,7 @@ bindBanner(this, bind.banner, imgs)
  * @param datas List<String>
  */
 object BannerUtils{
-    fun bindBanner(context: AppCompatActivity, banner: Banner<*, *>, datas: List<String>) {
+    fun bindBanner(context: AppCompatActivity, banner: Banner<String, ImgBannerAdapter>, datas: List<String>) {
         banner.adapter = ImgBannerAdapter(datas)
         banner.addBannerLifecycleObserver(context)
         banner.indicator = CircleIndicator(context)

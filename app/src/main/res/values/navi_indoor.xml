@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="navi_indoor_entry">NAVI 室内导航</string>
+    <string name="navi_indoor_description">使用手机摄像头定位、管理地图和跟踪已录制路线</string>
+    <string name="navi_indoor_busy">请先结束当前导航，再进入 NAVI 室内导航。</string>
+    <style name="NaviLaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+    <style name="NaviNormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">?android:colorBackground</item>
+    </style>
+</resources>

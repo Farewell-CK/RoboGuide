@@ -111,3 +111,11 @@ __pycache__/
 /artifacts/
 /platform/archive-data/
 /platform/archive.sqlite3*
+
+# NAVI vision service runtime outputs and private benchmark images
+/services/navi_vision/samples/
+/services/navi_vision/*.pid
+/services/navi_vision/*-environment.json
+/services/navi_vision/health-existing.json
+/services/navi_vision/gpu-selection.json
+/services/navi_vision/benchmark-results.json

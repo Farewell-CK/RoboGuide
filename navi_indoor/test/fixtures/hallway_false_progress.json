@@ -1,0 +1,92 @@
+[
+  {
+    "target": 0,
+    "target_score": 0.9365586158482841,
+    "candidates": [
+      {
+        "sequence": 0,
+        "score": 0.9365586158482841
+      },
+      {
+        "sequence": 3,
+        "score": 0.8412943324392129
+      },
+      {
+        "sequence": 2,
+        "score": 0.8210364905960715
+      }
+    ]
+  },
+  {
+    "target": 1,
+    "target_score": 0.7989981170091673,
+    "candidates": [
+      {
+        "sequence": 0,
+        "score": 0.9363985868678988
+      },
+      {
+        "sequence": 2,
+        "score": 0.8511018278366924
+      },
+      {
+        "sequence": 3,
+        "score": 0.83788086023294
+      }
+    ]
+  },
+  {
+    "target": 2,
+    "target_score": 0.8414534361307556,
+    "candidates": [
+      {
+        "sequence": 0,
+        "score": 0.928050365505039
+      },
+      {
+        "sequence": 2,
+        "score": 0.8414534361307556
+      },
+      {
+        "sequence": 3,
+        "score": 0.8326659271848218
+      }
+    ]
+  },
+  {
+    "target": 3,
+    "target_score": 0.8838170750649726,
+    "candidates": [
+      {
+        "sequence": 0,
+        "score": 0.9445187617290646
+      },
+      {
+        "sequence": 3,
+        "score": 0.8838170750649726
+      },
+      {
+        "sequence": 2,
+        "score": 0.8769916654900374
+      }
+    ]
+  },
+  {
+    "target": 4,
+    "target_score": 0.8013029563441991,
+    "candidates": [
+      {
+        "sequence": 0,
+        "score": 0.939063904267087
+      },
+      {
+        "sequence": 3,
+        "score": 0.8726313162244131
+      },
+      {
+        "sequence": 2,
+        "score": 0.8586529512541627
+      }
+    ]
+  }
+]

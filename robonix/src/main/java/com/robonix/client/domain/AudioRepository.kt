@@ -14,6 +14,8 @@ import com.robonix.proto.audio.ListAudioDevices_Request
 import com.robonix.proto.audio.ListAudioDevices_Response
 import com.robonix.proto.audio.SelectAudioDevice_Request
 import com.robonix.proto.audio.SelectAudioDevice_Response
+import com.robonix.proto.voiceprint.Enroll_Request
+import com.robonix.proto.voiceprint.Enroll_Response
 import io.grpc.MethodDescriptor
 import io.grpc.protobuf.ProtoUtils
 import io.grpc.stub.ClientCalls
@@ -66,12 +68,12 @@ class AudioRepository @Inject constructor(
             .setResponseMarshaller(ProtoUtils.marshaller(SelectAudioDevice_Response.getDefaultInstance()))
             .build()
 
-    private val VOICEPRINT_ENROLL_METHOD: MethodDescriptor<com.robonix.proto.voiceprint.Enroll_Request, com.robonix.proto.voiceprint.Enroll_Response> =
-        MethodDescriptor.newBuilder<com.robonix.proto.voiceprint.Enroll_Request, com.robonix.proto.voiceprint.Enroll_Response>()
+    private val VOICEPRINT_ENROLL_METHOD: MethodDescriptor<Enroll_Request, Enroll_Response> =
+        MethodDescriptor.newBuilder<Enroll_Request, Enroll_Response>()
             .setType(MethodDescriptor.MethodType.UNARY)
             .setFullMethodName("robonix.contracts.RobonixServiceVoiceprintEnroll/Enroll")
-            .setRequestMarshaller(ProtoUtils.marshaller(com.robonix.proto.voiceprint.Enroll_Request.getDefaultInstance()))
-            .setResponseMarshaller(ProtoUtils.marshaller(com.robonix.proto.voiceprint.Enroll_Response.getDefaultInstance()))
+            .setRequestMarshaller(ProtoUtils.marshaller(Enroll_Request.getDefaultInstance()))
+            .setResponseMarshaller(ProtoUtils.marshaller(Enroll_Response.getDefaultInstance()))
             .build()
 
     private var bridgeCollectionJob: Job? = null
@@ -166,7 +168,7 @@ class AudioRepository @Inject constructor(
             val channel = channelProvider.getChannel(endpoint)
             val resp = ClientCalls.blockingUnaryCall(
                 channel.newCall(VOICEPRINT_ENROLL_METHOD, io.grpc.CallOptions.DEFAULT),
-                com.robonix.proto.voiceprint.Enroll_Request.newBuilder()
+                Enroll_Request.newBuilder()
                     .setUserId(cleanUserId)
                     .setUserName(userName.ifBlank { cleanUserId })
                     .setAudioData(com.google.protobuf.ByteString.copyFrom(pcm))
