@@ -4,6 +4,17 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class CueTimingTest {
+    @Test public void slowCompletedPlansNeverAuthorizeMovementOrReleaseStop() {
+        GuidanceStabilizer g = new GuidanceStabilizer();
+        // Even successful diagnostic A* results arrive 3 s after acquisition.
+        // Consecutive new frame identities must not reset their capture ages.
+        for (long capture = 100; capture <= 18100; capture += 3000) {
+            FrameEvidence evidence = frame(capture);
+            assertEquals("停止", g.updateValidated("直走", true, capture + 3000, evidence));
+            assertEquals("停止", g.updateValidated("右转", true, capture + 3500, evidence));
+            assertFalse(evidence.fresh(capture + 3000));
+        }
+    }
     private FrameEvidence frame(long time) { return new FrameEvidence(time/1000.,1,time,time); }
     private String cue(GuidanceStabilizer g,String text,long time) {
         return g.updateValidated(text,true,time,frame(time));

@@ -34,8 +34,16 @@ class Enumerator {
 
             switch(action){
                 case UsbManager.ACTION_USB_DEVICE_ATTACHED:
-                case UsbUtilities.ACTION_USB_PERMISSION:
                     onDeviceAttach(context);
+                    break;
+                case UsbUtilities.ACTION_USB_PERMISSION:
+                    // A denied request must not immediately request again. Android
+                    // also returns denial without a dialog when CAMERA is missing.
+                    if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
+                        mHandler.sendEmptyMessage(MessagesHandler.ON_DEVICE_AVAILABLE);
+                    } else {
+                        Log.w(TAG, "USB permission denied; waiting for a new attach/resume");
+                    }
                     break;
                 case UsbManager.ACTION_USB_DEVICE_DETACHED:
                     onDeviceDetach();

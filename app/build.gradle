@@ -6,6 +6,8 @@ plugins {
 }
 
 def localProperties = new Properties()
+def swinlFast = project.findProperty('swinlFast') == 'true'
+def archiveTest = project.findProperty('archiveTest') == 'true'
 def localPropertiesFile = rootProject.file('local.properties')
 if (localPropertiesFile.exists()) {
     localPropertiesFile.withInputStream { localProperties.load(it) }
@@ -26,17 +28,18 @@ android {
     }
     compileSdkVersion 35
     defaultConfig {
-        applicationId "com.seaway.guideassistant"
-        minSdkVersion 24
+        applicationId archiveTest ? "com.seaway.guideassistant.swinl.archive" : "com.seaway.guideassistant.swinl"
+        manifestPlaceholders = [navigationAppLabel: archiveTest ? "导航助手·数据测试" : "@string/app_name"]
+        minSdkVersion 29
         targetSdkVersion 34
-        versionCode 4
-        versionName "1.3-qwen-plus-force"
+        versionCode swinlFast ? 16 : 7
+        versionName swinlFast ? "1.4-swinl-npu-384-v16-archive" : "1.4-swinl-npu-640-corrected-v7"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         // :navoutdoor 带有 semanticModel flavor 维度（完整搬运自 mobile-navigation），
-        // :app 本身不需要按该维度出多个包，缺省固定选用本机唯一有真实模型资产的 npu flavor。
-        missingDimensionStrategy 'semanticModel', 'npu'
+        // :app 固定使用已经验证的 Swin-L NPU flavor。
+        missingDimensionStrategy 'semanticModel', 'swinl'
 
         buildConfigField "String", "ASR_AUTH_TOKEN", "\"${System.getenv("ASR_AUTH_TOKEN") ?: localProperties.getProperty("ASR_AUTH_TOKEN", "")}\""
         buildConfigField "String", "DMWS_TOKEN", "\"${System.getenv("DMWS_TOKEN") ?: localProperties.getProperty("DMWS_TOKEN", "")}\""

@@ -8,6 +8,14 @@ final class VinsMono implements AutoCloseable {
     // VINS-Mono mode 0 fixes an accurate camera/IMU transform. D455 supplies
     // that rigid factory calibration through librealsense getExtrinsicTo().
     private static final int SOURCE_EXTRINSIC_MODE = 0;
+    private static final int TRACKER_MAX_COUNT=150,TRACKER_MIN_DISTANCE=25;
+    private static final double TRACKER_FUNDAMENTAL_THRESHOLD=1.0;
+    private static final boolean TRACKER_EQUALIZE=false;
+    private static final double FOCAL_LENGTH=460.0,ACC_NOISE=0.1,GYRO_NOISE=0.01,
+            ACC_RANDOM_WALK=0.0002,GYRO_RANDOM_WALK=2.0e-5,GRAVITY=9.80665,
+            SOLVER_TIME=0.04,KEYFRAME_PARALLAX=10.0,INITIAL_TIME_OFFSET=0.0;
+    private static final int SOLVER_ITERATIONS=8;
+    private static final boolean ESTIMATE_TIME_OFFSET=true;
 
     static final class TrackedFrame {
         final VinsInputBuffer.ImageSample image;
@@ -209,7 +217,7 @@ final class VinsMono implements AutoCloseable {
                 colorIntrinsic.getFx(), colorIntrinsic.getFy(),
                 colorIntrinsic.getPpx(), colorIntrinsic.getPpy(),
                 colorIntrinsic.getModel().value(), toDoubleArray(colorIntrinsic.getCoeffs()),
-                150, 25, 1.0, false);
+                TRACKER_MAX_COUNT, TRACKER_MIN_DISTANCE, TRACKER_FUNDAMENTAL_THRESHOLD, TRACKER_EQUALIZE);
         float[] rotationColumnMajor = cameraToImu.getRotation();
         double[] rotationRowMajor = new double[9];
         for (int row = 0; row < 3; row++) {
@@ -220,10 +228,25 @@ final class VinsMono implements AutoCloseable {
         float[] sourceTranslation = cameraToImu.getTranslation();
         double[] translation = {sourceTranslation[0], sourceTranslation[1], sourceTranslation[2]};
         estimatorHandle = NativeVinsEstimator.nativeCreate(
-                colorIntrinsic.getWidth(), colorIntrinsic.getHeight(), 460.0,
-                0.1, 0.01, 0.0002, 2.0e-5, 9.80665,
-                0.04, 8, 10.0, true, 0.0, SOURCE_EXTRINSIC_MODE,
+                colorIntrinsic.getWidth(), colorIntrinsic.getHeight(), FOCAL_LENGTH,
+                ACC_NOISE, GYRO_NOISE, ACC_RANDOM_WALK, GYRO_RANDOM_WALK, GRAVITY,
+                SOLVER_TIME, SOLVER_ITERATIONS, KEYFRAME_PARALLAX, ESTIMATE_TIME_OFFSET, INITIAL_TIME_OFFSET, SOURCE_EXTRINSIC_MODE,
                 rotationRowMajor, translation);
+        RuntimeRecordingConfiguration.observe("vins",RuntimeRecordingConfiguration.json(
+                "available",trackerHandle!=0&&estimatorHandle!=0,"source","Arguments supplied to native tracker/estimator creation",
+                "color_intrinsic",InferenceCapture.intrinsic(colorIntrinsic),
+                "tracker",RuntimeRecordingConfiguration.json("max_count",TRACKER_MAX_COUNT,"min_distance_pixels",TRACKER_MIN_DISTANCE,
+                        "fundamental_threshold",TRACKER_FUNDAMENTAL_THRESHOLD,"equalize",TRACKER_EQUALIZE),
+                "estimator",RuntimeRecordingConfiguration.json("focal_length_parameter",FOCAL_LENGTH,
+                        "acc_noise_parameter",ACC_NOISE,"gyro_noise_parameter",GYRO_NOISE,
+                        "acc_random_walk_parameter",ACC_RANDOM_WALK,"gyro_random_walk_parameter",GYRO_RANDOM_WALK,
+                        "gravity_m_per_s2",GRAVITY,"solver_time_seconds",SOLVER_TIME,"iterations",SOLVER_ITERATIONS,
+                        "keyframe_parallax_parameter",KEYFRAME_PARALLAX,"estimate_time_offset",ESTIMATE_TIME_OFFSET,
+                        "initial_time_offset_seconds",INITIAL_TIME_OFFSET,"extrinsic_mode",SOURCE_EXTRINSIC_MODE),
+                "imu_from_color_camera_rotation_row_major",NavigationRecording.array(rotationRowMajor),
+                "imu_from_color_camera_translation_m",NavigationRecording.array(translation),
+                "native_internal_defaults","Not exposed by JNI; supplied arguments are recorded here and native binary hashes are preserved in build_identity",
+                "extrinsic_relation","p_imu = R_imu_from_camera * p_camera + t_imu_from_camera; factory librealsense getExtrinsicTo(COLOR,GYRO)"));
         if (trackerHandle == 0 || estimatorHandle == 0) {
             close();
             throw new IllegalStateException("Unable to create native VINS-Mono");

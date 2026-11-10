@@ -1,6 +1,10 @@
 package com.seaway.guideassistant.llm
 
 import com.orhanobut.logger.Logger
+import android.os.SystemClock
+import com.elabrador.mobilenavigation.archive.NavigationArchive
+import org.json.JSONObject
+import java.util.UUID
 import com.seaway.guideassistant.base.Constant.timeoutMillis
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -24,6 +28,14 @@ class QwenIntentRecognizer(
             )
         )
 
+        val session = NavigationArchive.activeSessionId()
+        val requestId = UUID.randomUUID().toString()
+        NavigationArchive.trackProcessing(session, requestId, "cloud_intent_request")
+        val started = SystemClock.elapsedRealtime()
+        NavigationArchive.eventFor(session, "cloud.intent.request", NavigationArchive.json(
+            "request_id", requestId, "model", config.model,
+            "request", JSONObject(requestBody)
+        ))
         val connection = (URI(config.endpoint).toURL().openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = timeoutMillis
@@ -39,7 +51,15 @@ class QwenIntentRecognizer(
             val status = connection.responseCode
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val responseBody = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            Logger.i("LLm responseBody: $responseBody")
+            val safeBody = responseBody.replace(config.apiKey, "[REDACTED]")
+            val envelope = runCatching { JSONObject(safeBody) }.getOrNull()
+            NavigationArchive.eventFor(session, "cloud.intent.response", NavigationArchive.json(
+                "request_id", requestId, "http_status", status,
+                "duration_ms", SystemClock.elapsedRealtime() - started,
+                "raw_response", safeBody, "usage", envelope?.opt("usage"),
+                "provider_request_id", envelope?.opt("id")
+            ))
+            Logger.i("LLM intent response: HTTP $status")
             if (status !in 200..299) {
                 throw IOException("LLM request failed: HTTP $status, body=$responseBody")
             }
@@ -51,8 +71,18 @@ class QwenIntentRecognizer(
             }
 
             NavigationIntentValidator.validate(result)
+            NavigationArchive.eventFor(session, "cloud.intent.result", NavigationArchive.json(
+                "request_id", requestId, "result", JSONObject(NavigationIntentEncoder.toJson(result))
+            ))
             return result
+        } catch (error: Exception) {
+            NavigationArchive.eventFor(session, "cloud.intent.failure", NavigationArchive.json(
+                "request_id", requestId, "duration_ms", SystemClock.elapsedRealtime() - started,
+                "error_type", error.javaClass.simpleName
+            ))
+            throw error
         } finally {
+            NavigationArchive.completeProcessing(session, requestId)
             connection.disconnect()
         }
     }

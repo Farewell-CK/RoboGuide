@@ -103,3 +103,11 @@ CLAUDE.md
 # AI coding tool local state
 .omc/
 **/.omc/
+/build-swinl*.log
+
+# Navigation archive runtime data and Python caches
+__pycache__/
+*.py[cod]
+/artifacts/
+/platform/archive-data/
+/platform/archive.sqlite3*

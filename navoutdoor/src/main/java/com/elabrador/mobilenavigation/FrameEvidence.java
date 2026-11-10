@@ -3,6 +3,8 @@ package com.elabrador.mobilenavigation;
 /** Immutable acquisition identity; reprojection must retain this object. */
 final class FrameEvidence {
     static final long MAX_AGE_MILLIS = 1500;
+    final String recordingSessionId = com.elabrador.mobilenavigation.archive.NavigationArchive.activeSessionId();
+    final String inferenceId = java.util.UUID.randomUUID().toString();
     final double cameraSeconds;
     final long generation;
     final long captureElapsedMillis;

@@ -6,8 +6,10 @@ import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.text.InputType
 import android.util.Log
 import android.view.View
@@ -22,6 +24,9 @@ import androidx.core.widget.doOnTextChanged
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.elabrador.mobilenavigation.NavigationRecording
+import com.elabrador.mobilenavigation.archive.NavigationArchive
+import com.seaway.guideassistant.archive.NavigationRecordsActivity
 import com.elabrador.mobilenavigation.GuidanceLevel
 import com.elabrador.mobilenavigation.LocalPlanSnapshot
 import com.elabrador.mobilenavigation.OutdoorNavController
@@ -65,6 +70,69 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
     private var lastDispatchedPlanId = -1
     private var lastAnnouncedCompleted = false
     private var lastSpokenGuidance: String? = null
+    private var singleNavigationArchiveSession: String? = null
+    private var latestPhoneLocation: Location? = null
+    private var selectedArchiveDestination: PlaceSuggestion? = null
+    private var routeRequestPending = false
+
+    private fun finishSingleNavigationArchive(reason: String) {
+        val id = singleNavigationArchiveSession
+        if (id != null && id == NavigationArchive.activeSessionId() && !NavigationPlanManager.archiveTaskActive()) {
+            NavigationArchive.finish(reason)
+        }
+        singleNavigationArchiveSession = null
+        routeRequestPending = false
+        updateArchiveStatus()
+    }
+
+    private fun updateArchiveStatus() {
+        bind.btnNavigationRecords.text = if (NavigationArchive.activeSessionId() != null) {
+            "导航数据记录（正在记录）"
+        } else {
+            "导航数据记录"
+        }
+        bind.btnPlanRoute.text = if (routeRequestPending) "取消导航" else getString(R.string.nav_btn_start_outdoor)
+    }
+
+    /** Start before route planning so the request, validation failures and initialization are inside the session. */
+    private fun beginOutdoorNavigationRequest(source: String) {
+        if (NavigationPlanManager.state.value is NavigationPlanManager.PlanState.InProgress) {
+            NavigationPlanManager.beginRecordingIfNeeded()
+        } else if (NavigationArchive.activeSessionId() == null) {
+            singleNavigationArchiveSession = NavigationArchive.begin("outdoor_navigation", NavigationRecording.startMetadata())
+        } else if (!NavigationPlanManager.archiveTaskActive()) {
+            singleNavigationArchiveSession = NavigationArchive.activeSessionId()
+        }
+        routeRequestPending = true
+        NavigationArchive.event("navigation.requested", NavigationArchive.json(
+            "source", source, "mode", "outdoor", "start_input", bind.etStart.text.toString(),
+            "start_mode", "current_phone_location", "destination_input", bind.etEnd.text.toString(),
+            "start_location", archiveStartLocation(),
+            "selected_destination", selectedArchiveDestination?.let {
+                NavigationArchive.json("name", it.name, "address", it.address,
+                    "latitude", it.latitude, "longitude", it.longitude, "coordinate_system", "GCJ02",
+                    "source", "amap_place_suggestion")
+            }
+        ))
+        NavigationArchive.event("user.action", NavigationArchive.json("action", "start_navigation", "source", source))
+        updateArchiveStatus()
+    }
+
+    private fun archiveStartLocation(): org.json.JSONObject {
+        val location = latestPhoneLocation ?: return NavigationArchive.json(
+            "available", false, "reason", "no_phone_fix_at_start_request", "coordinate_system", "WGS84")
+        val age = if (location.elapsedRealtimeNanos > 0) {
+            (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L
+        } else null
+        return NavigationArchive.json(
+            "available", true, "source", "android_location", "coordinate_system", "WGS84",
+            "latitude", location.latitude, "longitude", location.longitude,
+            "accuracy_m", if (location.hasAccuracy()) location.accuracy else null,
+            "provider", location.provider, "fix_unix_ms", location.time,
+            "fix_elapsed_ns", location.elapsedRealtimeNanos, "age_at_request_ms", age,
+            "valid_coordinates", location.latitude.isFinite() && location.longitude.isFinite() &&
+                location.latitude in -90.0..90.0 && location.longitude in -180.0..180.0)
+    }
 
     /** true：已点击"开始导航"进入室外导航中（对应 groupOutdoorActive 可见），眼镜画面只在此时渲染。 */
     private val outdoorNavigationActive = MutableStateFlow(false)
@@ -103,18 +171,57 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         outdoorController = OutdoorNavController(requireContext(), Constant.AMAP_KEY, OutdoorListener())
+        bind.localPlanView.setObservationDrawnListener { cameraSeconds, captureMillis, generation, drawnMillis ->
+            outdoorController?.onLocalMapDrawn(cameraSeconds, captureMillis, generation, drawnMillis)
+        }
+        ensureOutdoorPermissions()
         val visionSettings = outdoorController?.visionHintSettings()
         bind.switchVisionHints.isChecked = visionSettings?.enabled ?: true
         bind.switchVisionHints.setOnCheckedChangeListener { _, enabled ->
             val current = outdoorController?.visionHintSettings() ?: return@setOnCheckedChangeListener
             outdoorController?.updateVisionHintSettings(current.copy(enabled = enabled))
         }
+        bind.btnNavigationRecords.setOnClickListener {
+            startActivity(Intent(requireContext(), NavigationRecordsActivity::class.java))
+        }
+        singleNavigationArchiveSession = NavigationArchive.activeSessionId()?.takeIf {
+            NavigationArchive.currentReason() == "outdoor_navigation" && !NavigationPlanManager.archiveTaskActive()
+        }
+        if (singleNavigationArchiveSession != null) showOutdoorActiveGroup()
+        updateArchiveStatus()
         bind.btnVisionSettings.setOnClickListener { showVisionHintSettingsDialog() }
-        bind.btnPlanRoute.setOnClickListener { outdoorController?.planRoute(bind.etEnd.text.toString()) }
-        bind.btnStartStop.setOnClickListener { outdoorController?.endNavigation() }
-        bind.btnCalibrateHeading.setOnClickListener { outdoorController?.calibrateHeading() }
+        bind.btnPlanRoute.setOnClickListener {
+            val controller = outdoorController ?: return@setOnClickListener
+            if (routeRequestPending) {
+                routeRequestPending = false
+                NavigationArchive.event("navigation.cancelled", NavigationArchive.json(
+                    "source", "cancel_while_planning", "mode", "outdoor"))
+                if (NavigationPlanManager.archiveTaskActive()) {
+                    NavigationPlanManager.cancel("navigation_cancelled_while_planning")
+                }
+                // endNavigation increments the controller's destination generation;
+                // an in-flight route response cannot restart navigation afterward.
+                controller.endNavigation()
+                updateArchiveStatus()
+                return@setOnClickListener
+            }
+            beginOutdoorNavigationRequest("start_navigation_button")
+            NavigationArchive.event("user.action", NavigationArchive.json("action", "plan_route", "destination", bind.etEnd.text.toString()))
+            controller.planRoute(bind.etEnd.text.toString())
+        }
+        bind.btnStartStop.setOnClickListener {
+            NavigationArchive.event("user.action", NavigationArchive.json("action", "end_outdoor_navigation"))
+            outdoorController?.endNavigation()
+        }
+        bind.btnCalibrateHeading.setOnClickListener {
+            NavigationArchive.event("user.action", NavigationArchive.json("action", "calibrate_heading"))
+            outdoorController?.calibrateHeading()
+        }
         bind.btnEndIndoor.setOnClickListener { finishIndoorPhase() }
-        bind.etEnd.doOnTextChanged { text, _, _, _ -> outdoorController?.searchDestination(text?.toString().orEmpty()) }
+        bind.etEnd.doOnTextChanged { text, _, _, _ ->
+            if (text?.toString() != selectedArchiveDestination?.name) selectedArchiveDestination = null
+            outdoorController?.searchDestination(text?.toString().orEmpty())
+        }
         bind.btnIndoorSend.setOnClickListener { sendIndoorManualInput() }
         voiceController = VoiceInputController(requireActivity(), get<OkHttpClient>(named("webSocket")), object : VoiceInputController.Callbacks {
             override fun onListeningStarted() = updateIndoorVoiceButton(recording = true)
@@ -131,6 +238,7 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
     override fun onResume() {
         super.onResume()
         outdoorController?.onResume()
+        updateArchiveStatus()
         if (wantGlassesRender && !glassesPlaying) {
             readyGlassesUrl()?.let(::startGlassesPlayback)
         }
@@ -143,6 +251,18 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
     }
 
     override fun onDestroyView() {
+        bind.localPlanView.setObservationDrawnListener(null)
+        // View recreation must not split one navigation into multiple archives.
+        // An explicit Activity finish is an actual exit; process death is recovered as interrupted.
+        if (activity?.isFinishing == true && activity?.isChangingConfigurations != true) {
+            NavigationArchive.event("navigation.exited", NavigationArchive.json("reason", "application_closed"))
+            if (NavigationPlanManager.state.value is NavigationPlanManager.PlanState.InProgress) {
+                NavigationPlanManager.cancel("application_closed")
+            }
+            else finishSingleNavigationArchive("application_closed")
+        } else if (NavigationArchive.activeSessionId() != null) {
+            NavigationArchive.event("navigation.view_recreated", NavigationArchive.json("recording_continues", true))
+        }
         outdoorController?.onDestroy()
         outdoorController = null
         voiceController?.release()
@@ -409,6 +529,7 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
             lastDispatchedPhaseIndex = -1
             lastDispatchedPlanId = -1
         }
+        updateArchiveStatus()
     }
 
     /** 拼出顶部状态区文案：AgentFragment 下发的完整指令 + 当前任务 + 下一步任务（若还有） */
@@ -438,14 +559,25 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
      * task_state/status 等中间态事件不展示也不播报，避免刷屏（参考 robonix-client-android 的
      * ChatViewModel.handlePilotEvent：只有最终结果和错误会进入可见的消息列表）。 */
     private fun dispatchIndoorInstruction(instruction: String) {
+        NavigationPlanManager.beginRecordingIfNeeded()
+        NavigationArchive.event("navigation.started", NavigationArchive.json(
+            "mode", "indoor", "instruction", instruction,
+            "start_input", bind.etStart.text.toString(), "start_mode", "current_phone_location",
+            "start_location", archiveStartLocation()))
+        updateArchiveStatus()
         RobotConversationLog.clear()
         dispatchInstructionToRobot(instruction)
     }
 
     private fun dispatchInstructionToRobot(instruction: String) {
+        val session = NavigationArchive.activeSessionId()
+        NavigationArchive.event("indoor.instruction", NavigationArchive.json("text", instruction))
         RobotConnectionManager.sendIndoorInstruction(
             text = instruction,
             onEvent = { event ->
+                NavigationArchive.eventFor(session, "indoor.robot_event", NavigationArchive.json(
+                    "kind", event.kind, "final_text", event.finalText
+                ))
                 // 只把 final_text 写入可见记录；plan/batch_result/node_state/task_state/status 等中间态
                 // 事件只用于 RobotConnectionManager 内部维护 turn 状态，不展示也不播报——参考
                 // robonix-client-android 的 ChatViewModel.handlePilotEvent：这些事件只会落进它自己的
@@ -454,7 +586,10 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
                     RobotConversationLog.append(instruction, event.finalText, event.kind)
                 }
             },
-            onError = { error -> RobotConversationLog.append(instruction, error, "error") },
+            onError = { error ->
+                NavigationArchive.eventFor(session, "indoor.robot_error", NavigationArchive.json("message", error))
+                RobotConversationLog.append(instruction, error, "error")
+            },
         )
     }
 
@@ -497,8 +632,10 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
 
     /** 仅在用户手动点击室内"结束导航"后调用：中止机器狗当前任务，推进到计划下一阶段 */
     private fun finishIndoorPhase() {
+        NavigationArchive.event("user.action", NavigationArchive.json("action", "end_indoor_phase"))
         RobotConnectionManager.cancelIndoorInstruction()
         NavigationPlanManager.advanceToNextPhase()
+        updateArchiveStatus()
     }
 
     /** 进入室外阶段：清空上一次残留的路线/导航状态，展示路线选择分组，用 LLM 解析出的目的地预填
@@ -563,6 +700,8 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
                 )
                 setOnClickListener {
                     bind.etEnd.setText(suggestion.name)
+                    selectedArchiveDestination = suggestion
+                    beginOutdoorNavigationRequest("destination_suggestion")
                     outdoorController?.selectSuggestion(suggestion)
                 }
             }
@@ -626,6 +765,7 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         outdoorNavigationActive.value = false
         showOutdoorSelectGroup()
         NavigationPlanManager.advanceToNextPhase()
+        updateArchiveStatus()
     }
 
     private inner class OutdoorListener : OutdoorNavController.Listener {
@@ -668,6 +808,7 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
 
         override fun onLocalPlan(plan: LocalPlanSnapshot) {
             bind.tvLocalPlan.text = when {
+                plan.waitingReason != null -> plan.waitingReason
                 plan.blocked -> "局部规划：前方受阻"
                 plan.planned && plan.success -> "局部规划：转向 %+.0f°".format(plan.steeringDegrees)
                 plan.planned -> "局部规划：规划失败"
@@ -686,6 +827,7 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         }
 
         override fun onLocation(location: Location, text: String) {
+            latestPhoneLocation = Location(location)
             bind.tvLocation.text = text
         }
 
@@ -699,6 +841,20 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
 
         override fun onRouteStatus(text: String) {
             bind.tvStatus.text = text
+            if (routeRequestPending || outdoorNavigationActive.value) {
+                NavigationArchive.event("navigation.route_status", NavigationArchive.json("text", text))
+            }
+        }
+
+        override fun onNavigationStartFailed(reason: String) {
+            routeRequestPending = false
+            NavigationArchive.event("navigation.start_failed", NavigationArchive.json(
+                "reason", reason, "destination_input", bind.etEnd.text.toString(),
+                "start_input", bind.etStart.text.toString(), "start_location", archiveStartLocation()))
+            if (!NavigationPlanManager.archiveTaskActive()) finishSingleNavigationArchive("navigation_start_failed")
+            outdoorNavigationActive.value = false
+            showOutdoorSelectGroup()
+            updateArchiveStatus()
         }
 
         override fun onNavigationStatus(text: String, visible: Boolean) {
@@ -721,17 +877,28 @@ class NavigateFragment : BaseBindFragment<FragmentNavigateBinding>() {
         }
 
         override fun onNavigationStarted() {
+            // Normal path already began on the user's start action, before planning.
+            if (NavigationArchive.activeSessionId() == null) beginOutdoorNavigationRequest("navigation_started_callback")
+            routeRequestPending = false
+            NavigationArchive.expectArtifact("navigation_video")
+            NavigationArchive.event("navigation.started", NavigationArchive.json(
+                "mode", "outdoor", "destination", bind.etEnd.text.toString()
+            ))
+            updateArchiveStatus()
             outdoorNavigationActive.value = true
             lastSpokenGuidance = null
             showOutdoorActiveGroup()
         }
 
         override fun onNavigationEnded() {
+            NavigationArchive.event("navigation.ended", NavigationArchive.json("mode", "outdoor"))
+            finishSingleNavigationArchive("navigation_ended")
             finishOutdoorPhase()
         }
 
         /** 到达目的地仅提示，不自动推进阶段：需用户手动点击"结束导航"才跳转到下一步 */
         override fun onArrived() {
+            NavigationArchive.event("navigation.arrived", NavigationArchive.json("mode", "outdoor"))
             bind.tvNavStatus.text = getString(R.string.nav_arrived_toast)
             bind.tvNavStatus.visibility = View.VISIBLE
             TtsUtils.speak(getString(R.string.nav_arrived_toast))

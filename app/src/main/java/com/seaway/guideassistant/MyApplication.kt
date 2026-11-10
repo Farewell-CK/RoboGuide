@@ -12,6 +12,8 @@ import com.seaway.guideassistant.ble.GlassesManager
 import com.seaway.guideassistant.module.httpModule
 import com.seaway.guideassistant.module.robotModule
 import com.seaway.guideassistant.ws.DeviceWatchClient
+import com.elabrador.mobilenavigation.NavigationRecording
+import com.elabrador.mobilenavigation.archive.NavigationArchive
 import com.tencent.mmkv.MMKV
 import io.reactivex.android.schedulers.AndroidSchedulers
 import org.koin.core.context.startKoin
@@ -29,6 +31,8 @@ class MyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        NavigationArchive.initialize(this)
+        NavigationArchive.registerBeforeFinish { NavigationRecording.finishSensors() }
         //日志打印
         Logger.addLogAdapter(AndroidLogAdapter())
         //模块注入
@@ -42,6 +46,15 @@ class MyApplication : Application() {
         //小工具初始化
         SmallUtils.init(this)
         //初始化系统TTS播报引擎
+        val speechSessions = java.util.concurrent.ConcurrentHashMap<String, String>()
+        TtsUtils.observer = { stage, utteranceId, text, detail ->
+            if (stage == "requested") NavigationArchive.activeSessionId()?.let { speechSessions[utteranceId] = it }
+            speechSessions[utteranceId]?.let { session ->
+                NavigationArchive.eventFor(session, "speech.$stage", NavigationArchive.json(
+                    "utterance_id", utteranceId, "text", text, "detail", detail))
+            }
+            if (stage in listOf("completed", "failed", "interrupted")) speechSessions.remove(utteranceId)
+        }
         TtsUtils.init(this)
         //初始化眼镜SDK
         GlassesManager.init(this)

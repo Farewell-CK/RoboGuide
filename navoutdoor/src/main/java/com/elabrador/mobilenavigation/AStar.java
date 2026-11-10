@@ -4,6 +4,10 @@ import java.util.*;
 
 /** Direct port of nvi_planning/src/local_planning/Astar.py. */
 final class AStar {
+    static final class Timing { long nanos; int searches; }
+    private static final ThreadLocal<Timing> TIMING = ThreadLocal.withInitial(Timing::new);
+    static void resetTiming() { TIMING.set(new Timing()); }
+    static Timing timing() { return TIMING.get(); }
     private static final double STRAIGHTNESS_TIE_BREAK = 0.01;
     enum Heuristic { MANHATTAN, EUCLIDEAN }
     private final int[] start, goal; private final int[][] map; private final Set<Long> obstacles;
@@ -13,6 +17,11 @@ final class AStar {
     AStar(int[] start,int[] goal,int[][] map,Set<Long> obstacles,Heuristic heuristic,double alpha){this(start,goal,map,obstacles,heuristic,alpha,0.0);}
     AStar(int[] start,int[] goal,int[][] map,Set<Long> obstacles,Heuristic heuristic,double alpha,double turnPenalty){this.start=start;this.goal=goal;this.map=map;this.obstacles=obstacles;this.heuristic=heuristic;this.alpha=alpha;this.turnPenalty=Math.max(0.0,turnPenalty);rows=map.length;cols=map[0].length;}
     List<int[]> searching(){
+        long started=System.nanoTime();
+        try { return search(); }
+        finally { Timing timing=TIMING.get(); timing.nanos+=System.nanoTime()-started; timing.searches++; }
+    }
+    private List<int[]> search(){
         if(start[0]<0||start[0]>=rows||start[1]<0||start[1]>=cols
                 ||goal[0]<0||goal[0]>=rows||goal[1]<0||goal[1]>=cols
                 ||obstacles.contains(key(start[0],start[1]))||obstacles.contains(key(goal[0],goal[1])))

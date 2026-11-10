@@ -15,6 +15,14 @@
             android:layout_height="wrap_content"
             android:padding="@dimen/dp_20">
 
+            <Button
+                android:id="@+id/btn_navigation_records"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="导航数据记录"
+                android:contentDescription="查看本地导航记录、导出和上传" />
+
             <TextView
                 android:id="@+id/tv_phase_status"
                 android:layout_width="match_parent"

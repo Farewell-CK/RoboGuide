@@ -14,9 +14,12 @@ final class GuidanceStabilizer {
     private FrameEvidence lastSafeEvidence;
 
     String updateValidated(String next, boolean active, long now, FrameEvidence evidence) {
-        if(active && evidence!=null && !evidence.fresh(now))next="停止";
+        return updateValidated(next,active,now,evidence,FrameEvidence.MAX_AGE_MILLIS);
+    }
+    String updateValidated(String next, boolean active, long now, FrameEvidence evidence,long maxAgeMillis) {
+        if(active && evidence!=null && (evidence.ageMillis(now)<0 || evidence.ageMillis(now)>=maxAgeMillis))next="停止";
         if(active && evidence==null && !"停止".equals(next))next="";
-        return updateInternal(next,active,now,evidence,true);
+        return updateInternal(next,active,now,evidence,true,maxAgeMillis);
     }
 
     String updateWithEvidence(String next,boolean active,long now,FrameEvidence evidence){
@@ -25,10 +28,10 @@ final class GuidanceStabilizer {
 
     /** Clock-only entry for callers that already validate each observation. */
     String update(String next,boolean active,long now){
-        return updateInternal(next,active,now,null,false);
+        return updateInternal(next,active,now,null,false,WAITING_SAFETY_TIMEOUT_MILLIS);
     }
 
-    private String updateInternal(String next,boolean active,long now,FrameEvidence evidence,boolean validate){
+    private String updateInternal(String next,boolean active,long now,FrameEvidence evidence,boolean validate,long observationGapMillis){
         if(!active){reset();return displayed;}
         if("停止".equals(next)){
             clearRecovery();waitingSince=-1;
@@ -45,7 +48,7 @@ final class GuidanceStabilizer {
         }
         waitingSince=-1;
         if("停止".equals(displayed)){
-            if(lastSafeAt>=0 && (now<lastSafeAt || now-lastSafeAt>=WAITING_SAFETY_TIMEOUT_MILLIS))clearRecovery();
+            if(lastSafeAt>=0 && (now<lastSafeAt || now-lastSafeAt>=observationGapMillis))clearRecovery();
             if(validate && lastSafeEvidence!=null && evidence.generation!=lastSafeEvidence.generation)clearRecovery();
             if(validate && lastSafeEvidence!=null && evidence.cameraSeconds<lastSafeEvidence.cameraSeconds){
                 clearRecovery();return displayed;

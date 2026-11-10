@@ -11,6 +11,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import org.json.*;
 import okhttp3.*;
+import com.elabrador.mobilenavigation.archive.NavigationArchive;
 
 /** Independent RGB -> cloud -> text pipeline. No access to navigation state. */
 final class QwenVisionHints implements AutoCloseable {
@@ -35,6 +36,10 @@ final class QwenVisionHints implements AutoCloseable {
     private volatile Call activeCall;
     private String lastPrimary="",lastDiagnostic="";
     private VisionHintSnapshot lastSnapshot;
+    // Only JPEGs actually sent to the cloud are archived. Keep a small dedup window.
+    private final LinkedHashSet<Long> archivedCaptures=new LinkedHashSet<>();
+    private String archivedSession;
+    private volatile String activeArchiveSession,activeRequestId;
     QwenVisionHints(Context context,Listener listener){
         this.listener=listener;
         worker.scheduleWithFixedDelay(()->{try{tick();}catch(Exception ignored){fail("视觉提示处理失败，等待重试");}},0,200,TimeUnit.MILLISECONDS);
@@ -59,6 +64,7 @@ final class QwenVisionHints implements AutoCloseable {
     void setForeground(boolean foreground){this.foreground=foreground;reset(foreground?"等待彩色画面":"后台暂停上传",false);}
     private void reset(String message,boolean clearPrimary){
         long g=generation.incrementAndGet();latest.set(null);lastInput=-1;
+        cancelActiveArchive(message);
         Call call=activeCall;if(call!=null)call.cancel();activeCall=null;
         execute(()->{if(g!=generation.get())return;frames.clear();lastSent=-1;nextRequest=0;
             lastPrimary="";lastDiagnostic="";
@@ -90,11 +96,11 @@ final class QwenVisionHints implements AutoCloseable {
             Bitmap bitmap=Bitmap.createBitmap(pixels,(raw.width+step-1)/step,(raw.height+step-1)/step,Bitmap.Config.ARGB_8888);
             ByteArrayOutputStream out=new ByteArrayOutputStream();
             try{bitmap.compress(Bitmap.CompressFormat.JPEG,70,out);}finally{bitmap.recycle();}
-            frames.addLast(new Frame(out.toByteArray(),raw.capture));while(frames.size()>4)frames.removeFirst();
+            frames.addLast(new Frame(out.toByteArray(),raw.capture,bitmapWidth(raw.width,step),bitmapWidth(raw.height,step)));while(frames.size()>4)frames.removeFirst();
         }
         while(!frames.isEmpty()&&now-frames.getFirst().capture>2500)frames.removeFirst();
         if(lastInput<0||now-lastInput>2000){
-            Call call=activeCall;if(call!=null){generation.incrementAndGet();call.cancel();activeCall=null;}
+            Call call=activeCall;if(call!=null){cancelActiveArchive("input_stale");generation.incrementAndGet();call.cancel();activeCall=null;}
             frames.clear();state.status("等待新鲜彩色画面");publish();return;
         }
         if(activeCall==null&&now>=nextRequest&&frames.size()>=4&&frames.getLast().capture>lastSent){
@@ -104,6 +110,9 @@ final class QwenVisionHints implements AutoCloseable {
     }
     private void send(List<Frame> input,long now)throws Exception {
         final long g=generation.get(),capture=input.get(input.size()-1).capture;
+        final String session=NavigationArchive.activeSessionId(),requestId=UUID.randomUUID().toString();
+        NavigationArchive.trackProcessing(session,requestId,"cloud_visual_request");
+        archiveRequest(session,requestId,input,capture,now);
         JSONArray content=new JSONArray();
         content.put(new JSONObject().put("type","text").put("text",VisionHintProtocol.PROMPT));
         for(Frame frame:input){
@@ -116,8 +125,13 @@ final class QwenVisionHints implements AutoCloseable {
         Request httpRequest=new Request.Builder().url(normalizeEndpoint(endpoint)).header("Authorization","Bearer "+key)
                 .post(RequestBody.create(request.toString(),MediaType.get("application/json; charset=utf-8"))).build();
         Call call=http.newCall(httpRequest);activeCall=call;nextRequest=now+REQUEST_MS;lastSent=capture;
+        activeArchiveSession=session;activeRequestId=requestId;
         call.enqueue(new Callback(){
-            public void onFailure(Call c,IOException error){execute(()->{
+            public void onFailure(Call c,IOException error){
+                archiveEvent(session,"cloud.visual.failure",NavigationArchive.json("request_id",requestId,
+                        "duration_ms",SystemClock.elapsedRealtime()-now,"error_type",error.getClass().getSimpleName(),
+                        "cancelled",c.isCanceled()));
+                execute(()->{
                 if(g!=generation.get()||closed)return;activeCall=null;
                 fail(error instanceof java.io.InterruptedIOException?"服务响应超时，稍后重试":"网络不可用，视觉提示暂停");
                 nextRequest=SystemClock.elapsedRealtime()+3000;
@@ -127,6 +141,7 @@ final class QwenVisionHints implements AutoCloseable {
                     if(!owned.isSuccessful()){
                         int status=owned.code();
                         String errorBody=owned.body()==null?"":readBounded(owned.body().byteStream());
+                        archiveResponse(session,requestId,status,errorBody,now);
                         boolean modelNotFound=status==404
                                 && (errorBody.contains("model_not_found")
                                 || errorBody.contains("Model not exist"));
@@ -141,13 +156,70 @@ final class QwenVisionHints implements AutoCloseable {
                     }
                     if(owned.body()==null)throw new IOException("empty body");
                     String body=readBounded(owned.body().byteStream());
+                    archiveResponse(session,requestId,owned.code(),body,now);
                     VisionHintProtocol.Result result=VisionHintProtocol.parse(body);
+                    execute(()->{
+                        if(g!=generation.get()||closed){
+                            archiveEvent(session,"cloud.visual.result",NavigationArchive.json("request_id",requestId,
+                                    "accepted",false,"reason","generation_changed_or_closed"));return;
+                        }
+                        activeCall=null;
+                        long completed=SystemClock.elapsedRealtime();
+                        boolean accepted=state.accept(result,capture,completed,completed-now);
+                        archiveEvent(session,"cloud.visual.result",NavigationArchive.json("request_id",requestId,
+                                "scene_usable",result.usable,"objects",new JSONObject(result.objects),"accepted",accepted,
+                                "capture_elapsed_ms",capture,"completed_elapsed_ms",completed,
+                                "capture_age_ms",completed-capture,"reason",accepted?"accepted":!result.usable?"scene_unusable":"stale_or_out_of_order"));
+                        publish();});
+                }catch(Exception error){
+                    archiveEvent(session,"cloud.visual.failure",NavigationArchive.json("request_id",requestId,
+                            "duration_ms",SystemClock.elapsedRealtime()-now,"error_type",error.getClass().getSimpleName(),
+                            "reason","response_parse_or_read_error"));
                     execute(()->{if(g!=generation.get()||closed)return;activeCall=null;
-                        long completed=SystemClock.elapsedRealtime();state.accept(result,capture,completed,completed-now);publish();});
-                }catch(Exception error){execute(()->{if(g!=generation.get()||closed)return;activeCall=null;
                     fail("返回内容无法可靠解析，等待重试");nextRequest=SystemClock.elapsedRealtime()+3000;});}
             }
         });
+    }
+    private static int bitmapWidth(int value,int step){return (value+step-1)/step;}
+    private void archiveRequest(String session,String requestId,List<Frame> input,long capture,long now){
+        if(session==null)return;
+        try {
+            if(!session.equals(archivedSession)){archivedSession=session;archivedCaptures.clear();}
+            JSONArray images=new JSONArray();
+            for(Frame frame:input){
+                String imageId="qwen-jpeg-"+frame.capture;
+                images.put(NavigationArchive.json("image_id",imageId,"capture_elapsed_ms",frame.capture,
+                        "relative_ms",frame.capture-capture));
+                if(!archivedCaptures.contains(frame.capture)&&NavigationArchive.blobFor(session,"cloud.visual.image","jpg",frame.jpeg,
+                        NavigationArchive.json("image_id",imageId,"capture_elapsed_ms",frame.capture,
+                                "width",frame.width,"height",frame.height,"jpeg_quality",70,"request_id",requestId))){
+                    archivedCaptures.add(frame.capture);
+                    while(archivedCaptures.size()>64)archivedCaptures.remove(archivedCaptures.iterator().next());
+                }
+            }
+            archiveEvent(session,"cloud.visual.request",NavigationArchive.json("request_id",requestId,"model",model,
+                    "endpoint",normalizeEndpoint(endpoint),"prompt",VisionHintProtocol.PROMPT,"temperature",0,
+                    "max_tokens",500,"stream",false,"images",images,"sent_elapsed_ms",now));
+        }catch(Exception ignored){/* Recording must not change the cloud/navigation path. */}
+    }
+    private void archiveResponse(String session,String requestId,int status,String body,long started){
+        try {
+            String safe=key==null||key.isEmpty()?body:body.replace(key,"[REDACTED]");
+            JSONObject envelope;try{envelope=new JSONObject(safe);}catch(Exception ignored){envelope=null;}
+            archiveEvent(session,"cloud.visual.response",NavigationArchive.json("request_id",requestId,
+                    "http_status",status,"duration_ms",SystemClock.elapsedRealtime()-started,"raw_response",safe,
+                    "usage",envelope==null?JSONObject.NULL:envelope.opt("usage"),
+                    "provider_request_id",envelope==null?JSONObject.NULL:envelope.opt("id")));
+        }catch(Exception ignored){}
+    }
+    private void cancelActiveArchive(String reason){
+        if(activeCall!=null)archiveEvent(activeArchiveSession,"cloud.visual.cancelled",
+                NavigationArchive.json("request_id",activeRequestId,"reason",reason));
+        activeArchiveSession=null;activeRequestId=null;
+    }
+    private static void archiveEvent(String session,String type,JSONObject payload){
+        if(session!=null)NavigationArchive.eventFor(session,type,payload);
+        if(type.endsWith(".result")||type.endsWith(".failure")||type.endsWith(".cancelled"))NavigationArchive.completeProcessing(session,payload.optString("request_id"));
     }
     private static String readBounded(InputStream stream)throws IOException {
         ByteArrayOutputStream output=new ByteArrayOutputStream();byte[] buffer=new byte[4096];int n;
@@ -167,9 +239,10 @@ final class QwenVisionHints implements AutoCloseable {
         ui.post(()->{if(!closed&&g==generation.get())listener.show(displayPrimary,displayDiagnostic,snapshot);});
     }
     private void execute(Runnable task){try{worker.execute(task);}catch(RejectedExecutionException ignored){}}
-    @Override public void close(){closed=true;generation.incrementAndGet();Call call=activeCall;if(call!=null)call.cancel();
+    @Override public void close(){cancelActiveArchive("closed");closed=true;generation.incrementAndGet();Call call=activeCall;if(call!=null)call.cancel();
         latest.set(null);worker.shutdownNow();http.dispatcher().executorService().shutdown();http.connectionPool().evictAll();ui.removeCallbacksAndMessages(null);}
     private static final class Raw {final byte[] rgb;final int width,height,stride;final long capture,generation;
         Raw(byte[] rgb,int width,int height,int stride,long capture,long generation){this.rgb=rgb;this.width=width;this.height=height;this.stride=stride;this.capture=capture;this.generation=generation;}}
-    private static final class Frame {final byte[] jpeg;final long capture;Frame(byte[] jpeg,long capture){this.jpeg=jpeg;this.capture=capture;}}
+    private static final class Frame {final byte[] jpeg;final long capture;final int width,height;
+        Frame(byte[] jpeg,long capture,int width,int height){this.jpeg=jpeg;this.capture=capture;this.width=width;this.height=height;}}
 }

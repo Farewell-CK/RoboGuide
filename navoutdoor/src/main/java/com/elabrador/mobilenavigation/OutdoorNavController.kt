@@ -41,6 +41,8 @@ import com.intel.realsense.librealsense.StreamType
 import com.intel.realsense.librealsense.TimestampDomain
 import com.intel.realsense.librealsense.VideoFrame
 import com.intel.realsense.librealsense.VideoStreamProfile
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.charset.StandardCharsets
@@ -133,6 +135,8 @@ class OutdoorNavController(
         fun onFrameStatus(text: String)
         fun onCalibrationStatus(text: String, calibrated: Boolean, recalibrationRequired: Boolean)
         fun onNavigationStarted()
+        /** Stable failure callback for archive ownership; does not change routing behavior. */
+        fun onNavigationStartFailed(reason: String) {}
         fun onNavigationEnded()
         fun onArrived()
         /** Justified addition (not in the directive's literal list): the depth preview bitmap MainActivity rendered into `depthPreview`. */
@@ -161,6 +165,7 @@ class OutdoorNavController(
         private const val COLOR_WIDTH = VIDEO_WIDTH
         private const val COLOR_HEIGHT = VIDEO_HEIGHT
         private val COLOR_FRAME_INTERVAL = BuildConfig.SEMANTIC_FRAME_INTERVAL
+        private val SOURCE_SWINL = BuildConfig.SEMANTIC_MODEL_KIND == "SWINL_NPU"
         private const val COLOR_AUTO_EXPOSURE_LIMIT_US = 16_000f
         private const val COLOR_METADATA_LOG_INTERVAL = 30
         // One second of source frames prevents UI/GC pauses from becoming VINS image
@@ -213,6 +218,7 @@ class OutdoorNavController(
     private var previewDepthBuffer: ByteArray? = null
     private var previewAlternateDepthBuffer: ByteArray? = null
     private var previewPixelBuffer: IntArray? = null
+    private var lastRecordedCalibration = ""
     private var previewBitmap: Bitmap? = null
     @Volatile private var previewValidPercent = Float.NaN
     @Volatile private var previewUsesNativeDepth = false
@@ -226,7 +232,7 @@ class OutdoorNavController(
     private var amapRouteClient: AmapRouteClient? = AmapRouteClient()
     private var semanticSegmenter: SemanticSegmenter? = null
 
-    private val localPlanner = LocalPlanner()
+    private val localPlanner = LocalPlanner(SOURCE_SWINL)
     private val vinsInput = VinsInputBuffer()
     private val vinsTimestampMapper = RealSenseTimestampMapper()
     private val calibrationVinsPoseHistory = VinsPoseHistory()
@@ -323,6 +329,7 @@ class OutdoorNavController(
         override fun run() {
             if (released) return
             tryAutoAlignedCalibration()
+            if (navigationActive) renderLocalPlanMetrics()
             renderDirectionGuidance()
             val now = SystemClock.elapsedRealtime()
             // 不再因地图观测过期而清空/替换已显示的局部地图——保留最后一次成功渲染的旧地图，
@@ -338,6 +345,21 @@ class OutdoorNavController(
     }
 
     init {
+        NavigationRecording.initialize(context.applicationContext)
+        RuntimeRecordingConfiguration.observe("navigation", NavigationRecording.j(
+            "available", true, "source", "OutdoorNavController runtime constants",
+            "depth_valid_min_m", VALID_MIN_METERS, "depth_valid_max_m", VALID_MAX_METERS,
+            "obstacle_warning_m", OBSTACLE_METERS, "stop_distance_m", STOP_METERS,
+            "depth_sample_step_pixels", SAMPLE_STEP_PIXELS,
+            "camera_requested_width", VIDEO_WIDTH, "camera_requested_height", VIDEO_HEIGHT,
+            "camera_requested_fps", VIDEO_FPS, "gyro_requested_hz", 200, "accel_requested_hz", 100,
+            "navigation_frame_interval", NAVIGATION_FRAME_INTERVAL,
+            "preview_frame_interval", PREVIEW_FRAME_INTERVAL,
+            "semantic_frame_interval", COLOR_FRAME_INTERVAL,
+            "video_input_queue_capacity", VIDEO_FRAME_QUEUE_CAPACITY,
+            "color_auto_exposure_limit_us", COLOR_AUTO_EXPOSURE_LIMIT_US,
+            "automatic_reroute_min_interval_ms", AUTOMATIC_REROUTE_MIN_INTERVAL_MS,
+            "route_provider", "AMap walking", "route_coordinate_system", "GCJ02"))
         NavigationAudit.start(context.applicationContext)
         val settings = visionHintSettings()
         visionHints.configure(settings.key, settings.endpoint, settings.model, settings.enabled)
@@ -351,6 +373,16 @@ class OutdoorNavController(
         }
 
         semanticSegmenter = SemanticSegmenter(context.applicationContext, object : SemanticSegmenter.Listener {
+            override fun onInference(timing: InferenceTiming) {
+                NavigationRecording.safe {
+                    if (NavigationRecording.accepts(timing.evidence)) {
+                        com.elabrador.mobilenavigation.archive.NavigationArchive.eventFor(timing.evidence.recordingSessionId, "inference_timing", NavigationRecording.j(
+                            "evidence", NavigationRecording.evidence(timing.evidence), "prep_ns", timing.prepNanos,
+                            "model_ns", timing.modelNanos, "decode_ns", timing.decodeNanos, "map_ns", timing.mapNanos))
+                    }
+                }
+                runOnUiThread { renderLocalPlanMetrics() }
+            }
             override fun onStatus(status: String) {
                 runOnUiThread { listener.onSemanticOverlay(status, GuidanceLevel.MUTED) }
             }
@@ -379,6 +411,7 @@ class OutdoorNavController(
 
         phonePoseTracker = PhonePoseTracker(context, object : PhonePoseTracker.Listener {
             override fun onDeclinationLocation(location: Location) {
+                NavigationRecording.safe { NavigationRecording.location(location, "declination") }
                 updatePlaceSearchLocation(location)
                 val accepted = declinationPosition.accept(
                     location.latitude,
@@ -396,6 +429,7 @@ class OutdoorNavController(
             }
 
             override fun onHeading(headingDegrees: Float) {
+                NavigationRecording.safe { NavigationRecording.heading(headingDegrees) }
                 currentHeading = headingDegrees
                 latestHeadingNanos = SystemClock.elapsedRealtimeNanos()
                 listener.onHeading(
@@ -412,6 +446,7 @@ class OutdoorNavController(
                 NavigationAudit.log(
                     "LOCATION_ALIGNED source=${location.provider}" +
                         " accuracy=${location.accuracy} fix_ns=${location.elapsedRealtimeNanos}")
+                NavigationRecording.safe { NavigationRecording.location(location, "navigation") }
                 lastLocation = Location(location)
                 pendingLocationSearchKeyword?.let { keyword ->
                     pendingLocationSearchKeyword = null
@@ -517,6 +552,7 @@ class OutdoorNavController(
             PackageManager.PERMISSION_GRANTED
 
     fun onCameraPermissionGranted() {
+        com.intel.realsense.librealsense.UsbUtilities.grantUsbPermissionIfNeeded(context)
         startStreaming()
     }
 
@@ -536,7 +572,11 @@ class OutdoorNavController(
 
     @Synchronized
     fun onResume() {
+        com.elabrador.mobilenavigation.archive.NavigationArchive.event("app_foreground",NavigationRecording.j())
         activityResumed = true
+        if (hasCameraPermission()) {
+            com.intel.realsense.librealsense.UsbUtilities.grantUsbPermissionIfNeeded(context)
+        }
         visionHints.setForeground(true)
         rsContext?.let { rs ->
             try {
@@ -558,6 +598,7 @@ class OutdoorNavController(
     }
 
     fun onPause() {
+        com.elabrador.mobilenavigation.archive.NavigationArchive.event("app_background",NavigationRecording.j("navigation_keeps_running",navigationActive))
         visionHints.setForeground(false)
         colorPreviewGeneration++
         listener.onColorPreview(null)
@@ -696,15 +737,18 @@ class OutdoorNavController(
         val destination = destinationTextIfNoSuggestionSelected.trim()
         if (key.isEmpty()) {
             listener.onRouteStatus("请输入高德 Web 服务 Key")
+            listener.onNavigationStartFailed("route_key_unavailable")
             return
         }
         if (destination.isEmpty()) {
             listener.onRouteStatus("请输入目的地名称或完整地址")
+            listener.onNavigationStartFailed("destination_empty")
             return
         }
         val location = lastLocation
         if (location == null) {
             listener.onRouteStatus("尚未获得手机定位，请到室外等待定位")
+            listener.onNavigationStartFailed("start_location_unavailable")
             return
         }
 
@@ -733,10 +777,16 @@ class OutdoorNavController(
                 runOnUiThread {
                     if (requestGeneration != destinationGeneration || released) return@runOnUiThread
                     listener.onRouteStatus("$message；可重新选择地点重试")
+                    listener.onNavigationStartFailed("route_request_failed: $message")
                 }
             }
         }
         val suggestion = selectedDestination
+        if (amapRouteClient == null) {
+            listener.onRouteStatus("路线服务尚未就绪")
+            listener.onNavigationStartFailed("route_client_unavailable")
+            return
+        }
         if (suggestion != null) {
             amapRouteClient?.planWalkingRoute(key, location, suggestion, callback)
         } else {
@@ -751,10 +801,12 @@ class OutdoorNavController(
         }
         if (currentRoute == null || !routeFollower.hasRoute()) {
             listener.onNavigationStatus("请先规划一条步行路线", true)
+            listener.onNavigationStartFailed("route_unavailable")
             return
         }
         if (lastLocation == null) {
             listener.onNavigationStatus("等待手机定位后才能开始导航", true)
+            listener.onNavigationStartFailed("start_location_unavailable")
             return
         }
         navigationActive = true
@@ -767,6 +819,15 @@ class OutdoorNavController(
         listener.onGuidanceChanged("", GuidanceLevel.MUTED)
         requestLocalPlanRefresh()
         listener.onNavigationStarted()
+        NavigationRecording.safe {
+            NavigationRecording.route(currentRoute)
+            lastLocation?.let { NavigationRecording.location(Location(it), "navigation_start") }
+            com.elabrador.mobilenavigation.archive.NavigationArchive.event("outdoor_navigation_started", NavigationRecording.j(
+                "location", lastLocation?.let { NavigationRecording.j("latitude", it.latitude, "longitude", it.longitude,
+                    "coordinate_system", "WGS84", "accuracy_m", if (it.hasAccuracy()) it.accuracy else null,
+                    "fix_unix_ms", it.time, "fix_elapsed_ns", it.elapsedRealtimeNanos) },
+                "calibration", dynamicHeadingCalibrator.status(), "calibration_quality", dynamicHeadingCalibrator.qualityDetails()))
+        }
         updateNavigationGuidance()
     }
 
@@ -859,6 +920,7 @@ class OutdoorNavController(
             true)
 
         if (guidance.arrived) {
+            NavigationRecording.safe { com.elabrador.mobilenavigation.archive.NavigationArchive.event("destination_arrived", NavigationRecording.j("remaining_m",guidance.remainingMeters,"accuracy_m",location.accuracy)) }
             Log.i(
                 TAG,
                 "Arrived at destination: remainingMeters=${guidance.remainingMeters}," +
@@ -902,6 +964,7 @@ class OutdoorNavController(
     fun calibrateHeading() {
         manualRecalibrationRequired = false
         dynamicHeadingCalibrator.startAutoAligned()
+        NavigationRecording.safe { com.elabrador.mobilenavigation.archive.NavigationArchive.event("heading_calibration_requested", NavigationRecording.j()) }
         tryAutoAlignedCalibration()
         renderDynamicHeadingCalibration()
         resetLocalPlanning()
@@ -939,6 +1002,10 @@ class OutdoorNavController(
         }
         if (manualRecalibrationRequired) {
             text += "\nVINS 已重置：请让手机顶部与 D455F 镜头同向，然后点击重新标定"
+        }
+        if (text != lastRecordedCalibration) {
+            lastRecordedCalibration = text
+            NavigationRecording.safe { com.elabrador.mobilenavigation.archive.NavigationArchive.event("heading_calibration", NavigationRecording.j("ready",ready,"recalibration_required",manualRecalibrationRequired,"details",text)) }
         }
         listener.onCalibrationStatus(text, ready, manualRecalibrationRequired)
     }
@@ -987,6 +1054,7 @@ class OutdoorNavController(
                         ) return@runOnUiThread
                         currentRoute = result
                         routeFollower.setRoute(result)
+                        NavigationRecording.safe { NavigationRecording.route(result) }
                         resetLocalPlanning()
                         requestLocalPlanRefresh()
                         NavigationAudit.log(
@@ -1043,6 +1111,8 @@ class OutdoorNavController(
     }
 
     private fun streamDepth() {
+        RuntimeRecordingConfiguration.observe("camera_state", NavigationRecording.j("available", false,
+            "state", "starting", "reason", "stream_initialization_in_progress"))
         val pipeline = Pipeline()
         val videoFrames = ArrayBlockingQueue<FrameSet>(VIDEO_FRAME_QUEUE_CAPACITY)
         val droppedVideoFrames = AtomicLong()
@@ -1132,6 +1202,7 @@ class OutdoorNavController(
                                             }
                                             imageTime = vinsTimestampMapper.toSystemTimeMilliseconds(
                                                 color.timestamp, color.timestampDomain, System.currentTimeMillis().toDouble())
+                                            NavigationRecording.safe { NavigationVideoRecorder.offer(frameRgb,colorWidth,colorHeight,colorStride,imageTime,color.number.toLong()) }
                                             val imageAge = (System.currentTimeMillis() - imageTime).toLong()
                                             if (imageAge >= -100L && imageAge < 1000L) {
                                                 visionHints.offer(
@@ -1147,7 +1218,7 @@ class OutdoorNavController(
                                         // time-aligned RGB/depth frame instead of being capped at 10 Hz.
                                         val navigationFrame = frameCount % NAVIGATION_FRAME_INTERVAL == 0L
                                         val segmenter = semanticSegmenter
-                                        val semanticFrame = rgb != null && intrinsic != null &&
+                                        val semanticFrame = (!SOURCE_SWINL || navigationFrame) && rgb != null && intrinsic != null &&
                                             imageTime.isFinite() && vinsInitialized &&
                                             frameCount % COLOR_FRAME_INTERVAL == 0L &&
                                             segmenter != null && segmenter.canAcceptFrame()
@@ -1203,6 +1274,8 @@ class OutdoorNavController(
                 config.close()
             }
         } catch (error: Exception) {
+            RuntimeRecordingConfiguration.observe("camera_state", NavigationRecording.j("available", false,
+                "state", "failed", "reason", error.javaClass.simpleName))
             Log.e(TAG, "RealSense streaming stopped", error)
             if (streaming.get()) {
                 runOnUiThread {
@@ -1211,6 +1284,8 @@ class OutdoorNavController(
                 }
             }
         } finally {
+            RuntimeRecordingConfiguration.observe("camera_state", NavigationRecording.j("available", false,
+                "state", "stopped", "reason", "stream_loop_ended"))
             try {
                 pipeline.stop()
             } catch (ignored: Exception) {
@@ -1298,13 +1373,30 @@ class OutdoorNavController(
             val alignedNanos = SystemClock.elapsedRealtimeNanos()
             var semanticCopiedNanos = alignedNanos
             if (semanticFrame) {
+                val capture = if (com.elabrador.mobilenavigation.archive.NavigationArchive.activeSessionId() != null) {
+                    val dp = rawDepth.profile
+                    val cp = colorFrame.profile
+                    try {
+                        val di = dp.`as`<com.intel.realsense.librealsense.VideoStreamProfile>(Extension.VIDEO_PROFILE).intrinsic
+                        val transform = dp.getExtrinsicTo(cp)
+                        InferenceCapture(DepthImage.copy(rawDepth), NavigationRecording.j(
+                            "rgb_frame",colorFrame.number,"depth_frame",rawDepthFrame.number,
+                            "rgb_raw_ms",colorFrame.timestamp,"depth_raw_ms",rawDepthFrame.timestamp,
+                            "rgb_time_domain",colorFrame.timestampDomain.name,"depth_time_domain",rawDepthFrame.timestampDomain.name,
+                            "pair_skew_ms",skewMillis,"color_intrinsic",InferenceCapture.intrinsic(intrinsic),
+                            "raw_depth_intrinsic",InferenceCapture.intrinsic(di),
+                            "depth_to_color_rotation_column_major",NavigationRecording.array(transform.rotation),
+                            "depth_to_color_translation_m",NavigationRecording.array(transform.translation),
+                            "alignment","librealsense.Align(COLOR)"))
+                    } finally { dp.close(); cp.close() }
+                } else null
                 val semanticDepth = alignedDepth.data
                 semanticCopiedNanos = SystemClock.elapsedRealtimeNanos()
                 semanticSegmenter?.submitRgb(
                     rgb, colorWidth, colorHeight, colorStride,
                     semanticDepth, alignedDepth.width, alignedDepth.height,
                     alignedDepth.stride, alignedDepth.units, intrinsic,
-                    imageTime / 1000.0)
+                    imageTime / 1000.0, capture)
                 if (semanticCaptureCount.incrementAndGet() % 10L == 0L) {
                     Log.i(TAG, String.format(
                         Locale.US, "SEMANTIC_CAPTURE align=%.1fms depth_copy=%.1fms frame=%d",
@@ -1315,6 +1407,10 @@ class OutdoorNavController(
             }
             if (navigationFrame) {
                 val distances = analyzeDepth(alignedDepth)
+                NavigationRecording.safe { com.elabrador.mobilenavigation.archive.NavigationArchive.event("distance_summary",NavigationRecording.j(
+                    "rgb_frame",colorFrame.number,"depth_frame",rawDepthFrame.number,"camera_seconds",imageTime/1000.0,
+                    "left_m",distances.left,"front_m",distances.center,"right_m",distances.right,
+                    "left_valid",distances.left.isFinite(),"front_valid",distances.center.isFinite(),"right_valid",distances.right.isFinite())) }
                 val semantic = latestSemanticResult
                 updateDepthPreview(alignedDepth, rawDepth, frameCount)
                 val shownFrameCount = frameCount
@@ -1398,6 +1494,7 @@ class OutdoorNavController(
             val videoProfile = resolvedColor.`as`<VideoStreamProfile>(Extension.VIDEO_PROFILE)
             intrinsic = videoProfile.intrinsic
             cameraToImu = resolvedColor.getExtrinsicTo(resolvedGyro)
+            observeCameraConfiguration(device, intrinsic, cameraToImu)
         } finally {
             device.close()
         }
@@ -1414,6 +1511,72 @@ class OutdoorNavController(
         if (device.supportsInfo(info)) {
             Log.i(TAG, "D455F ${info.name}=${device.getInfo(info)}")
         }
+    }
+
+    /** Observes read-only SDK state after existing configuration; never changes sensor options. */
+    private fun observeCameraConfiguration(device: Device, intrinsic: Intrinsic, cameraToImu: Extrinsic) {
+        NavigationRecording.safe {
+            val information = JSONObject()
+            for (info in arrayOf(CameraInfo.NAME, CameraInfo.FIRMWARE_VERSION,
+                CameraInfo.RECOMMENDED_FIRMWARE_VERSION, CameraInfo.USB_TYPE_DESCRIPTOR,
+                CameraInfo.PRODUCT_ID, CameraInfo.PRODUCT_LINE, CameraInfo.IMU_TYPE)) {
+                information.put(info.name, readConfigurationValue {
+                    if (device.supportsInfo(info)) device.getInfo(info) else null
+                })
+            }
+            val sensors = JSONArray()
+            for ((sensorIndex, sensor) in device.querySensors().withIndex()) {
+                val streams = JSONArray()
+                for (profile in sensor.activeStreams) {
+                    val stream = NavigationRecording.j("stream_type", profile.type.name,
+                        "format", profile.format.name, "index", profile.index,
+                        "frame_rate_hz", profile.frameRate, "source", "active librealsense profile")
+                    if (profile.`is`(Extension.VIDEO_PROFILE)) {
+                        val video = profile.`as`<VideoStreamProfile>(Extension.VIDEO_PROFILE)
+                        stream.put("width", video.width).put("height", video.height)
+                            .put("intrinsic", readConfigurationValue { InferenceCapture.intrinsic(video.intrinsic) })
+                    }
+                    streams.put(stream)
+                }
+                val options = JSONObject()
+                for (option in arrayOf(Option.ENABLE_AUTO_EXPOSURE, Option.EXPOSURE, Option.GAIN,
+                    Option.AUTO_EXPOSURE_PRIORITY, Option.AUTO_EXPOSURE_LIMIT,
+                    Option.OPTION_AUTO_EXPOSURE_LIMIT_TOGGLE, Option.ENABLE_AUTO_WHITE_BALANCE,
+                    Option.WHITE_BALANCE)) {
+                    options.put(option.name, readConfigurationValue {
+                        if (sensor.supports(option)) NavigationRecording.j("value", sensor.getValue(option),
+                            "default", sensor.getDefault(option), "minimum", sensor.getMinRange(option),
+                            "maximum", sensor.getMaxRange(option), "unit", "librealsense native option units") else null
+                    })
+                }
+                val sensorInfo = NavigationRecording.j("sensor_index", sensorIndex, "active_streams", streams,
+                    "options", options, "source", "read-only state after configureColorExposure")
+                if (sensor.`is`(Extension.DEPTH_SENSOR)) {
+                    sensorInfo.put("depth_unit_m", readConfigurationValue {
+                        sensor.`as`<com.intel.realsense.librealsense.DepthSensor>(Extension.DEPTH_SENSOR).depthScale
+                    })
+                }
+                sensors.put(sensorInfo)
+            }
+            RuntimeRecordingConfiguration.observe("camera", NavigationRecording.j(
+                "available", true, "information", information, "librealsense_version", readConfigurationValue { RsContext.getVersion() },
+                "sensors", sensors, "color_intrinsic", InferenceCapture.intrinsic(intrinsic),
+                "imu_from_color_camera_rotation_column_major", NavigationRecording.array(cameraToImu.rotation),
+                "imu_from_color_camera_translation_m", NavigationRecording.array(cameraToImu.translation),
+                "extrinsic_source", "active COLOR profile getExtrinsicTo(active GYRO profile)",
+                "extrinsic_relation", "p_imu = R_imu_from_color_camera * p_color_camera + t_imu_from_color_camera",
+                "alignment_target", "COLOR", "color_coordinates", "optical_x_right_y_down_z_forward_m"))
+            RuntimeRecordingConfiguration.observe("camera_state", NavigationRecording.j(
+                "available", true, "state", "streaming", "source", "pipeline.start and active profiles"))
+        }
+    }
+
+    private fun readConfigurationValue(read: () -> Any?): JSONObject = try {
+        val value = read()
+        if (value == null) NavigationRecording.j("available", false, "reason", "metadata_or_option_not_supported")
+        else NavigationRecording.j("available", true, "value", value)
+    } catch (error: Exception) {
+        NavigationRecording.j("available", false, "reason", error.javaClass.simpleName)
     }
 
     private fun logSensorOption(sensor: Sensor, option: Option) {
@@ -1464,6 +1627,19 @@ class OutdoorNavController(
                 colorFrame.getMetadata(FrameMetadata.GAIN_LEVEL) else -1L
             val fps = if (colorFrame.supportsMetadata(FrameMetadata.ACTUAL_FPS))
                 colorFrame.getMetadata(FrameMetadata.ACTUAL_FPS) else -1L
+            RuntimeRecordingConfiguration.observe("camera_exposure", NavigationRecording.j(
+                "available", exposure >= 0L, "source", "actual COLOR FrameMetadata, sampled every $COLOR_METADATA_LOG_INTERVAL frames",
+                "frame_number", colorFrame.number, "frame_raw_ms", colorFrame.timestamp,
+                "frame_time_domain", colorFrame.timestampDomain.name,
+                "exposure_us", if (exposure >= 0L) exposure else null,
+                "gain_level", if (gain >= 0L) gain else null,
+                "actual_fps_metadata_raw", if (fps >= 0L) fps else null,
+                "actual_fps_unit", "unconverted librealsense metadata value",
+                "auto_exposure", readConfigurationValue {
+                    if (colorFrame.supportsMetadata(FrameMetadata.AUTO_EXPOSURE)) colorFrame.getMetadata(FrameMetadata.AUTO_EXPOSURE) else null
+                }, "white_balance", readConfigurationValue {
+                    if (colorFrame.supportsMetadata(FrameMetadata.WHITE_BALANCE)) colorFrame.getMetadata(FrameMetadata.WHITE_BALANCE) else null
+                }))
             Log.i(TAG, "D455F_COLOR_FRAME exposure_us=$exposure gain=$gain actual_fps=$fps")
         } catch (error: Exception) {
             Log.w(TAG, "Unable to read D455F color frame metadata", error)
@@ -1517,7 +1693,12 @@ class OutdoorNavController(
 
     private fun processVinsEstimate(local: VinsMono, tracked: VinsMono.TrackedFrame) {
         if (vinsMono !== local) return
+        val recordingSession = com.elabrador.mobilenavigation.archive.NavigationArchive.activeSessionId()
         val pose = local.process(vinsInput, tracked)
+        NavigationRecording.safe {
+            if (recordingSession != null && recordingSession == com.elabrador.mobilenavigation.archive.NavigationArchive.activeSessionId())
+                NavigationRecording.vins(pose, tracked.features, tracked.generation)
+        }
         if (pose != null && vinsMono === local) {
             val wasInitialized = vinsInitialized
             if (pose.initialized) {
@@ -1571,6 +1752,11 @@ class OutdoorNavController(
         semanticSegmenter?.resetVinsState()
         runOnUiThread {
             resetLocalPlanning()
+            if (navigationActive) {
+                latestLocalPlan = LocalPlanner.PathResult.waiting("VINS 坐标系已重置，正在重建局部地图")
+                planObservation = PlanObservation(latestLocalPlan, null)
+                listener.onLocalPlan(latestLocalPlan.toSnapshot())
+            }
             renderDynamicHeadingCalibration()
             renderVinsStatus(vinsInput.status())
         }
@@ -1615,6 +1801,7 @@ class OutdoorNavController(
             val domain: TimestampDomain = frame.timestampDomain
             val timestamp = vinsTimestampMapper.toSystemTimeMilliseconds(
                 frame.timestamp, domain, System.currentTimeMillis().toDouble())
+            NavigationRecording.safe { NavigationRecording.imu(if (profile.type == StreamType.GYRO) 1 else 2, frame.timestamp, domain.name, timestamp, value) }
             if (profile.type == StreamType.GYRO) {
                 vinsInput.addGyroscope(timestamp, value[0], value[1], value[2])
             } else if (profile.type == StreamType.ACCEL) {
@@ -1763,6 +1950,7 @@ class OutdoorNavController(
                 if (previewUsesNativeDepth) "原始" else "彩色对齐"))
         }
         val vinsStatus = vinsInput.status()
+        NavigationRecording.safe { NavigationRecording.resources(vinsStatus) }
         frameStatus.append(String.format(
             Locale.CHINA,
             " · VINS输入 图像 %,d / 陀螺仪 %,d / 加速度 %,d / 合并IMU %,d / 配对 %,d%s",
@@ -1782,7 +1970,8 @@ class OutdoorNavController(
         val published = planObservation
         val cuePlan = published.plan
         val evidence = published.evidence
-        val observationFresh = evidence != null && evidence.fresh(now)
+        val observationFresh = semanticObservationUsable(evidence,now) &&
+            semanticSegmenter?.isCurrentEvidence(evidence) == true
         val poseFresh = latestVinsPose?.initialized == true &&
             now - latestPoseCaptureMillis >= 0L && now - latestPoseCaptureMillis < 1500L
         if (!navigationActive) {
@@ -1809,17 +1998,21 @@ class OutdoorNavController(
                 !dynamicHeadingCalibrator.isReady() -> "等待地理方向对齐"
                 else -> cuePlan.waitingReason.orEmpty()
             }
-            guidance = if (cueEvidence?.fresh(now) == false) "停止" else ""
+            guidance = if (!semanticObservationUsable(cueEvidence,now)) "停止" else ""
         }
 
         guidance = guidanceStabilizer.updateValidated(
-            guidance, navigationActive, now, cueEvidence)
+            guidance, navigationActive, now, cueEvidence,
+            if (SOURCE_SWINL) SemanticObservationPolicy.SWIN_MAP_MAX_MILLIS else FrameEvidence.MAX_AGE_MILLIS)
         if (!navigationActive) cueEvidence = null
         val auditNow = SystemClock.elapsedRealtimeNanos()
         if (navigationActive &&
             (guidance != lastAuditCue || reason != lastAuditReason ||
                 auditNow - lastAuditNanos > TimeUnit.SECONDS.toNanos(1))
         ) {
+            NavigationRecording.safe { com.elabrador.mobilenavigation.archive.NavigationArchive.event("navigation_cue", NavigationRecording.j(
+                "cue", guidance, "reason", reason, "raw_cue", lastPlanCue, "evidence", NavigationRecording.evidence(evidence),
+                "observation_fresh", observationFresh, "pose_fresh", poseFresh)) }
             lastAuditCue = guidance
             lastAuditReason = reason
             lastAuditNanos = auditNow
@@ -1834,7 +2027,7 @@ class OutdoorNavController(
         }
         if (navigationActive && reason.isNotEmpty()) {
             listener.onLocalPlanMetrics(
-                (if (guidance == "停止") "安全停止：" else "等待：") + reason,
+                localPlanMetricsText() + "\n" + (if (guidance == "停止") "安全停止：" else "等待：") + reason,
                 if (guidance == "停止") GuidanceLevel.DANGER else GuidanceLevel.WARNING)
         }
         val level = when {
@@ -1847,15 +2040,26 @@ class OutdoorNavController(
         listener.onGuidanceChanged(speechText, level)
     }
 
-    private fun computeLocalPlan(semantic: SemanticSegmenter.Result): LocalPlanner.PathResult {
-        if (!navigationActive) return LocalPlanner.PathResult.waitingForTarget()
-        if (!hasNavigationLocation()) return LocalPlanner.PathResult.waiting("等待手机定位")
+    private fun computeLocalPlan(semantic: SemanticSegmenter.Result,
+                                 requireFresh: Boolean = true): LocalPlanner.PathResult {
         val evidence = semantic.evidence
-        if (evidence == null || !evidence.fresh(SystemClock.elapsedRealtime())) {
+        if (evidence == null || (requireFresh && !semanticObservationUsable(evidence,SystemClock.elapsedRealtime()))) {
             return LocalPlanner.PathResult.waiting("语义观测过期")
         }
+        val plan=computeLocalPlan(semantic.localCostGrid, semantic.mapPose, evidence,semantic.displayCostGrid)
+        // A missing GPS/route/heading can block planning without hiding a
+        // genuinely completed semantic map. This remains an unplanned result.
+        return if(SOURCE_SWINL && plan.visualizationGrid==null && semantic.displayCostGrid!=null)
+            LocalPlanner.PathResult.waitingWithGrid(plan.waitingReason,
+                Array(MapTransform.HEIGHT) { row -> semantic.displayCostGrid.copyOfRange(
+                    row*MapTransform.WIDTH,(row+1)*MapTransform.WIDTH) }) else plan
+    }
+
+    private fun computeLocalPlan(costGrid: IntArray?, mapPose: VinsMono.Pose?,
+                                 evidence: FrameEvidence, displayGrid: IntArray? = null): LocalPlanner.PathResult {
+        if (!navigationActive) return LocalPlanner.PathResult.waitingForTarget()
+        if (!hasNavigationLocation()) return LocalPlanner.PathResult.waiting("等待手机定位")
         if (!routeFollower.hasRoute()) return LocalPlanner.PathResult.waiting("等待全局路线")
-        val costGrid = semantic.localCostGrid
         if (costGrid == null || costGrid.size != MapTransform.WIDTH * MapTransform.HEIGHT) {
             return LocalPlanner.PathResult.waiting("等待语义点云/OctoMap局部代价图")
         }
@@ -1871,7 +2075,6 @@ class OutdoorNavController(
             Float.NaN,
             location.elapsedRealtimeNanos
         ) ?: return LocalPlanner.PathResult.waiting(routeFollower.waitingReason())
-        val mapPose = semantic.mapPose
         if (mapPose == null || !mapPose.initialized) {
             return LocalPlanner.PathResult.waiting("等待与地图同步的 VINS 位姿")
         }
@@ -1892,9 +2095,36 @@ class OutdoorNavController(
                 " pose_xy=${mapPose.x},${mapPose.y} map_yaw=${mapPose.egoRightAxisYawRadians()}" +
                 " cross_track=${guidance.crossTrackMeters}" +
                 " calibration=${dynamicHeadingCalibrator.status()}")
-        return localPlanner.plan(
+        AStar.resetTiming()
+        val result = localPlanner.plan(
             grid, MapTransform.RESOLUTION, -7.9f, -7.9f,
-            0f, 0f, targetCol, targetRow, mapPose)
+            0f, 0f, targetCol, targetRow, mapPose,
+            if(SOURCE_SWINL && displayGrid!=null) Array(MapTransform.HEIGHT) { row ->
+                displayGrid.copyOfRange(row*MapTransform.WIDTH,(row+1)*MapTransform.WIDTH)
+            } else null)
+        val timing = AStar.timing()
+        NavigationAudit.log("ASTAR_AUDIT generation=${evidence.generation} frame=${evidence.cameraSeconds}" +
+            " searches=${timing.searches} search_ms=${timing.nanos / 1e6}" +
+            " success=${result.success}")
+        return result
+    }
+
+    /**
+     * Render the latest semantic cost grid for diagnosis even when its camera
+     * evidence has aged out.  This path is visualization-only: the published
+     * plan observation retains its old evidence, so the safety gate keeps
+     * guidance stopped until a fresh map arrives.
+     */
+    private fun staleCostGridForDisplay(semantic: SemanticSegmenter.Result): LocalPlanner.PathResult? {
+        val costGrid = (if(SOURCE_SWINL) semantic.displayCostGrid else semantic.localCostGrid) ?: return null
+        if (costGrid.size != MapTransform.WIDTH * MapTransform.HEIGHT) return null
+        val grid = Array(MapTransform.HEIGHT) { row ->
+            IntArray(MapTransform.WIDTH).also { dst ->
+                System.arraycopy(costGrid, row * MapTransform.WIDTH, dst, 0, MapTransform.WIDTH)
+            }
+        }
+        return LocalPlanner.PathResult.waitingWithGrid(
+            "语义地图已过期（仅显示，安全停止）", grid)
     }
 
     private fun requestLocalPlanRefresh() {
@@ -1933,7 +2163,7 @@ class OutdoorNavController(
         val generation = localPlanGeneration.get()
         val refreshStartedNanos = SystemClock.elapsedRealtimeNanos()
         val requestedMap = pendingLocalPlanMap.getAndSet(null)
-        val projected = requestedMap ?: segmenter.reprojectLatestLocalMap()
+        val projected = requestedMap ?: if (SOURCE_SWINL) return else segmenter.reprojectLatestLocalMap()
         if (generation != localPlanGeneration.get()) return
         if (projected == null) {
             val waiting = LocalPlanner.PathResult.waiting(segmenter.localMapWaitingReason())
@@ -1953,16 +2183,48 @@ class OutdoorNavController(
             return
         }
         val evidence = projected.evidence ?: return
+        if (!semanticObservationUsable(evidence,SystemClock.elapsedRealtime())) {
+            // Run A* for visualization/timing only. Its acquisition evidence is
+            // retained below and remains expired for all movement guidance.
+            val diagnosticStarted = SystemClock.elapsedRealtimeNanos()
+            val diagnosticPlan = computeLocalPlan(projected, requireFresh = false)
+            val diagnosticDuration = SystemClock.elapsedRealtimeNanos() - diagnosticStarted
+            NavigationRecording.safe { NavigationRecording.plan(diagnosticPlan,evidence,diagnosticDuration,false) }
+            val status = "语义地图已过期（仅显示，安全停止）"
+            val display = if (diagnosticPlan.visualizationGrid != null)
+                diagnosticPlan.withDisplayStatus(status) else staleCostGridForDisplay(projected)
+            if (display == null || generation != localPlanGeneration.get()) return
+            val sequence = localPlanSequence.incrementAndGet()
+            latestSemanticResult = projected
+            latestLocalPlan = display
+            latestPlanEvidence = evidence
+            planObservation = PlanObservation(diagnosticPlan, evidence)
+            recordLocalPlanMetrics(refreshStartedNanos, diagnosticDuration)
+            runOnUiThread {
+                if (generation != localPlanGeneration.get() ||
+                    sequence < latestRenderedLocalPlanSequence
+                ) return@runOnUiThread
+                latestRenderedLocalPlanSequence = sequence
+                renderSemanticStatus(projected)
+                renderLocalPlanMetrics()
+                listener.onLocalPlan(display.toSnapshot(evidence))
+                hasValidLocalPlanDisplay = true
+                renderDirectionGuidance()
+            }
+            NavigationAudit.log(
+                "PLAN_DISPLAY_STALE frame=${evidence.cameraSeconds}" +
+                    " age_ms=${evidence.ageMillis(SystemClock.elapsedRealtime())}" +
+                    " astar_ms=${diagnosticDuration / 1e6}" +
+                    " planned=${diagnosticPlan.planned} success=${diagnosticPlan.success}" +
+                    " movement_authorized=false")
+            return
+        }
         val planStartedNanos = SystemClock.elapsedRealtimeNanos()
         val plan = computeLocalPlan(projected)
         if (generation != localPlanGeneration.get()) return
         val planDurationNanos = SystemClock.elapsedRealtimeNanos() - planStartedNanos
-        if (!evidence.fresh(SystemClock.elapsedRealtime())) {
-            NavigationAudit.log(
-                "PLAN_EXPIRED frame=${evidence.cameraSeconds}" +
-                    " plan_ms=${planDurationNanos / 1e6}")
-            return
-        }
+        NavigationRecording.safe { NavigationRecording.plan(plan,evidence,planDurationNanos,semanticObservationUsable(evidence,SystemClock.elapsedRealtime())) }
+        if (!semanticObservationUsable(evidence,SystemClock.elapsedRealtime())) return
         val sequence = localPlanSequence.incrementAndGet()
         latestSemanticResult = projected
         planObservation = PlanObservation(plan, evidence)
@@ -1984,10 +2246,9 @@ class OutdoorNavController(
         runOnUiThread {
             if (generation != localPlanGeneration.get() ||
                 sequence != localPlanSequence.get() ||
-                !evidence.fresh(SystemClock.elapsedRealtime())
+                !semanticObservationUsable(evidence,SystemClock.elapsedRealtime())
             ) return@runOnUiThread
             latestRenderedLocalPlanSequence = sequence
-            recordRenderedLocalPlanRefresh(evidence)
             renderSemanticStatus(projected)
             renderLocalPlanMetrics()
             listener.onLocalPlan(plan.toSnapshot(evidence))
@@ -1995,7 +2256,7 @@ class OutdoorNavController(
             updateNavigationGuidance()
             renderDirectionGuidance()
             NavigationAudit.log(
-                "PLAN_AUDIT frame=${evidence.cameraSeconds}" +
+                "PLAN_AUDIT generation=${evidence.generation} frame=${evidence.cameraSeconds}" +
                     " plan_ms=${planDurationNanos / 1e6}" +
                     " ui_queue_ms=" +
                     ((SystemClock.elapsedRealtimeNanos() - planStartedNanos - planDurationNanos) / 1e6) +
@@ -2014,17 +2275,25 @@ class OutdoorNavController(
             if (semanticNanos > 0L) max(0L, refreshStartedNanos - semanticNanos) else -1L
     }
 
-    private fun recordRenderedLocalPlanRefresh(evidence: FrameEvidence) {
-        if (!renderedObservations.observe(evidence, SystemClock.elapsedRealtime())) return
-        val renderedNanos = SystemClock.elapsedRealtimeNanos()
-        val previousNanos = latestLocalPlanCompletedNanos
-        latestLocalPlanCompletedNanos = renderedNanos
+    fun onLocalMapDrawn(cameraSeconds: Double, captureMillis: Long, generation: Long, drawnMillis: Long) {
+        if (!navigationActive || !cameraSeconds.isFinite() || captureMillis < 0 ||
+            generation != latestPlanEvidence?.generation) return
+        val evidence = FrameEvidence(cameraSeconds, generation, captureMillis)
+        if (!renderedObservations.observeDrawn(evidence, drawnMillis)) return
+        latestLocalPlanCompletedNanos = drawnMillis * 1_000_000L
         latestLocalPlanRefreshNanos =
-            if (previousNanos > 0L) renderedNanos - previousNanos else -1L
+            renderedObservations.intervalMillis.let { if (it < 0) -1L else it * 1_000_000L }
     }
 
     private fun renderSemanticStatus(semantic: SemanticSegmenter.Result) {
         if (semantic.inferenceMillis <= 0L) {
+            return
+        }
+        if (SOURCE_SWINL) {
+            val age = semantic.evidence?.ageMillis(SystemClock.elapsedRealtime()) ?: -1L
+            listener.onSemanticOverlay(String.format(Locale.CHINA,
+                "Swin-L 语义：%s · NPU推理 %.2f 秒 · 采集距今 %.1f 秒\n地图仅随新的 Swin-L 语义结果更新",
+                semantic.label, semantic.inferenceMillis / 1000f, age / 1000f), GuidanceLevel.MUTED)
             return
         }
         if (!semantic.centerCost.isFinite()) {
@@ -2099,17 +2368,33 @@ class OutdoorNavController(
             listener.onLocalPlanMetrics("A*诊断：等待开始导航", GuidanceLevel.MUTED)
             return
         }
+        listener.onLocalPlanMetrics(localPlanMetricsText(),
+            if (semanticObservationUsable(latestPlanEvidence,SystemClock.elapsedRealtime())) GuidanceLevel.SAFE else GuidanceLevel.WARNING)
+    }
+
+    private fun localPlanMetricsText(): String {
+        val now = SystemClock.elapsedRealtime()
         val duration = if (latestLocalPlanDurationNanos >= 0L)
             String.format(Locale.CHINA, "%.1f ms", latestLocalPlanDurationNanos / 1_000_000f) else "--"
         val refresh = if (latestLocalPlanRefreshNanos >= 0L)
             String.format(Locale.CHINA, "%.0f ms", latestLocalPlanRefreshNanos / 1_000_000f) else "--"
-        val inputAge = if (latestLocalPlanInputAgeNanos >= 0L)
-            String.format(Locale.CHINA, "%.1f 秒", latestLocalPlanInputAgeNanos / 1_000_000_000f) else "--"
-        val text = String.format(
-            Locale.CHINA, "A*单次 %s · 刷新间隔 %s\n代价图输入年龄 %s · 更新 #%,d",
-            duration, refresh, inputAge, latestRenderedLocalPlanSequence)
-        listener.onLocalPlanMetrics(text, if (latestLocalPlanDurationNanos >= 0L) GuidanceLevel.SAFE else GuidanceLevel.WARNING)
+        val semanticAge = latestSemanticResult.evidence?.let {
+            String.format(Locale.CHINA, "%.1f 秒", it.ageMillis(now) / 1000f) } ?: "--"
+        val silence = renderedObservations.silentMillis(now).let {
+            if (it >= 0) String.format(Locale.CHINA, "%.1f 秒", it / 1000f) else "--" }
+        val timing=semanticSegmenter?.latestInference()
+        val model=timing?.let { String.format(Locale.CHINA,"%.3f 秒",it.modelMillis()/1000) } ?: "等待首帧"
+        val pipeline=timing?.takeIf { it.mapNanos > 0 }?.let {
+            String.format(Locale.CHINA,"%.3f 秒",it.pipelineMillis()/1000) } ?: "建图中"
+        val displayedAge=renderedObservations.captureToDrawMillis().let {
+            if(it>=0)String.format(Locale.CHINA,"%.3f 秒",it/1000.0) else "等待首图" }
+        return String.format(Locale.CHINA,
+            "Swin-L NPU单帧推理 %s · 预处理至建图 %s\n语义地图：上次间隔 %s · 近5秒 %.1f Hz\n本图采集→显示 %s · 当前采集帧龄 %s\n距上次新图 %s · 局部规划 %s（含路径复用）",
+            model, pipeline, refresh, renderedObservations.recentHz(now), displayedAge, semanticAge, silence, duration)
     }
+
+    private fun semanticObservationUsable(evidence: FrameEvidence?,now: Long): Boolean =
+        if (SOURCE_SWINL) SemanticObservationPolicy.usable(evidence,now) else evidence?.fresh(now)==true
 
     private fun resetLocalPlanning() {
         localPlanGeneration.incrementAndGet()
