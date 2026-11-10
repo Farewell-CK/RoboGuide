@@ -148,6 +148,7 @@ fn distinct_cardinality_defers_without_stopping_other_missions_and_retries() {
             .unwrap();
     }
     let mut controller = ControllerState {
+        published_deployments: Default::default(),
         federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control,

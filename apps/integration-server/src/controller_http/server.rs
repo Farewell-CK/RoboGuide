@@ -225,6 +225,8 @@ fn authorize_tenant_path(
             | "/v1/artifact-authorizations"
             | "/v1/resource-quotas"
             | "/v1/resource-topology"
+            | "/v1/physical-entities"
+            | "/v1/deployment-feasibility"
     ) {
         return Err(
             "global administration/diagnostics require an explicitly delegated global principal"
@@ -270,6 +272,8 @@ fn authorize_operator_request(
             | "/v1/resource-quotas"
             | "/v1/resource-topology"
             | "/v1/maintenance/archive/operations"
+            | "/v1/physical-entities"
+            | "/v1/deployment-feasibility"
             | "/v1/maintenance/coordinated-archive/operations",
         ) => 2,
         ("GET", _)
@@ -302,7 +306,13 @@ fn authorize_operator_request(
         ("POST", path) if path.starts_with("/v1/memory/handoffs/") && path.ends_with("/commit") => {
             2
         }
-        ("POST", "/v1/node-identities/commands" | "/v1/node-identities/adopt") => 2,
+        (
+            "POST",
+            "/v1/node-identities/commands"
+            | "/v1/node-identities/adopt"
+            | "/v1/physical-entities"
+            | "/v1/deployment-feasibility",
+        ) => 2,
         ("POST", "/v1/tenant-migrations") => 2,
         (
             "POST",
@@ -1334,6 +1344,52 @@ where
             }
         };
     }
+    if matches!(path, "/v1/physical-entities" | "/v1/deployment-feasibility") {
+        let result = if method == "GET" {
+            let live = controller
+                .lock()
+                .map_err(|_| "Controller lock is poisoned")?;
+            if path == "/v1/physical-entities" {
+                Ok(application::deployment_management::physical_view(&live))
+            } else {
+                application::deployment_management::feasibility_view(&live, deployment_feasibility)
+            }
+        } else if method == "POST" {
+            let subject = principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:recovery-admin");
+            if path == "/v1/physical-entities" {
+                application::deployment_management::submit_physical(
+                    controller,
+                    event_log,
+                    event_write_gate.as_ref(),
+                    &request.body,
+                    subject,
+                    clock,
+                )
+            } else {
+                application::deployment_management::submit_feasibility(
+                    controller,
+                    event_log,
+                    event_write_gate.as_ref(),
+                    &request.body,
+                    subject,
+                    clock,
+                    deployment_feasibility,
+                )
+            }
+        } else {
+            Err("unsupported deployment administration method".into())
+        };
+        return match result {
+            Ok(body) => write_http_response(stream, "200 OK", body).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
     if method == "POST" && path == "/v1/resource-topology" {
         return match application::state_policy::submit_resource_topology(
             controller,
@@ -2227,7 +2283,9 @@ where
             let live = controller
                 .lock()
                 .map_err(|_| "controller lock is poisoned")?;
-            let assessment = match deployment_feasibility {
+            let current_deployment =
+                application::deployment_management::current(&live, deployment_feasibility)?;
+            let assessment = match current_deployment.as_deref() {
                 Some(source) => source.assess_initial_plan(
                     &plan,
                     &scoped_control,
@@ -2336,6 +2394,8 @@ where
                 let live = controller
                     .lock()
                     .map_err(|_| "controller lock is poisoned")?;
+                let current_deployment =
+                    application::deployment_management::current(&live, deployment_feasibility)?;
                 let mut scoped = live.bridge.control().clone();
                 scoped
                     .register_mission_tenant(
@@ -2347,7 +2407,7 @@ where
                             &live,
                             &plan,
                             tenant.as_deref().unwrap_or("local"),
-                            deployment_feasibility,
+                            current_deployment.as_deref(),
                             verifier_feed,
                             &request.body,
                         )
@@ -2373,6 +2433,42 @@ where
                     .await;
                 }
             };
+            let mission_id = plan.goal().mission_id().clone();
+            let group_id = domain::ExecutionGroupId::new(format!("group-{mission_id}"))?;
+            let gate_wait = StageObservation::start(
+                &diagnostics,
+                DiagnosticKind::Http,
+                DiagnosticStage::WriteGate,
+                None,
+            );
+            let _write_guard = event_write_gate.lock()?;
+            drop(gate_wait);
+            let replay = {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "controller lock is poisoned")?;
+                MissionAdmission::replay(
+                    &live,
+                    &plan,
+                    &group_id,
+                    tenant.as_deref().unwrap_or("local"),
+                )
+            };
+            if !matches!(replay, Ok(None)) {
+                let (status, body) = match replay {
+                    Ok(Some(body)) => match event_log.require_writes_enabled() {
+                        Ok(()) => ("202 Accepted", body),
+                        Err(error) => (
+                            "503 Service Unavailable",
+                            serde_json::json!({"error":error.to_string()}),
+                        ),
+                    },
+                    Err(error) => ("409 Conflict", serde_json::json!({"error":error})),
+                    Ok(None) => unreachable!("new admissions continue below"),
+                };
+                drop(_write_guard);
+                return write_http_response(stream, status, body).await;
+            }
             let verifier_admission = {
                 let live = controller
                     .lock()
@@ -2385,6 +2481,7 @@ where
                 )
             };
             if let Err(error) = verifier_admission {
+                drop(_write_guard);
                 return write_http_response(
                     stream,
                     "422 Unprocessable Entity",
@@ -2392,16 +2489,13 @@ where
                 )
                 .await;
             }
-            let mission_id = plan.goal().mission_id().clone();
-            let group_id = domain::ExecutionGroupId::new(format!("group-{mission_id}"))?;
-            let gate_wait = StageObservation::start(
-                &diagnostics,
-                DiagnosticKind::Http,
-                DiagnosticStage::WriteGate,
-                None,
-            );
-            let _write_guard = event_write_gate.lock()?;
-            drop(gate_wait);
+            let current_deployment = {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "Controller lock is poisoned")?;
+                application::deployment_management::current(&live, deployment_feasibility)?
+            };
+            let deployment_feasibility = current_deployment.as_deref();
             let capacity = {
                 let live = controller
                     .lock()

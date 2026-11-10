@@ -66,6 +66,7 @@ impl Fixture {
             )
             .expect("submit");
         let mut controller = ControllerState {
+            published_deployments: Default::default(),
             federation: Default::default(),
             bridge: IntegrationRuntimeBridge::new(
                 control,

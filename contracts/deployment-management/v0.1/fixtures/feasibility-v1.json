@@ -1,0 +1,64 @@
+{
+  "schema_version": "roboguide.deployment-intent-feasibility/v0.3",
+  "authority": "deployment-observed-reset-state",
+  "identity": {
+    "run_id": "synthetic-hot-enrollment",
+    "episode_id": "fixture",
+    "scene_id": "software-only",
+    "dataset_revision": "fixture",
+    "dataset_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "semantic_evidence_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "spatial_profile_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "habitat_seed": 0,
+    "episode_reset_count": 1
+  },
+  "initial_agent_positions": {
+    "0": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "records": [
+    {
+      "schema_version": "roboguide.habitat-spatial-feasibility/v0.2",
+      "node_id": "existing",
+      "agent_id": 0,
+      "operation": "mobility.navigate@v1",
+      "destination": "fixture-goal",
+      "profile": {
+        "node_id": "existing",
+        "agent_id": 0,
+        "source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "operation_support": {
+          "mobility.move@v1": true,
+          "mobility.navigate@v1": true
+        }
+      },
+      "goal_occupancy": "none",
+      "goal_tolerance_m": null,
+      "start": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "fixture-floor"
+      },
+      "destination_entity": {
+        "position": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "region_id": null,
+        "floor_id": "fixture-floor"
+      },
+      "status": "compatible",
+      "reason": "Synthetic software enrollment fixture; no localization or robot",
+      "route_reachability_proven": false
+    }
+  ],
+  "digest": "sha256:51cccf3c56086c60181c820b72a1b598e652fc5b2d7a8831c81131dfcf643703"
+}
