@@ -300,12 +300,27 @@ def main():
                 cleanup.callback(image_jobs.close)
             photo_memory = None
             if args.photo_memory_config is not None:
-                from robonix_task.photo_capture_memory import PhotoCaptureMemory
+                from robonix_task.photo_capture_memory import (
+                    PhotoCaptureMemories,
+                    PhotoCaptureMemory,
+                )
 
                 config = json.loads(args.photo_memory_config.read_bytes())
-                if config["node_id"] != args.node_id:
-                    raise ValueError("photo publisher must match the enrolled Connector identity")
-                photo_memory = PhotoCaptureMemory(**config)
+                profiles = config["publications"] if "publications" in config else [config]
+                if not isinstance(profiles, list) or not 0 < len(profiles) <= 16:
+                    raise ValueError("bounded explicit photo publications required")
+                with ExitStack() as opening:
+                    publications = []
+                    for profile in profiles:
+                        if profile["node_id"] != args.node_id:
+                            raise ValueError("photo publisher must match the Connector identity")
+                        publication = PhotoCaptureMemory(**profile)
+                        opening.callback(publication.close)
+                        publications.append(publication)
+                    photo_memory = PhotoCaptureMemories(
+                        publications, root=Path(profiles[0]["root"])
+                    )
+                    opening.pop_all()
                 cleanup.callback(photo_memory.close)
             server.RequestHandlerClass = combined_handler(
                 captures, observer, origins, args.node_id, chassis, image_jobs, photo_memory

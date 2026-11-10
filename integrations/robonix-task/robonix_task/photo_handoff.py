@@ -389,8 +389,9 @@ class PhotoHandoffReader:
         if not isinstance(tasks, list):
             raise ValueError("consumer_task_evidence_missing")
         selected = [t for t in tasks if isinstance(t, dict) and t.get("task_id") == task_id]
-        if len(selected) != 1 or selected[0].get("status") != "Active":
+        if len(selected) != 1 or selected[0].get("status") not in {"Ready", "Active"}:
             raise ValueError("consumer_task_not_active")
+        task_ready = selected[0]["status"] == "Ready"
         response = self._authority_json(path + "/execution-attempts", deadline)
         rows = response.get("attempts")
         if not isinstance(rows, list):
@@ -416,12 +417,14 @@ class PhotoHandoffReader:
             raise _ConsumerPending("consumer_running_observation_not_yet_received")
         if consumer.get("status") != "Running":
             raise ValueError("consumer_attempt_not_current_running_or_foreign")
+        if task_ready:
+            raise _ConsumerPending("consumer_task_activation_not_yet_received")
         return consumer
 
     def _running_consumer(
         self, invocation: dict[str, Any], consumer_attempt_id: str
     ) -> dict[str, Any]:
-        """Wait at most 3s only for this exact Accepted/Dispatched attempt's first Running fact."""
+        """Wait at most 3s for exact Ready/Accepted progression to Active plus Running."""
         deadline = time.monotonic() + 3
         while True:
             remaining = deadline - time.monotonic()

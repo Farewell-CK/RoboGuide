@@ -142,6 +142,7 @@ class FakeTransport:
         self.after_blob: dict[str, Any] | None = None
         self.memory_errors: list[int] = []
         self.consumer_statuses: list[str] = []
+        self.consumer_task_statuses: list[str] = []
         self.memory = {
             "schema": "roboguide.memory-manifest/v0.1",
             "selector": {"memory_id": "photo-memory", "revision_id": "r1"},
@@ -176,6 +177,8 @@ class FakeTransport:
             if self.consumer_statuses:
                 self.attempts["attempts"][1]["status"] = self.consumer_statuses.pop(0)
             return copy.deepcopy(self.attempts)
+        if self.consumer_task_statuses:
+            self.mission["tasks"][1]["status"] = self.consumer_task_statuses.pop(0)
         return copy.deepcopy(self.mission)
 
     def get_bytes(self, origin: str, path: str, max_bytes: int) -> bytes:
@@ -235,6 +238,10 @@ class PhotoHandoffTests(unittest.TestCase):
             ("completed", lambda m, a: a["attempts"][1].update(status="Completed")),
             ("failed", lambda m, a: a["attempts"][1].update(status="Failed")),
             ("task_cancelled", lambda m, a: m["tasks"][1].update(status="Cancelled")),
+            ("task_pending", lambda m, a: m["tasks"][1].update(status="Pending")),
+            ("task_blocked", lambda m, a: m["tasks"][1].update(status="Blocked")),
+            ("task_awaiting", lambda m, a: m["tasks"][1].update(status="AwaitingSatisfaction")),
+            ("task_completed", lambda m, a: m["tasks"][1].update(status="Completed")),
             ("ambiguous", lambda m, a: a["attempts"].append(copy.deepcopy(a["attempts"][1]))),
         ]
         with TemporaryDirectory() as directory:
@@ -357,6 +364,75 @@ class PhotoHandoffTests(unittest.TestCase):
                     )
                     with self.assertRaises(ValueError):
                         reader.resolve(invocation, consumer_attempt_id="original-consumer-attempt")
+                    self.assertFalse(
+                        any(p.startswith("/v1/artifacts/") for _, p in transport.calls)
+                    )
+
+    def test_ready_task_waits_for_active_without_waiving_original_consumer_identity(self) -> None:
+        """A real Ready/Dispatched progression reaches Active/Running within the original budget."""
+        with TemporaryDirectory() as directory:
+            for status in ("Dispatched", "Accepted", "Running"):
+                with self.subTest(initial_attempt=status):
+                    invocation, mission, attempts, state, raw = fixture()
+                    mission["tasks"][1]["status"] = "Ready"
+                    attempts["attempts"][1]["status"] = status
+                    transport = FakeTransport(mission, attempts, state, raw)
+                    transport.consumer_task_statuses = ["Ready", "Ready", "Active"]
+                    transport.consumer_statuses = [status, "Running", "Running"]
+                    reader = PhotoHandoffReader(
+                        "https://controller.invalid",
+                        "https://artifact.invalid",
+                        Path(directory) / status,
+                        expected_memory_id="photo-memory",
+                        transport=transport,
+                    )
+                    with patch("robonix_task.photo_handoff.time.sleep") as waiting:
+                        result = reader.resolve(
+                            invocation, consumer_attempt_id="original-consumer-attempt"
+                        )
+                    self.assertGreaterEqual(waiting.call_count, 2)
+                    self.assertEqual(
+                        result["producer_receipt"]["consumer_attempt"]["status"], "Running"
+                    )
+                    self.assertEqual(transport.mission["tasks"][1]["status"], "Active")
+
+    def test_ready_consumer_terminal_foreign_or_expired_never_downloads(self) -> None:
+        """Ready alone cannot authorize cancelled, unknown, foreign or stalled local work."""
+        with TemporaryDirectory() as directory:
+            for case in ("Cancelled", "Failed", "Unknown", "Completed", "foreign", "timeout"):
+                with self.subTest(case=case):
+                    invocation, mission, attempts, state, raw = fixture()
+                    mission["tasks"][1]["status"] = "Ready"
+                    attempts["attempts"][1]["status"] = (
+                        "Running" if case in {"foreign", "timeout"} else case
+                    )
+                    if case == "foreign":
+                        attempts["attempts"][1]["execution_id"] = "other-attempt"
+                    transport = FakeTransport(mission, attempts, state, raw)
+                    reader = PhotoHandoffReader(
+                        "https://controller.invalid",
+                        "https://artifact.invalid",
+                        Path(directory) / case,
+                        expected_memory_id="photo-memory",
+                        transport=transport,
+                    )
+                    if case == "timeout":
+                        with (
+                            patch(
+                                "robonix_task.photo_handoff.time.monotonic",
+                                side_effect=[0, 0, 0, 0, 0, 0, 0, 4],
+                            ),
+                            patch("robonix_task.photo_handoff.time.sleep"),
+                            self.assertRaisesRegex(ValueError, "budget_expired"),
+                        ):
+                            reader.resolve(
+                                invocation, consumer_attempt_id="original-consumer-attempt"
+                            )
+                    else:
+                        with self.assertRaisesRegex(ValueError, "consumer"):
+                            reader.resolve(
+                                invocation, consumer_attempt_id="original-consumer-attempt"
+                            )
                     self.assertFalse(
                         any(p.startswith("/v1/artifacts/") for _, p in transport.calls)
                     )

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import uuid
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -297,3 +298,98 @@ class PhotoCaptureMemory:
                 raise ValueError("photo_export_requires_exact_manifest")
             self._verify(self.record)
             return {"path": self.record["path"]}
+
+
+class PhotoCaptureMemories:
+    """Offer bounded immutable publications without moving their original provider bytes."""
+
+    def __init__(self, publications: list[PhotoCaptureMemory], root: Path) -> None:
+        """Validate borrowed children before taking ownership; failed construction closes none."""
+        if not 1 <= len(publications) <= 16:
+            raise ValueError("bounded_photo_publications_required")
+        self.root = Path(root).absolute()
+        _no_links(self.root)
+        if not self.root.is_dir():
+            raise ValueError("existing_photo_provider_root_required")
+        selectors: set[str] = set()
+        roots: set[Path] = set()
+        node_id = publications[0].profile["node_id"]
+        for publication in publications:
+            child = publication.root.absolute()
+            _no_links(child)
+            try:
+                child.relative_to(self.root)
+            except ValueError:
+                raise ValueError("photo_publication_outside_provider_root") from None
+            memory_id = publication.profile["memory_id"]
+            if publication.profile["node_id"] != node_id:
+                raise ValueError("photo_publication_provider_node_mismatch")
+            if memory_id in selectors or child in roots:
+                raise ValueError("duplicate_photo_publication_selector_or_root")
+            selectors.add(memory_id)
+            roots.add(child)
+        self.publications = tuple(publications)
+        self.lock = threading.RLock()
+        self.closed = False
+
+    def refresh(self, captures: CaptureSource) -> None:
+        """Refresh each original publication without changing any existing selector."""
+        with self.lock:
+            if self.closed:
+                raise Conflict("photo_publications_closed")
+            for publication in self.publications:
+                publication.refresh(captures)
+
+    def discover(self) -> dict[str, Any]:
+        """Aggregate only verified child manifests under the fixed sixteen-publication limit."""
+        with self.lock:
+            if self.closed:
+                raise Conflict("photo_publications_closed")
+            manifests: list[dict[str, Any]] = []
+            for publication in self.publications:
+                manifests.extend(publication.discover()["manifests"])
+            if len(manifests) > 16:
+                raise Conflict("photo_publication_manifest_bound_exceeded")
+            return {"manifests": manifests}
+
+    def export(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Translate one exact original child export into a safe provider-relative path."""
+        if set(body) != {"manifest"}:
+            raise ValueError("photo_export_requires_exact_manifest")
+        with self.lock:
+            if self.closed:
+                raise Conflict("photo_publications_closed")
+            selected = [
+                publication
+                for publication in self.publications
+                if body["manifest"] in publication.discover()["manifests"]
+            ]
+            if len(selected) != 1:
+                raise ValueError("photo_export_manifest_missing_or_ambiguous")
+            publication = selected[0]
+            output = publication.export(body)
+            path = output.get("path")
+            if (
+                not isinstance(path, str)
+                or not path
+                or Path(path).is_absolute()
+                or ".." in Path(path).parts
+            ):
+                raise ValueError("photo_child_export_path_unsafe")
+            absolute = publication.root / path
+            _no_links(absolute)
+            try:
+                relative = absolute.relative_to(self.root)
+            except ValueError:
+                raise ValueError("photo_child_export_outside_provider_root") from None
+            return {"path": relative.as_posix()}
+
+    def close(self) -> None:
+        """Release child owners once in reverse order after all Connector handlers have drained."""
+        with self.lock:
+            if self.closed:
+                return
+            self.closed = True
+            with ExitStack() as cleanup:
+                for publication in self.publications:
+                    cleanup.callback(publication.close)

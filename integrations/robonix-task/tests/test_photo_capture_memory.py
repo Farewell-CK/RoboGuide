@@ -14,8 +14,9 @@ import zlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
+from unittest.mock import patch
 
-from robonix_task.photo_capture_memory import PhotoCaptureMemory
+from robonix_task.photo_capture_memory import PhotoCaptureMemories, PhotoCaptureMemory
 
 
 def png() -> bytes:
@@ -273,6 +274,109 @@ class PhotoCaptureMemoryTests(unittest.TestCase):
                     store.refresh(captures)
             finally:
                 store.close()
+                captures.db.close()
+
+
+class PhotoCaptureMemoriesTests(unittest.TestCase):
+    """Preserve existing original selectors while offering a bounded later experiment round."""
+
+    def test_original_root_and_second_round_discover_export_without_rewriting(self) -> None:
+        """One provider exports old root bytes and new child bytes through their exact manifests."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            captures = Captures(root / "capture")
+            captures.add("photo-memory")
+            first = publisher(root / "memory")
+            first.refresh(captures)
+            original = first.record_path.read_bytes()
+            manifest_one = first.discover()["manifests"][0]
+            captures.add("photo-memory-02")
+            second = PhotoCaptureMemory(
+                root / "memory/round02", "lite3-dog2", "photo-memory-02", "capture", "camera"
+            )
+            combined = PhotoCaptureMemories([first, second], root / "memory")
+            try:
+                combined.refresh(captures)
+                manifests = combined.discover()["manifests"]
+                self.assertEqual(len(manifests), 2)
+                self.assertEqual(manifests[0], manifest_one)
+                self.assertEqual(first.record_path.read_bytes(), original)
+                for index, manifest in enumerate(manifests):
+                    path = combined.export({"manifest": manifest})["path"]
+                    self.assertEqual((combined.root / path).read_bytes(), png())
+                    self.assertEqual(path.startswith("round02/"), index == 1)
+                foreign = copy.deepcopy(manifests[1])
+                foreign["selector"]["revision_id"] = "r2"
+                with self.assertRaisesRegex(ValueError, "missing_or_ambiguous"):
+                    combined.export({"manifest": foreign})
+            finally:
+                combined.close()
+                captures.db.close()
+            first = publisher(root / "memory")
+            second = PhotoCaptureMemory(
+                root / "memory/round02", "lite3-dog2", "photo-memory-02", "capture", "camera"
+            )
+            combined = PhotoCaptureMemories([first, second], root / "memory")
+            try:
+                self.assertEqual(combined.discover()["manifests"], manifests)
+                self.assertEqual(first.record_path.read_bytes(), original)
+            finally:
+                combined.close()
+
+    def test_duplicate_selector_and_external_root_refuse_without_closing_children(self) -> None:
+        """Invalid composition grants no ownership and cannot close a caller's open publication."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = publisher(root / "memory")
+            duplicate = publisher(root / "memory/duplicate")
+            outside = PhotoCaptureMemory(
+                root / "outside", "lite3-dog2", "photo-memory-02", "capture", "camera"
+            )
+            try:
+                with self.assertRaisesRegex(ValueError, "duplicate"):
+                    PhotoCaptureMemories([first, duplicate], root / "memory")
+                with self.assertRaisesRegex(ValueError, "outside"):
+                    PhotoCaptureMemories([first, outside], root / "memory")
+                for publication in (first, duplicate, outside):
+                    self.assertFalse(publication.owner.closed)
+                with self.assertRaisesRegex(ValueError, "bounded"):
+                    PhotoCaptureMemories([], root / "memory")
+                with self.assertRaisesRegex(ValueError, "bounded"):
+                    PhotoCaptureMemories([first] * 17, root / "memory")
+            finally:
+                outside.close()
+                duplicate.close()
+                first.close()
+
+    def test_child_unsafe_export_and_reverse_close_are_enforced(self) -> None:
+        """Child metadata cannot choose an external path, and successful ownership closes once."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            captures = Captures(root / "capture")
+            captures.add()
+            first = publisher(root / "memory")
+            second = PhotoCaptureMemory(
+                root / "memory/round02", "lite3-dog2", "photo-memory-02", "capture", "camera"
+            )
+            combined = PhotoCaptureMemories([first, second], root / "memory")
+            order: list[str] = []
+            try:
+                combined.refresh(captures)
+                manifest = first.discover()["manifests"][0]
+                for path in ("../outside.png", str(root / "outside.png")):
+                    with patch.object(first, "export", return_value={"path": path}):
+                        with self.assertRaisesRegex(ValueError, "unsafe"):
+                            combined.export({"manifest": manifest})
+                with (
+                    patch.object(first, "close", side_effect=lambda: order.append("first")),
+                    patch.object(second, "close", side_effect=lambda: order.append("second")),
+                ):
+                    combined.close()
+                    combined.close()
+                self.assertEqual(order, ["second", "first"])
+            finally:
+                first.close()
+                second.close()
                 captures.db.close()
 
 
