@@ -36,6 +36,7 @@ ARCHIVE_SCHEMAS = {
     "roboguide.recovery-profile/v0.29",
     "roboguide.recovery-profile/v0.30",
     "roboguide.recovery-profile/v0.31",
+    "roboguide.recovery-profile/v0.32",
 }
 OWNER_FILE = ".retention-owner.json"
 FENCE_FILE = "blobs"
@@ -62,8 +63,44 @@ MAINTENANCE_SCHEMAS = {
     "roboguide.recovery-profile/v0.29",
     "roboguide.recovery-profile/v0.30",
     "roboguide.recovery-profile/v0.31",
+    "roboguide.recovery-profile/v0.32",
 }
 MAX_OWNER_BYTES = 4096
+LEGACY_STORAGE = "roboguide.artifact-storage/legacy"
+
+
+def is_legacy(component: dict[str, Any], profile_schema: str) -> bool:
+    """Select only explicitly declared legacy bytes without adopting a retained owner."""
+    return (
+        profile_schema == "roboguide.recovery-profile/v0.32"
+        and component.get("kind") == "artifact"
+        and component.get("storage_schema") == LEGACY_STORAGE
+    )
+
+
+def validate_legacy(root: Path) -> None:
+    """Check the original bare-blob layout and lease while refusing retained-format markers."""
+    real_directory(root)
+    forbidden = {
+        OWNER_FILE,
+        "objects-v1",
+        ".retention-intent.json",
+        ".maintenance-upgrade.json",
+        "maintenance-v1",
+        "reference-authorities-v1",
+        "reclamation-v1",
+        "retirement-v1",
+    }
+    for entry in root.iterdir():
+        if entry.name in forbidden or entry.name not in {"blobs", "staging", ".writer.lock"}:
+            raise ValueError(
+                "legacy Artifact contains an unknown or retained-owner generation marker"
+            )
+    real_directory(root / "blobs")
+    real_directory(root / "blobs/sha256")
+    real_directory(root / "staging")
+    if not stat.S_ISREG((root / ".writer.lock").lstat().st_mode):
+        raise ValueError("legacy Artifact requires its actual regular writer lease")
 
 
 def supports(profile_schema: str) -> bool:
@@ -77,6 +114,8 @@ def metadata_files(component: dict[str, Any], profile_schema: str) -> list[str]:
         from .replica_content import metadata_files as root_metadata
 
         return root_metadata(component)
+    if is_legacy(component, profile_schema):
+        return []
     return (
         [OWNER_FILE, FENCE_FILE]
         if component["kind"] == "artifact" and supports(profile_schema)
@@ -163,6 +202,7 @@ def validate_storage(
             "roboguide.recovery-profile/v0.29",
             "roboguide.recovery-profile/v0.30",
             "roboguide.recovery-profile/v0.31",
+            "roboguide.recovery-profile/v0.32",
         }
         else "roboguide.artifact-storage/v3"
         if profile_schema in ARCHIVE_SCHEMAS
@@ -276,6 +316,15 @@ def validate_bundle(
     if not supports(profile_schema):
         return
     component_id = component["component_id"]
+    if is_legacy(component, profile_schema):
+        directory = root / "stores" / component_id
+        # Writer locks are excluded from immutable snapshots and created only on restore.
+        for entry in directory.iterdir():
+            if entry.name not in {"blobs", "staging"}:
+                raise ValueError("legacy Artifact bundle contains hidden retained-owner authority")
+        real_directory(directory / "blobs/sha256")
+        real_directory(directory / "staging")
+        return
     for name in metadata_files(component, profile_schema):
         record = records.get(f"stores/{component_id}/{name}")
         if record is None or record["kind"] != "content" or record["byte_size"] > MAX_OWNER_BYTES:
@@ -304,5 +353,6 @@ def validate_bundle(
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
         "roboguide.recovery-profile/v0.31",
+        "roboguide.recovery-profile/v0.32",
     } and (owner is None or owner["schema"] != component["storage_schema"]):
         raise ValueError("original Artifact bundle format differs from the explicit declaration")

@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import sqlite3
+from collections.abc import Iterator, Mapping
 from contextlib import closing
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.29",
     "roboguide.recovery-profile/v0.30",
     "roboguide.recovery-profile/v0.31",
+    "roboguide.recovery-profile/v0.32",
 }
 WRAPPER = "roboguide.controller-checkpoint/v48"
 WRAPPERS = {
@@ -171,6 +173,7 @@ def _controller(
     database: Path,
     profile_schema: str,
     budget: OperationBudget,
+    archive_roots: Mapping[str, Path] | None = None,
 ) -> tuple[
     dict[tuple[str, str], dict[str, Any]], dict[tuple[str, str], tuple[str, dict[str, Any]]]
 ]:
@@ -194,7 +197,7 @@ def _controller(
         from .controller_storage import table_names
         from .controller_storage import validate as validate_controller
 
-        validate_controller(connection, profile_schema)
+        validate_controller(connection, profile_schema, archive_roots=archive_roots)
         connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, MAX_EVIDENCE_BYTES)
         connection.set_progress_handler(progress, 1000)
         tables = table_names(connection)
@@ -235,6 +238,7 @@ def _controller(
                 "roboguide.recovery-profile/v0.29",
                 "roboguide.recovery-profile/v0.30",
                 "roboguide.recovery-profile/v0.31",
+                "roboguide.recovery-profile/v0.32",
             }
         ):
             raise ValueError("Prepared recovery wrapper requires explicit recovery v0.18")
@@ -266,6 +270,7 @@ def _controller(
                 "roboguide.recovery-profile/v0.29",
                 "roboguide.recovery-profile/v0.30",
                 "roboguide.recovery-profile/v0.31",
+                "roboguide.recovery-profile/v0.32",
             }
         ):
             raise ValueError("upload-retention wrapper requires explicit recovery v0.16")
@@ -292,6 +297,7 @@ def _controller(
             "roboguide.recovery-profile/v0.29",
             "roboguide.recovery-profile/v0.30",
             "roboguide.recovery-profile/v0.31",
+            "roboguide.recovery-profile/v0.32",
         } and (
             connection.execute(
                 "SELECT 1 FROM events WHERE payload_schema='domain.EventPayload.json/v32' LIMIT 1"
@@ -329,6 +335,7 @@ def _controller(
             "roboguide.recovery-profile/v0.29",
             "roboguide.recovery-profile/v0.30",
             "roboguide.recovery-profile/v0.31",
+            "roboguide.recovery-profile/v0.32",
         } and any(row.get("payload_schema") == "domain.EventPayload.json/v32" for row in archived):
             raise ValueError("protected Prepared recovery needs complete parent8/Root4 recovery")
         original_archives = archive_references.operations(
@@ -396,15 +403,27 @@ def _controller(
         selected_columns = ",".join(
             name if name in columns else "NULL AS " + name for name in envelope_columns
         )
-        for envelope in chain(
-            history,
-            (
-                dict(zip(envelope_columns, row, strict=True))
-                for row in connection.execute(
-                    "SELECT " + selected_columns + " FROM events ORDER BY sequence"
+        from .controller_storage import STORAGE_V2, STORAGE_V3, actual_format
+
+        envelopes: Iterator[dict[str, Any]]
+        if actual_format(connection) in {STORAGE_V2, STORAGE_V3}:
+            envelopes = (
+                json.loads(data)
+                for (data,) in connection.execute(
+                    "SELECT data FROM catalog_recovery_events ORDER BY sequence"
                 )
-            ),
-        ):
+            )
+        else:
+            envelopes = chain(
+                history,
+                (
+                    dict(zip(envelope_columns, row, strict=True))
+                    for row in connection.execute(
+                        "SELECT " + selected_columns + " FROM events ORDER BY sequence"
+                    )
+                ),
+            )
+        for envelope in envelopes:
             schema, raw = envelope["payload_schema"], envelope["payload_json"]
             budget.check()
             total += len(raw.encode())
@@ -494,6 +513,7 @@ def _controller(
             "roboguide.recovery-profile/v0.29",
             "roboguide.recovery-profile/v0.30",
             "roboguide.recovery-profile/v0.31",
+            "roboguide.recovery-profile/v0.32",
         }:
             from .scoped_map_recovery import validate_catalog
 
@@ -513,7 +533,11 @@ def validate(
     tombstones: dict[str, set[str]] = {}
     for component in components:
         budget.check()
-        if component["kind"] == "artifact" and artifact_layout.supports(profile_schema):
+        if (
+            component["kind"] == "artifact"
+            and artifact_layout.supports(profile_schema)
+            and not artifact_layout.is_legacy(component, profile_schema)
+        ):
             owner = artifact_layout.validate_storage(
                 root / "stores" / component["component_id"], profile_schema
             )
@@ -536,7 +560,16 @@ def validate(
         name = f"stores/{component['component_id']}/{component['database']}"
         if name not in files:
             raise ValueError("Catalog authority database is missing")
-        heads, publications = _controller(root / name, profile_schema, budget)
+        heads, publications = _controller(
+            root / name,
+            profile_schema,
+            budget,
+            {
+                item["root"]: root / "stores" / item["component_id"]
+                for item in components
+                if item["kind"] == "archive"
+            },
+        )
         for key, reference in heads.items():
             if key not in publications:
                 raise ValueError("original Catalog reference has no actual publication")

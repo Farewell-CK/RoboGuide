@@ -23,6 +23,19 @@ def catalog_rows(
     profile_schema: str = gc.SCHEMA,
 ) -> list[dict[str, Any]]:
     """Keep original archived envelopes and the consistent tail inside fixed bounds."""
+    from .controller_storage import STORAGE_V2, STORAGE_V3, actual_format
+
+    if actual_format(connection) in {STORAGE_V2, STORAGE_V3}:
+        from .controller_values import validate_catalog
+
+        validate_catalog(connection, profile_schema)
+        result = []
+        for (data,) in connection.execute(
+            "SELECT data FROM catalog_recovery_events ORDER BY sequence"
+        ):
+            budget.check()
+            result.append(json.loads(data))
+        return result
     result = archive_references.catalog_history(connection, profile_schema, budget)
     total = sum(len(canonical(row)) for row in result)
     connection.row_factory = sqlite3.Row
@@ -588,13 +601,14 @@ def validate_bundle(
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
         "roboguide.recovery-profile/v0.31",
+        "roboguide.recovery-profile/v0.32",
     }:
         return
     from . import artifact_layout
 
     owners = {}
     for component in components:
-        if component["kind"] != "artifact":
+        if component["kind"] != "artifact" or artifact_layout.is_legacy(component, profile_schema):
             continue
         directory = root / "stores" / component["component_id"]
         owner = artifact_layout.validate_storage(directory, profile_schema)
@@ -624,6 +638,16 @@ def validate_bundle(
 
             archive_rows = coordinated_operations(connection, profile_schema, budget)
         candidates = {owner: value for owner, value in owners.items() if authority in value[1]}
+        legacy = [
+            item["component_id"]
+            for item in components
+            if artifact_layout.is_legacy(item, profile_schema)
+            and item["component_id"] in component["depends_on"]
+        ]
+        if len(legacy) > 1 or (legacy and candidates):
+            raise ValueError("bare Artifact inputs have ambiguous declared original storage")
+        legacy_required: list[tuple[str, int, str | None]] = []
+        replicated = any(item["kind"] in {"replica", "replica-content"} for item in components)
         required: list[tuple[str, dict[str, dict[str, Any]], str, int, str | None]] = []
         for original in archive_rows:
             if original["completed_ms"] is None:
@@ -636,7 +660,9 @@ def validate_bundle(
                 (archive_owner[0], archive_owner[2], key["content_digest"], key["byte_size"], None)
             )
         for key, upload in uploads.items():
-            if profile_schema in {
+            if (
+                replicated or profile_schema != "roboguide.recovery-profile/v0.32"
+            ) and profile_schema in {
                 "roboguide.recovery-profile/v0.19",
                 "roboguide.recovery-profile/v0.20",
                 "roboguide.recovery-profile/v0.21",
@@ -650,10 +676,20 @@ def validate_bundle(
                 "roboguide.recovery-profile/v0.29",
                 "roboguide.recovery-profile/v0.30",
                 "roboguide.recovery-profile/v0.31",
+                "roboguide.recovery-profile/v0.32",
             }:
                 # Root's exact committed origins own replicated uploads; local projections may lag.
                 continue
             if upload["phase"] not in {"prepared", "completed"}:
+                continue
+            if legacy:
+                legacy_required.append(
+                    (
+                        upload["content_digest"],
+                        upload["byte_size"],
+                        "staging/" + key + ".partial" if upload["phase"] == "prepared" else None,
+                    )
+                )
                 continue
             released = retired.get(key)
             for owner, (identifier, _, tombstones) in candidates.items():
@@ -679,6 +715,11 @@ def validate_bundle(
                     continue
                 evidence = payload[kind]["receipt"]["evidence"]
                 if evidence.get("artifact_digest") is not None:
+                    if legacy:
+                        legacy_required.append(
+                            (evidence["artifact_digest"], evidence["artifact_size_bytes"], None)
+                        )
+                        continue
                     for identifier, _, tombstones in candidates.values():
                         required.append(
                             (
@@ -691,6 +732,18 @@ def validate_bundle(
                         )
                     if not candidates:
                         raise ValueError("original verifier/goal CAS owner is unavailable")
+        for checksum, size, staging in legacy_required:
+            names = ["blobs/sha256/" + checksum[7:9] + "/" + checksum[7:]]
+            if staging is not None:
+                names.append(staging)
+            if not any(
+                files.get("stores/" + legacy[0] + "/" + name, {}).get("content_digest") == checksum
+                and files["stores/" + legacy[0] + "/" + name]["byte_size"] == size
+                for name in names
+            ):
+                raise ValueError(
+                    "original legacy Artifact input lacks its exact declared blob bytes"
+                )
         for identifier, tombstones, checksum, size, staging in required:
             if checksum in tombstones:
                 raise ValueError(
