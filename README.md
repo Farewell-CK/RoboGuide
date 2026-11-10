@@ -3,10 +3,12 @@
 [双节点无运动照片交接](docs/decisions/0245-no-motion-photo-handoff.md)复用现有 Mission、
 顺序依赖和 Global Memory/Artifact：一个节点采图，另一个节点读取同摘要的原图并校验。
 新增受限计算能力仍在原 Connector 内，软件通过与现场执行分别记录。
+[本轮真机验收](docs/development/acceptance/2026-11-10-two-dog-photo-handoff.md)已完成真实
+MI、狗2采图、狗1原字节校验和重传/重启检查，未执行运动或语义视觉任务。
 
 [数据治理实施记录](docs/development/rg-data-governance-implementation.md)跟踪独立整合分支的
 v3 无损正文去重、恢复工具、保留策略、归档与 MI 姿态验证；代码、隔离验收、现场启用和
-真机效果分别记录，当前尚未部署 ThinkPad。
+真机效果分别记录；ThinkPad 当前运行实验恢复副本，长期发布门槛仍未全部验收。
 
 [Controller 启动优化](docs/development/controller-startup-streaming-2026-11-09.md)先将
 Catalog 恢复改为单次流式校验，只保留相关事件，并复用同轮定位证据。

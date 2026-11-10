@@ -11,6 +11,9 @@
 原请求在读取前持久化，重启在途为 Unknown、不自动重做。校验仅证明摘要、长度及
 PNG/JPEG 容器/声明尺寸，不证明像素解码、视觉质量或物理效果。
 接口和验收边界见[ADR-0245](../../docs/decisions/0245-no-motion-photo-handoff.md)。
+2026-11-10 [真实双节点验收](../../docs/development/acceptance/2026-11-10-two-dog-photo-handoff.md)
+保留首轮启动时序失败及其修复；第二轮真实 MI、跨节点原图消费、重传和消费者重启通过。
+这不包含像素语义、运动或通用 Memory-use 验收。
 
 姿态任务的“调用结束”与“目标达成”应分开。可选的
 [reported-posture 目标评估器](robonix_task/posture_goal.py)复用既有 RG State 读取，

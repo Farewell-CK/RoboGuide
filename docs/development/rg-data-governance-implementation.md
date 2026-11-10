@@ -19,6 +19,13 @@ MI's current World-only grounding still excludes Node robot-state; this is an ex
 integration boundary, not a completed MI state gate. See
 [power-on sampling acceptance](acceptance/2026-11-10-dog2-poweron-state-sampling.md).
 
+The later authorized two-dog experiment completed a real MI-planned, single-Mission
+sequential photo handoff: dog2 captured and published original PNG bytes, dog1 consumed and
+independently checked the exact Global Memory/Artifact. The first activation race remains a
+Failed original Mission; a fixed new request completed. This neither finishes the deferred
+retention work nor proves physical motion, generic Memory-use or 24-hour stability. See
+[the two-dog acceptance](acceptance/2026-11-10-two-dog-photo-handoff.md).
+
 ## Fixed acceptance contract
 
 - Ordinary telemetry: 24-hour hot window, then 30 days from verified durable archive publication.
