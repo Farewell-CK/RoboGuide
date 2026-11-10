@@ -327,3 +327,32 @@ including exact original readback and source epoch changes. Body-write reduction
 99.99% / 99.999% / 99.9999%; subsequent Catalog recovery took 0.002663 / 0.002421 / 0.003933 s.
 The million-observation probe peak RSS was 20356 KiB. These probe results are not full Controller
 readiness, retention plateau or 24-hour performance acceptance.
+
+## Complete cold recovery accepted; actual soak running
+
+The backup-only acceptance completed successfully on ThinkPad with frozen R7 runtime programs
+and the source-bound R9 recovery tool. Backup, independent verification, new-directory restore,
+restored original-table comparison, original MI SQL comparison, strict actual old-writer refusal
+and final bundle verification all passed. The old writer exited 1 with its original refusal
+message; restored SQL SHA-256 stayed
+`cdefac89bc9fc8c876ac6db00b6d5e6519d54d5bf0873b5ea27ee1c96a888764`.
+
+The complete bundle contains 21 data/version files / 2650353482 bytes: one Controller SQL,
+one MI Request SQL, eight original bare Artifact CAS files and eleven deployment/program evidence
+files. Its manifest digest is
+`sha256:ec53d43d613d251b11733749494a79d21d93c8fcb6bdb8708510e1a4c5397ce0`.
+The transport archive includes that manifest as a twenty-second file, compresses to 415182316
+bytes and has SHA-256 `1eb440f3d0537fd8b7d9e2479a984e907c747476da690bc6aaeb3341cd8508ca`.
+It was copied to Windows and independently checked, including canonical manifest digest. The
+separate encrypted sensitive-configuration backup remains separate; no private-key/env file is
+included in the public bundle. Its release status is candidate-not-deployed, not field rollout.
+
+After the original complete recovery receipt, the actual one-shot 86400-second two-Node soak
+started around 2026-11-10 14:55 Asia/Shanghai, unit `rg-soak-24h-r9-final-20261110.service`.
+The script uses the original fixed workload, 3600-second warmup, 300-second RSS windows,
+512 MiB Controller RSS ceiling, <=5% postwarmup growth, <=10% one-core average CPU, <=200 ms
+Inventory/State-read P95 and zero freshness/API errors. Aggregate resources are capped at 4 GiB,
+two CPU cores and no swap; the private output cap remains 2 GiB. The initial sample was healthy.
+This is running evidence, not completed 24-hour acceptance. The full control-write API gap,
+permanent expiry/31-day plateau, journal/Catalog compaction, replicated v3 and physical-effect
+validation remain explicitly outstanding. Field Controller/MI are stopped; no robot was contacted.
