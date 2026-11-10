@@ -12,6 +12,13 @@ Actual MI origin capture, central Memory readback/planning and original request 
 navigation remains unapproved. See
 [the no-motion field acceptance](acceptance/2026-11-10-dog2-mi-origin-readonly.md).
 
+Subsequent chassis power-on check found and fixed slow sensor sampling delaying chassis
+reports in the same Connector. Linux integration tests passed (67); the updated dog2 Connector
+returned 23/23 valid reported-posture reads over 44.683 seconds. No Pilot task was added.
+MI's current World-only grounding still excludes Node robot-state; this is an explicit remaining
+integration boundary, not a completed MI state gate. See
+[power-on sampling acceptance](acceptance/2026-11-10-dog2-poweron-state-sampling.md).
+
 ## Fixed acceptance contract
 
 - Ordinary telemetry: 24-hour hot window, then 30 days from verified durable archive publication.
