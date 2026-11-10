@@ -152,5 +152,3 @@ target = "/execution_id"
 [operations.workflow.cancel.request.bindings.value]
 kind = "pointer"
 pointer = "/local_handle"
-
-
