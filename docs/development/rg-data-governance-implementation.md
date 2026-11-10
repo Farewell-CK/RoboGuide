@@ -4,6 +4,14 @@ This implements the user's original A–F plan on `codex/rg-data-governance`. La
 drafts do not replace the authorized gates. The integration base is `7fd7b2d1`, retaining both
 `f0247aa4` and `5ac441d9`; unrelated unfinished mobile work is excluded.
 
+Latest experiment status (2026-11-10): the operator subsequently deferred the four long-term
+retention/compaction items and requested continuing real RG experiments. The isolated soak was
+interrupted after 1685 seconds and is not a 24-hour pass. Frozen R7 Controller/R9 MI now run an
+explicit experimental restored copy on ThinkPad; the original field stores remain preserved.
+Actual MI origin capture, central Memory readback/planning and original request replay passed;
+navigation remains unapproved. See
+[the no-motion field acceptance](acceptance/2026-11-10-dog2-mi-origin-readonly.md).
+
 ## Fixed acceptance contract
 
 - Ordinary telemetry: 24-hour hot window, then 30 days from verified durable archive publication.
@@ -50,7 +58,9 @@ shrink is separately reported and no VACUUM has been silently performed.
 
 ## Deployment boundary
 
-This branch has not been deployed to ThinkPad. No new robot command is authorized by this work.
+Formal long-run release remains unaccepted. A later operator-authorized no-motion field
+experiment uses frozen programs against restored copies, as described in the latest status above.
+No robot motion is authorized by the data-governance work.
 The minutely worker must report incomplete coverage rather than infer permission from terminal
 Mission counts or command-name prefixes. It cannot delete data until every required reference
 source and the existing durable archive receipt contract are connected. This ledger does not
