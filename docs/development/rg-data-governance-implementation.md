@@ -254,3 +254,41 @@ verified owned candidate, preserves logical SQL, fsyncs candidate bytes and only
 the clone. The field database is never the VACUUM target. Actual restored SQL, legacy Artifact,
 MI Request database and deployment-version evidence still need end-to-end acceptance before
 the authorized 24-hour two-Node soak and field switch.
+
+## Cold-recovery run and connectivity interruption
+
+The next cold-recovery attempt (`field-r6-restore-gate-retry2`) verified completed task units,
+recorded the exact protected system-process visibility exclusions and removed only the unused
+task-owned release build cache. It then drained the owned database's WAL through SQLite under
+the actual path/inode leases and verified all SQL identities unchanged. The field SQL, MI Request
+SQL and original Artifact root were not replacement or cleanup targets.
+
+`VACUUM INTO` produced a 2506993664-byte owned candidate from the 5709590528-byte migrated clone.
+The candidate passed the streaming audit and full identity comparison. Replacement, fsync,
+complete bundle creation, new-directory restore and old-writer refusal are subsequent separate
+steps; their final result has not been observed. The script preserves the old owned clone until
+the exact candidate validations, durable-file sync and lease checks permit an atomic replacement.
+
+SSH connectivity to ThinkPad subsequently failed: connections first reset/closed, then timed out
+on both 192.168.2.20 and the configured 100.116.9.127 Tailscale address. The local WLAN still had
+192.168.2.13; Tailscale marked SW-ThinkPad-X1-Carbon offline. This does not establish whether the
+host slept, lost power or lost networking, nor whether the background recovery script completed.
+Its last directly observed new evidence was the successful compacted audit and subsequent SQL
+descriptor check. Reconnect and inspect the retained original phase result before proceeding.
+
+The one-shot 24-hour wrapper is configured to wait for that exact recovery attempt's strict
+`passed=true`, the completed 100-Node result and both successful R6 Python stages. It cannot call
+the short runs a 24-hour pass. Its initial pre-start interruption and session-bus environment
+failure were retained separately; the corrected wrapper was last observed waiting for recovery.
+No 24-hour workload or field deployment is reported as started or passed. The original Controller
+and MI services were last directly observed inactive under the operator's stop authorization.
+
+The operator then reported rebooting ThinkPad, and SSH recovered. Boot identity is
+`48017a69-9d4a-4f87-aa68-85e80518a839`. The original enabled Controller started automatically;
+MI was waiting for Controller readiness. Both were stopped again under the existing maintenance
+authorization, and the interrupted MI startup's failed status was cleared without restarting it.
+Original SQL still contained 1465461 events, one checkpoint and 651747 command rows; no physical
+command was issued. Both owned SQL files survived, including the candidate's empty WAL/SHM.
+The interrupted run has no final phase receipt and must be resumed with fresh boot/process leases,
+full candidate validation and the original frozen source/program identities. No old process tuple
+or unobserved completion is accepted after reboot.
