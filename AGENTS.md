@@ -79,6 +79,9 @@ ADR-0240 adds opt-in --chassis-state in the existing combined Connector. It samp
 fixed Robonix chassis/state tool through Atlas/MCP, closes its own session/channel and adds
 cached chassis evidence to the existing robot-state export. Central posture inspection GETs
 only authenticated Controller State/inventory and refuses expired/unknown/foreign evidence.
+The combined Connector's robonix_task/observation_workers.py isolates chassis sampling from
+slow sensor probes in the same process: chassis waits 1s after each sample, sensors retain 3s.
+Join both serial source workers before closing their transports; never extend TTL to hide delays.
 Retain the source's shorter stale_ms through Controller retention; evidence output uses a
 new file and unavailable exits 2. Merge review regression reproduces both original failures.
 Do not replace Robonix posture logic with joint-angle inference or infer damping/remote state.

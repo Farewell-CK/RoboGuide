@@ -15,6 +15,7 @@ from robonix_task.adapter import Adapter, Server
 from robonix_task.adapter import Handler as PilotHandler
 from robonix_task.chassis_state import ChassisStateObserver
 from robonix_task.host import inspect_host
+from robonix_task.observation_workers import ObservationWorkers
 from robonix_task.origin import OriginStore
 from robonix_task.position import annotate_mapping_age
 from robonix_task.protocol import Liaison
@@ -166,14 +167,6 @@ def main():
         """Let the serving thread exit its request loop without signal deadlock."""
         stopping.set()
 
-    def observe():
-        """Refresh robot observations independently of request handlers."""
-        while not stopping.is_set():
-            observer.sample()
-            if chassis is not None:
-                chassis.sample()
-            stopping.wait(3)
-
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
     with ExitStack() as cleanup:
@@ -206,10 +199,11 @@ def main():
                 captures, observer, origins, args.node_id, chassis
             )
             server.timeout = 0.5
-            observer_thread = threading.Thread(target=observe, name="robonix-observer")
-            observer_thread.start()
-            cleanup.callback(observer_thread.join)
-            cleanup.callback(stopping.set)
+            workers = ObservationWorkers(
+                observer.sample, chassis.sample if chassis is not None else None, stopping
+            )
+            cleanup.callback(workers.close)
+            workers.start()
             while not stopping.is_set():
                 server.handle_request()
         finally:
