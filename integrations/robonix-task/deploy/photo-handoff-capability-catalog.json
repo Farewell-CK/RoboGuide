@@ -1,0 +1,25 @@
+{
+  "schema_version": "roboguide.capability-catalog/v0.3",
+  "capabilities": [
+    {"contract": {"namespace": "lite3", "name": "capture-rgb", "version": "v1"}, "description": "Read one new local RGB frame without any actuator operation.", "attributes": []},
+    {"contract": {"namespace": "image", "name": "inspect", "version": "v1"}, "description": "Consume the original producer's exact Global photo Artifact under a restricted read identity and check its content digest and image container.", "attributes": []}
+  ],
+  "operations": [
+    {
+      "operation": {"namespace": "lite3", "name": "capture-rgb", "version": "v1"},
+      "description": "Capture one RGB frame after the original request boundary, retain PNG bytes and finalize them in the central Artifact service. Explicit photo_memory_id offers only that preallocated selector as Global Memory. No motion, map load, Pilot or semantic analysis.",
+      "parameters": [{"name": "photo_memory_id", "type": "string", "required": true, "description": "Exact preallocated immutable photo selector authorized by deployment; revision r1, never an arbitrary file path or URL."}],
+      "required_capabilities": [{"namespace": "lite3", "name": "capture-rgb", "version": "v1"}]
+    },
+    {
+      "operation": {"namespace": "image", "name": "inspect", "version": "v1"},
+      "description": "Only after the same Mission's producer Task completes, consume its exact attempt's immutable Global photo Memory. The selected compute node checks original digest, byte length and image container dimensions, and returns its own receipt. It does not decode pixels, judge visual quality, identify objects or operate robots. The Task must depend on the actual producing Task; use sequential-handoff. RG owns matching/Commit/Bind. Unique producer selection and independent consumer placement must be established by RG configuration, never by a local robot proving cluster identity.",
+      "parameters": [
+        {"name": "producer_node_id", "type": "string", "required": true, "description": "Deployment-fixed enrolled original producer identity used for exact attributed input verification, not receiver identity selection."},
+        {"name": "producer_task_id", "type": "string", "required": true, "description": "Exact producing Task in this Mission's DAG."},
+        {"name": "producer_role_id", "type": "string", "required": true, "description": "Exact Role of the producing camera attempt."}
+      ],
+      "required_capabilities": [{"namespace": "image", "name": "inspect", "version": "v1"}]
+    }
+  ]
+}

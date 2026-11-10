@@ -1,5 +1,9 @@
 # RoboGuide
 
+[双节点无运动照片交接](docs/decisions/0245-no-motion-photo-handoff.md)复用现有 Mission、
+顺序依赖和 Global Memory/Artifact：一个节点采图，另一个节点读取同摘要的原图并校验。
+新增受限计算能力仍在原 Connector 内，软件通过与现场执行分别记录。
+
 [数据治理实施记录](docs/development/rg-data-governance-implementation.md)跟踪独立整合分支的
 v3 无损正文去重、恢复工具、保留策略、归档与 MI 姿态验证；代码、隔离验收、现场启用和
 真机效果分别记录，当前尚未部署 ThinkPad。

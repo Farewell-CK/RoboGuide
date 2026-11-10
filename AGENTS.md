@@ -1,3 +1,10 @@
+ADR-0245 adds opt-in no-motion photo handoff in the existing combined Connector. Keep the original
+Mission DAG and sequential-handoff; publish only the explicitly preallocated photo selector, bind
+original producer/consumer Task/attempt and central manifest/digest, and use restricted read identities.
+Photo inputs are not Spatial maps. image_inspection/photo_jobs/photo_handoff/photo_capture_memory
+own local bounded receipts and bytes, not Control, Memory-use or robot authority. Interrupted consumers
+remain Unknown without replay. Container/header validation is not pixel/semantic or physical verification.
+
 ADR-0244 introduces opt-in standalone Controller storage v3. Preserve exact original event bytes,
 per-observation source time/epoch/sequence/TTL, original external command receipts and protected
 decision evidence. Deduplicate immutable State values only; never reintroduce full duplicate State

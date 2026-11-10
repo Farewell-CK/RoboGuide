@@ -1,5 +1,17 @@
 # Robonix 本机任务接入
 
+可选的[照片交接配置](deploy/photo-handoff-mission-plan.json)使用一个 Mission 的
+`sequential-handoff`：狗2采图并显式发布一个预分配 Global Memory selector，狗1在
+同一原任务依赖之后读取原摘要字节。部署分别追加
+[图片校验能力](deploy/image-inspection-node.fragment.toml)与
+[照片 provider](deploy/photo-memory-node.fragment.toml)，沿原 Connector 启用
+`--image-inspection-config` / `--photo-memory-config`。不新增服务或运动权限。
+消费者凭独立 viewer/local 身份核对当前原 producer/consumer attempt，Artifact viewer
+仅授权本轮 Memory ID；这不是原 Node leaf，不能冒用 Node lifecycle 身份。
+原请求在读取前持久化，重启在途为 Unknown、不自动重做。校验仅证明摘要、长度及
+PNG/JPEG 容器/声明尺寸，不证明像素解码、视觉质量或物理效果。
+接口和验收边界见[ADR-0245](../../docs/decisions/0245-no-motion-photo-handoff.md)。
+
 姿态任务的“调用结束”与“目标达成”应分开。可选的
 [reported-posture 目标评估器](robonix_task/posture_goal.py)复用既有 RG State 读取，
 要求在确切本机 attempt 完成后记录 anchor，再等到同来源、同 epoch、原生采样标识更新的报告。

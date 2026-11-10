@@ -1,5 +1,9 @@
 # RoboGuide V2 现行架构
 
+[ADR-0245](../../decisions/0245-no-motion-photo-handoff.md)定义首轮无运动双节点照片交接：
+原 Mission DAG/`sequential-handoff` 负责先后，现有 Global Memory/Artifact 保留原图来源，
+受限消费者只核验同一原任务和摘要；不新增调度或运动权威。实施与现场验收分别记录。
+
 [ADR-0244](../../decisions/0244-state-retention-and-deduplicated-storage.md)规划并实现存储 v3
 的无损遥测正文引用与受控历史保留：当前 State/TTL 语义不变，原事务覆盖正文、事件和恢复
 投影；首次部署只评估策略。备份、长跑、现场和复制交付分别验收，当前工作尚在实施。

@@ -1,0 +1,35 @@
+# Append to dog2's existing Node config, retaining its Artifact settings and camera operation.
+# --photo-memory-root must resolve to state_directory/memory/photo-captures.
+# The one preallocated experiment selector is explicit in the Connector's photo-memory profile.
+[[memory_providers]]
+id = "photo-captures"
+owner = "dog2-camera"
+kind = "artifact"
+scope = "global"
+visibility = "exchangeable"
+payload_schema = "roboguide.rgb-image/v0.1"
+media_type = "image/png"
+storage_directory = "memory/photo-captures"
+[memory_providers.discover]
+manifests_pointer = "/steps/photo-discover/manifests"
+[[memory_providers.discover.steps]]
+id = "photo-discover"
+connection = "camera-http"
+[memory_providers.discover.steps.operation]
+kind = "http"
+method = "GET"
+path = "/v1/photo-memories/discover"
+[memory_providers.export]
+artifact_path_pointer = "/steps/photo-export/path"
+[[memory_providers.export.steps]]
+id = "photo-export"
+connection = "camera-http"
+[memory_providers.export.steps.operation]
+kind = "http"
+method = "POST"
+path = "/v1/photo-memories/export"
+[memory_providers.export.steps.request]
+base = {}
+[[memory_providers.export.steps.request.bindings]]
+target = "/manifest"
+value = { kind = "pointer", pointer = "/invocation/memory_manifest" }

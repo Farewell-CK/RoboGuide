@@ -1,0 +1,63 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.10",
+  "mission": {
+    "id": "two-dog-photo-handoff-example",
+    "objective": "Dog2 captures one new stationary RGB image; dog1 consumes those exact bytes and checks digest and image container without motion.",
+    "actors": [{"id": "photo-producer"}, {"id": "photo-consumer"}]
+  },
+  "contexts": [{
+    "id": "photo-handoff",
+    "roles": [{"id": "producer", "actor": "photo-producer"}, {"id": "consumer", "actor": "photo-consumer"}],
+    "relations": [],
+    "executor_constraints": [],
+    "coupling_mode": "sequential-handoff"
+  }],
+  "tasks": [
+    {
+      "id": "capture-photo",
+      "description": "Capture one request-new RGB image and explicitly offer this experiment's immutable photo Memory.",
+      "context_id": "photo-handoff",
+      "depends_on": [],
+      "coupling_mode": "sequential-handoff",
+      "roles": [{
+        "id": "capture-role",
+        "context_role": "producer",
+        "requirements": {
+          "capabilities": [{"contract": {"namespace": "lite3", "name": "capture-rgb", "version": "v1"}, "constraints": []}],
+          "resources": [{"kind": "compute", "units": 1}]
+        },
+        "execution_intent": {
+          "operation": {"namespace": "lite3", "name": "capture-rgb", "version": "v1"},
+          "objective": "Read one RGB camera frame generated after this request; publish its original PNG only. No Pilot, map or actuator operation.",
+          "parameters": {"photo_memory_id": "dog2-photo-handoff-20261110-01"}
+        },
+        "resource_scope": "task"
+      }],
+      "timing": {"earliest_start_offset_ms": 0, "latest_start_offset_ms": null, "completion_deadline_offset_ms": 120000},
+      "satisfaction": {"expected_effect": "One new RGB capture completed and its exact PNG was finalized in Artifact storage.", "basis": "execution-report", "verifier": null}
+    },
+    {
+      "id": "inspect-photo",
+      "description": "Consume only capture-photo's original completed attempt and exact published image; check SHA, size and bounded container dimensions.",
+      "context_id": "photo-handoff",
+      "depends_on": ["capture-photo"],
+      "coupling_mode": "sequential-handoff",
+      "roles": [{
+        "id": "inspect-role",
+        "context_role": "consumer",
+        "requirements": {
+          "capabilities": [{"contract": {"namespace": "image", "name": "inspect", "version": "v1"}, "constraints": []}],
+          "resources": [{"kind": "compute", "units": 1, "allocation_mode": "divisible", "resource_class": "image.inspection-slots/v1"}]
+        },
+        "execution_intent": {
+          "operation": {"namespace": "image", "name": "inspect", "version": "v1"},
+          "objective": "Read the original producer image and verify content digest, byte count, container and dimensions. Do not claim pixel decoding, visual semantics or physical effects; no robot command.",
+          "parameters": {"producer_node_id": "lite3-dog2", "producer_task_id": "capture-photo", "producer_role_id": "capture-role"}
+        },
+        "resource_scope": "task"
+      }],
+      "timing": {"earliest_start_offset_ms": 0, "latest_start_offset_ms": null, "completion_deadline_offset_ms": 180000},
+      "satisfaction": {"expected_effect": "The original producer's exact Artifact bytes were independently hashed and their image container checked on the consumer node.", "basis": "execution-report", "verifier": null}
+    }
+  ]
+}
