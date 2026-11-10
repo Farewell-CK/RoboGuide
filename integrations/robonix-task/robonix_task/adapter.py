@@ -84,8 +84,22 @@ class Adapter:
             raise ValueError("bounded objective required")
         if not isinstance(intent.get("parameters"), dict):
             raise ValueError("parameters object required")
-        if self.task_profile is not None and intent["parameters"] != {"profile": self.task_profile}:
-            raise ValueError("task profile differs from this deployment")
+        if self.task_profile is not None:
+            parameters = intent["parameters"]
+            if (
+                parameters.get("profile") != self.task_profile
+                or set(parameters) - {"profile", "expected_posture"}
+                or (
+                    "expected_posture" in parameters
+                    and (
+                        not isinstance(parameters["expected_posture"], str)
+                        or parameters["expected_posture"] not in {"standing", "down"}
+                    )
+                )
+            ):
+                raise ValueError(
+                    "task profile or explicit posture metadata differs from deployment"
+                )
         canonical(body)
 
     def schedule(self, function: Callable[..., Any], *args: Any) -> None:

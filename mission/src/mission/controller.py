@@ -455,6 +455,45 @@ class HttpMissionController:
             "mission_status": mission_status,
         }
 
+    def posture_goal_view(self, mission_id: str) -> dict[str, Any]:
+        """Read bounded scoped goal projections without resubmission or action authority."""
+        base = f"/v1/missions/{quote(mission_id, safe='')}"
+        result: dict[str, Any] = {}
+        for label, suffix in (
+            ("tenant", "/tenant"),
+            ("admission", "/admission"),
+            ("attempts", "/execution-attempts"),
+            ("mission", ""),
+        ):
+            status, document, _ = self._request("GET", base + suffix, None)
+            if status != 200:
+                raise MissionControllerError(f"posture {label} unavailable: HTTP {status}")
+            result[label] = document["attempts"] if label == "attempts" else document
+        return result
+
+    def posture_snapshot(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Read one shared State/inventory pair through the restricted verifier identity."""
+        documents = []
+        for path in ("/v1/inventory", "/v1/state/records?object_class=node&object_type=robot"):
+            status, document, _ = self._request("GET", path, None)
+            if status != 200:
+                raise MissionControllerError(f"posture observation unavailable: HTTP {status}")
+            documents.append(document)
+        return documents[1], documents[0]
+
+    def publish_posture_evidence(self, evidence: dict[str, Any]) -> dict[str, Any]:
+        """Send one frozen generic verifier input without retrying uncertain transport."""
+        status, receipt, _ = self._request("POST", "/v1/verifier-evidence", evidence)
+        if (
+            status != 200
+            or receipt.get("schema_version") != "roboguide.semantic-verifier-receipt/v0.1"
+        ):
+            raise MissionControllerError(f"posture evidence unavailable: HTTP {status}")
+        admitted = receipt.get("receipt")
+        if not isinstance(admitted, dict) or admitted.get("evidence") != evidence:
+            raise MissionControllerError("posture receipt differs from frozen evidence")
+        return receipt
+
     def _request(
         self,
         method: str,

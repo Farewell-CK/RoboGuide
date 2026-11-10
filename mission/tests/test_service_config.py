@@ -29,6 +29,50 @@ def test_repository_service_configuration_is_local_and_nonsecret() -> None:
         "spatial-map-import",
     ]
     assert "password" not in path.read_text(encoding="utf-8").lower()
+    assert settings.posture_verifier_enabled is False
+    assert settings.verifier_client_cert is None
+
+
+def test_posture_verifier_cannot_inherit_plain_loopback_operator(tmp_path: Path) -> None:
+    """Even local observation workers require an explicitly restricted certificate identity."""
+    path = tmp_path / "service.toml"
+    text = Path("config/mission-service.toml").read_text(encoding="utf-8")
+    path.write_text(text.replace("[service]", "[service]\nposture_verifier_enabled = true"))
+    with pytest.raises(MissionServiceConfigError, match="independent mTLS"):
+        load_service_settings(path, repository_root=tmp_path)
+
+
+def test_posture_verifier_rejects_operator_certificate_under_another_filename(
+    tmp_path: Path,
+) -> None:
+    """Changing the PEM filename cannot turn the operator into a separate verifier principal."""
+    pem = "-----BEGIN CERTIFICATE-----\nAQID\n-----END CERTIFICATE-----\n"
+    for name in ("operator.crt", "verifier.crt", "ca.crt"):
+        (tmp_path / name).write_text(pem)
+    (tmp_path / "key.pem").write_text("fixture-only")
+    text = Path("config/mission-service.toml").read_text(encoding="utf-8")
+    text = text.replace(
+        'controller_endpoint = "http://127.0.0.1:8080"',
+        'controller_endpoint = "https://127.0.0.1:8080"',
+    )
+    text = text.replace(
+        "[service]",
+        """[service]
+posture_verifier_enabled = true
+posture_verifier_source_id = "posture-test"
+posture_verifier_tenant_id = "local"
+controller_client_cert = "operator.crt"
+controller_client_key = "key.pem"
+controller_client_ca = "ca.crt"
+verifier_client_cert = "verifier.crt"
+verifier_client_key = "key.pem"
+verifier_client_ca = "ca.crt"
+""",
+    )
+    path = tmp_path / "service.toml"
+    path.write_text(text)
+    with pytest.raises(MissionServiceConfigError, match="independent restricted certificate"):
+        load_service_settings(path, repository_root=tmp_path)
 
 
 def test_shared_world_service_configuration_selects_deployment_execution_profile() -> None:

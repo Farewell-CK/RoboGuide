@@ -535,7 +535,7 @@ def main():
     parser.add_argument("--controller", type=Path, required=True)
     parser.add_argument("--node", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--storage-schema", choices=("legacy", "1", "2"), default="legacy")
+    parser.add_argument("--storage-schema", choices=("legacy", "1", "2", "3"), default="legacy")
     run(parser.parse_args())
 
 

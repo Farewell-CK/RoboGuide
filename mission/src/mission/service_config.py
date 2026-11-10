@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ssl
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -63,6 +64,13 @@ class MissionServiceSettings:
     artifact_client_ca: Path | None = None
     connection_limit: int = 128
     connection_timeout_seconds: float = 35.0
+    posture_verifier_enabled: bool = False
+    posture_verifier_source_id: str = ""
+    posture_verifier_source_revision: int = 1
+    posture_verifier_tenant_id: str = ""
+    verifier_client_cert: Path | None = None
+    verifier_client_key: Path | None = None
+    verifier_client_ca: Path | None = None
 
     @property
     def approval_required_contracts(self) -> frozenset[str]:
@@ -96,6 +104,33 @@ def load_service_settings(
     root = repository_root if repository_root is not None else path.parent.parent
     controller_tls = _client_profile(service, "controller", endpoint, root)
     artifact_tls = _client_profile(service, "artifact", artifact_endpoint, root)
+    verifier_enabled = _optional_bool(service, "posture_verifier_enabled", False)
+    verifier_tls = (
+        _client_profile(service, "verifier", endpoint, root)
+        if verifier_enabled
+        else (None, None, None)
+    )
+    verifier_source = _optional_text(service, "posture_verifier_source_id", "")
+    verifier_tenant = _optional_text(service, "posture_verifier_tenant_id", "")
+    verifier_revision = _optional_positive_integer(service, "posture_verifier_source_revision", 1)
+    if verifier_enabled:
+        if (
+            not verifier_source
+            or not verifier_tenant
+            or verifier_tenant == "*"
+            or urlparse(endpoint).scheme != "https"
+            or not all(verifier_tls)
+        ):
+            raise MissionServiceConfigError(
+                "posture verifier requires HTTPS, independent mTLS and an explicit source/tenant"
+            )
+        assert verifier_tls[0] is not None
+        if controller_tls[0] is not None and _certificate_bytes(
+            verifier_tls[0]
+        ) == _certificate_bytes(controller_tls[0]):
+            raise MissionServiceConfigError(
+                "posture verifier must use an independent restricted certificate"
+            )
     mtls_paths = tuple(
         _optional_path(service, key, root=root)
         for key in (
@@ -214,7 +249,26 @@ def load_service_settings(
         artifact_client_cert=artifact_tls[0],
         artifact_client_key=artifact_tls[1],
         artifact_client_ca=artifact_tls[2],
+        posture_verifier_enabled=verifier_enabled,
+        posture_verifier_source_id=verifier_source,
+        posture_verifier_source_revision=verifier_revision,
+        posture_verifier_tenant_id=verifier_tenant,
+        verifier_client_cert=verifier_tls[0],
+        verifier_client_key=verifier_tls[1],
+        verifier_client_ca=verifier_tls[2],
     )
+
+
+def _certificate_bytes(path: Path) -> bytes:
+    """Compare actual first PEM certificate identity rather than configurable filenames."""
+    text = path.read_text(encoding="ascii")
+    end = text.find("-----END CERTIFICATE-----")
+    if end < 0:
+        raise MissionServiceConfigError("verifier client certificate is not PEM")
+    try:
+        return ssl.PEM_cert_to_DER_cert(text[: end + len("-----END CERTIFICATE-----")])
+    except ValueError as error:
+        raise MissionServiceConfigError("verifier client certificate is invalid") from error
 
 
 def _client_profile(

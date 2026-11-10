@@ -30,6 +30,8 @@ from mission.execution_profile import load_optional_execution_profile
 from mission.grounding_reader import HttpMissionGroundingReader, UrllibGroundingJsonTransport
 from mission.models import JSONObject
 from mission.planning_profile import load_optional_planning_profile
+from mission.posture_verifier import PostureGoalVerifier
+from mission.posture_verifier_store import PostureVerificationStore
 from mission.request_store import HTTP_IDEMPOTENCY_COMPLETE
 from mission.requests import MissionRequestEngine, MissionRequestError, MissionRequestStore
 from mission.responses import (
@@ -86,6 +88,27 @@ def build_engine(
             service_settings.controller_client_ca,
         ),
     )
+    posture_verifier = None
+    if service_settings.posture_verifier_enabled:
+        assert service_settings.verifier_client_cert is not None
+        posture_verifier = PostureGoalVerifier(
+            PostureVerificationStore(service_settings.state_db),
+            HttpMissionController(
+                service_settings.controller_endpoint,
+                0.2,
+                tls_context=_client_tls_context(
+                    service_settings.verifier_client_cert,
+                    service_settings.verifier_client_key,
+                    service_settings.verifier_client_ca,
+                ),
+            ),
+            {
+                "source_id": service_settings.posture_verifier_source_id,
+                "source_revision": service_settings.posture_verifier_source_revision,
+                "tenant_id": service_settings.posture_verifier_tenant_id,
+                "certificate_sha256": _file_digest(service_settings.verifier_client_cert),
+            },
+        )
     plan_validator = (
         partial(controller.validate_plan, evidence=execution_planning_evidence)
         if execution_planning_evidence is not None
@@ -187,6 +210,7 @@ def build_engine(
         reviewer=reviewer,
         repairer=repairer,
         max_repair_attempts=(planner_settings.max_repair_attempts if reviewer is not None else 0),
+        posture_verifier=posture_verifier,
         grounding_reader=HttpMissionGroundingReader(
             service_settings.controller_endpoint,
             service_settings.artifact_endpoint,
@@ -319,6 +343,11 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
                 if not self._authorize_request_owner(parts[0]):
                     return
                 self._run(lambda: self.server.engine.get(parts[0]).observations(), HTTPStatus.OK)
+                return
+            if len(parts) == 2 and parts[0] and parts[1] == "posture-verification":
+                if not self._authorize_request_owner(parts[0]):
+                    return
+                self._run(lambda: self.server.engine.posture_verification(parts[0]), HTTPStatus.OK)
                 return
             if len(parts) == 2 and parts[0] and parts[1] == "provenance":
                 if not self._authorize_request_owner(parts[0]):
@@ -843,6 +872,8 @@ class MissionRequestHttpServer(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         """Wait for owned HTTP workers before releasing the single-writer process lock."""
+        if self.engine.posture_verifier is not None:
+            self.engine.posture_verifier.close()
         try:
             super().server_close()
         finally:
@@ -1028,6 +1059,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     LOG.info("listening on %s:%s", settings.listen_host, settings.listen_port)
     try:
+        if engine.posture_verifier is not None:
+            engine.posture_verifier.start()
         server.serve_forever()
     except KeyboardInterrupt:
         LOG.info("shutdown requested")
