@@ -1,0 +1,23 @@
+{
+  "schema_version": "roboguide.capability-catalog/v0.3",
+  "capabilities": [
+    {
+      "contract": {"namespace": "task", "name": "delegate", "version": "v1"},
+      "description": "Delegate one complete local goal to the selected robot's Robonix Pilot under its admitted deployment profile. RG retains participant matching, Commit/Bind, resource and recovery authority.",
+      "attributes": [{"name": "task-profile", "type": "string", "description": "Exact supported local-task-v1 receiver profile."}]
+    },
+    {
+      "contract": {"namespace": "observation.patrol", "name": "verify-arrival", "version": "v1"},
+      "description": "Independent onsite arrival and stable-stop attestation for one exact target, accepted plan and complete current attempt set. This is an explicitly registered generic verifier source, not another robot action or a claim of automatic localization.",
+      "attributes": []
+    }
+  ],
+  "operations": [
+    {
+      "operation": {"namespace": "task", "name": "delegate", "version": "v1"},
+      "description": "Pass a complete local navigation or separately authorized photo objective to the already selected robot's Robonix Pilot. The first fixed patrol uses independent execution: dog1 to the tea-room entrance and dog2 to Professor Wang's office entrance, each with independently verified local map/Scene provenance. Do not copy one Node's region coordinates to the peer because map labels match. Navigation Tasks must use verifier-evidence with observation.patrol.verify-arrival@v1, the exact deployment target-reference predicate and a 5000 ms receive-age bound. Pilot done, Nav2 SUCCEEDED, timeout and API acceptance do not prove physical arrival, stable stopping or that a shared door is clear. Missing region/map/source bindings, current chassis evidence, admitted verifier or onsite motion authorization prevent submission. RG owns fixed physical Actor binding, distinctness, matching and resources; do not make Robonix prove RG uniqueness or match local robot names to RG aliases. Robonix owns local navigation and immediate safety. Use profile=local-task-v1 only; no coordinate, map, stop or basic-action capability is invented. Photo/archive/summary tasks require verified native capture and original Artifact receipts first; do not create a fake summary operation or claim an unimplemented photo pipeline is ready. This profile does not authorize fault injection, replacement or motion automatically.",
+      "parameters": [{"name": "profile", "type": "string", "required": true, "description": "Exact deployed local-task-v1 profile, with no extra motion parameters."}],
+      "required_capabilities": [{"namespace": "task", "name": "delegate", "version": "v1"}]
+    }
+  ]
+}

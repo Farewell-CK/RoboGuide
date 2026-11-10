@@ -21,6 +21,7 @@ from robonix_task.observation_workers import ObservationWorkers
 from robonix_task.origin import OriginStore
 from robonix_task.photo_handoff import PhotoHandoffReader
 from robonix_task.photo_jobs import PhotoInspectionJobs
+from robonix_task.physical_observation import entity_reference, physical_observation
 from robonix_task.position import annotate_mapping_age
 from robonix_task.protocol import Liaison
 from status_bridge import Status
@@ -28,7 +29,14 @@ from status_bridge import handler_type as observer_handler
 
 
 def combined_handler(
-    captures, observer, origins=None, node_id=None, chassis=None, image_jobs=None, photo_memory=None
+    captures,
+    observer,
+    origins=None,
+    node_id=None,
+    chassis=None,
+    image_jobs=None,
+    photo_memory=None,
+    physical_entity=None,
 ):
     """Keep the existing route implementations and disambiguate readiness paths."""
     camera = camera_handler(captures)
@@ -46,7 +54,19 @@ def combined_handler(
 
         def do_GET(self):
             """Select the module by the fixed Node workflow route."""
-            if self.path.startswith("/v1/image-inspections/"):
+            if self.path in ("/v1/world/entity-reference", "/v1/world/physical-observation"):
+                if physical_entity is None:
+                    self.reply(404, {"error": "physical World export disabled"})
+                elif self.path.endswith("/entity-reference"):
+                    self.reply(200, entity_reference(physical_entity))
+                else:
+                    self.reply(
+                        200,
+                        physical_observation(
+                            annotate_mapping_age(snapshot(), time.time_ns()), physical_entity
+                        ),
+                    )
+            elif self.path.startswith("/v1/image-inspections/"):
                 if image_jobs is None:
                     self.reply(404, {"error": "image inspection profile disabled"})
                 elif self.path == "/v1/image-inspections/health":
@@ -213,9 +233,12 @@ def main():
     parser.add_argument("--chassis-state", action="store_true")
     parser.add_argument("--image-inspection-config", type=Path)
     parser.add_argument("--photo-memory-config", type=Path)
+    parser.add_argument("--physical-entity")
     args = parser.parse_args()
     if (args.origin_root is None) != (args.origin_node_id is None):
         parser.error("origin-root and origin-node-id must be supplied together")
+    if args.physical_entity is not None:
+        entity_reference(args.physical_entity)
 
     def publish(path, execution_id):
         """Reuse the existing authenticated upload and finalization path."""
@@ -323,7 +346,14 @@ def main():
                     opening.pop_all()
                 cleanup.callback(photo_memory.close)
             server.RequestHandlerClass = combined_handler(
-                captures, observer, origins, args.node_id, chassis, image_jobs, photo_memory
+                captures,
+                observer,
+                origins,
+                args.node_id,
+                chassis,
+                image_jobs,
+                photo_memory,
+                args.physical_entity,
             )
             server.timeout = 0.5
             workers = ObservationWorkers(

@@ -1,0 +1,45 @@
+# Append only when the enrolled Node has no robot-observer local system yet.
+# Replace NODE_ID; use --chassis-state on the existing combined Connector.
+[[local_systems]]
+id = "robot-observer"
+runtime_name = "robonix-readonly-observer"
+runtime_version = "v0.1"
+[local_systems.health]
+state_pointer = "/state"
+detail_pointer = "/detail"
+online = ["ONLINE"]
+degraded = ["DEGRADED"]
+offline = ["OFFLINE"]
+[local_systems.health.step]
+id = "observer-health"
+connection = "observer-http"
+[local_systems.health.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/observer/health"
+
+[[connections]]
+id = "observer-http"
+driver = "http"
+local_system = "robot-observer"
+endpoint = "http://127.0.0.1:18112"
+timeout_ms = 2500
+
+[[state_exports]]
+id = "robot-state"
+owner = "robot-observer"
+object_class = "node"
+object_type = "robot"
+object_id = "NODE_ID"
+semantic = "reported"
+payload_schema = "lite3.robot-state/v0.1"
+interval_ms = 1000
+valid_for_ms = 10000
+value_pointer = ""
+[state_exports.step]
+id = "robot-state"
+connection = "observer-http"
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/state"

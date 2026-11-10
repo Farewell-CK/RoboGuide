@@ -1,0 +1,326 @@
+{
+  "schema": "lab.two-dog-patrol-preparation-acceptance/v0.1",
+  "date": "2026-11-10",
+  "scope": "preparation-and-no-motion-software-verification",
+  "branch": "codex/two-dog-patrol-preflight",
+  "baseline_commit": "a699ab8e",
+  "motion_authorized": false,
+  "fault_injection_authorized": false,
+  "patrol_executed": false,
+  "tests": {
+    "connector": 125,
+    "mission": 670,
+    "physical_grounding_target_file": 40,
+    "linux_exit_codes": [
+      0,
+      0
+    ]
+  },
+  "runtime_switch": {
+    "dog1": {
+      "services": {
+        "node": "MainPID=521508\nActiveState=active\n",
+        "connector": "MainPID=521497\nActiveState=active\n"
+      },
+      "delegate_readiness": "READY",
+      "entity": {
+        "entity_id": "entity-lite3-dog1"
+      }
+    },
+    "dog2": {
+      "services": {
+        "node": "MainPID=906935\nActiveState=active\n",
+        "connector": "MainPID=906928\nActiveState=active\n"
+      },
+      "delegate_readiness": "READY",
+      "entity": {
+        "entity_id": "entity-lite3-dog2"
+      }
+    }
+  },
+  "thor_only_current": {
+    "dog1": {
+      "delegate": {
+        "detail": "Liaison unavailable: _InactiveRpcError",
+        "state": "UNAVAILABLE"
+      },
+      "physical": {
+        "arrival_verified": false,
+        "battery": {
+          "availability": "unknown",
+          "percent": null,
+          "remaining_at_publisher_ms": 0
+        },
+        "damping_state": "not_provided",
+        "device_stop_verified": false,
+        "freshness_basis": "reported physical facts; deduct Controller retention and planning delay before use",
+        "mapping": {
+          "localization_quality": null,
+          "localization_verified": false,
+          "map_id": null,
+          "map_revision_id": null,
+          "mode": null,
+          "pose_measurement_time": null,
+          "reported_pose": null,
+          "response_age_ms": null,
+          "response_availability": "unavailable",
+          "response_received_at_ns": null
+        },
+        "motion_authorized": false,
+        "physical_entity_id": "entity-lite3-dog1",
+        "posture": {
+          "aggregate_age_ms": null,
+          "availability": "unknown",
+          "individual_measurement_time": null,
+          "remaining_at_publisher_ms": 0,
+          "reported_posture": null,
+          "sample_received_at_ns": null,
+          "source_stale_ms": null
+        },
+        "remote_connection": "not_provided",
+        "schema_version": "roboguide.world.robot-physical-observation/v0.1",
+        "shared_frame_verified": false
+      }
+    },
+    "dog2": {
+      "delegate": {
+        "detail": "Liaison unavailable: _InactiveRpcError",
+        "state": "UNAVAILABLE"
+      },
+      "physical": {
+        "arrival_verified": false,
+        "battery": {
+          "availability": "unknown",
+          "percent": null,
+          "remaining_at_publisher_ms": 0
+        },
+        "damping_state": "not_provided",
+        "device_stop_verified": false,
+        "freshness_basis": "reported physical facts; deduct Controller retention and planning delay before use",
+        "mapping": {
+          "localization_quality": null,
+          "localization_verified": false,
+          "map_id": null,
+          "map_revision_id": null,
+          "mode": null,
+          "pose_measurement_time": null,
+          "reported_pose": null,
+          "response_age_ms": null,
+          "response_availability": "unavailable",
+          "response_received_at_ns": null
+        },
+        "motion_authorized": false,
+        "physical_entity_id": "entity-lite3-dog2",
+        "posture": {
+          "aggregate_age_ms": null,
+          "availability": "unknown",
+          "individual_measurement_time": null,
+          "remaining_at_publisher_ms": 0,
+          "reported_posture": null,
+          "sample_received_at_ns": null,
+          "source_stale_ms": null
+        },
+        "remote_connection": "not_provided",
+        "schema_version": "roboguide.world.robot-physical-observation/v0.1",
+        "shared_frame_verified": false
+      }
+    }
+  },
+  "controller_plan_validation": {
+    "decision": "blocked",
+    "deployment_digest": null,
+    "execution_lifetime": null,
+    "execution_topology": null,
+    "issues": [
+      {
+        "code": "verifier.source_unavailable",
+        "message": "Mission requires one authorized independent verifier source per Task",
+        "path": "/tasks"
+      }
+    ],
+    "issues_truncated": false,
+    "mission_id": "two-dog-patrol-navigation-preparation-20261110",
+    "plan_body_sha256": "sha256:c93d630099c5ac0afc28cf4111728ce2539331ba1fe45926c1ba004ba0be54cf",
+    "schema_version": "roboguide.plan-validation/v0.2",
+    "scope": "published-contracts",
+    "verifier_source_digest": null,
+    "world_identity": null
+  },
+  "local_submission_refusal": "onsite_motion_authorization_required",
+  "preflight": {
+    "schema_version": "roboguide.patrol-preflight/v0.1",
+    "status": "Blocked",
+    "navigation_ready": false,
+    "navigation_blockers": [
+      {
+        "code": "robonix_task_delegate_unavailable",
+        "node_id": "lite3-dog1"
+      },
+      {
+        "code": "fresh_reported_chassis_unavailable",
+        "node_id": "lite3-dog1"
+      },
+      {
+        "code": "independent_map_binding_unverified",
+        "node_id": "lite3-dog1"
+      },
+      {
+        "code": "robonix_task_delegate_unavailable",
+        "node_id": "lite3-dog2"
+      },
+      {
+        "code": "fresh_reported_chassis_unavailable",
+        "node_id": "lite3-dog2"
+      },
+      {
+        "code": "independent_target_source_missing",
+        "node_id": "lite3-dog2"
+      },
+      {
+        "code": "independent_arrival_verifier_unavailable",
+        "node_id": ""
+      }
+    ],
+    "patrol_blockers": [
+      {
+        "code": "robonix_photo_operation_unverified",
+        "node_id": "lite3-dog1"
+      },
+      {
+        "code": "robonix_photo_artifact_receipt_unverified",
+        "node_id": "lite3-dog1"
+      },
+      {
+        "code": "robonix_photo_operation_unverified",
+        "node_id": "lite3-dog2"
+      },
+      {
+        "code": "robonix_photo_artifact_receipt_unverified",
+        "node_id": "lite3-dog2"
+      },
+      {
+        "code": "patrol_summary_artifact_unavailable",
+        "node_id": ""
+      }
+    ],
+    "motion_authorized": false,
+    "physical_effect_verified": false,
+    "plan_scope": "navigation-only-preparation",
+    "target_predicates": {
+      "dog1-navigate": "onsite-arrival/v0.1 entity-lite3-dog1 arrived-and-stopped at 茶水间门口 target-reference-sha256:b44316c965899a444559a0d7d55a1ea2fde50c55fb241f4d60f75e7ed8385e59",
+      "dog2-navigate": "onsite-arrival/v0.1 pending-map-binding entity-lite3-dog2 arrived-and-stopped at 王老师办公室门口 target-reference-sha256:11b020359d050e5aacee7816e1ab5d074e957cacf0ab3bb0b8e2126fd69084d0"
+    },
+    "limitations": [
+      "freshness_is_a_readonly_snapshot_not_dispatch_authority",
+      "map_label_equality_does_not_establish_shared_coordinates",
+      "arrival_requires_independent_current_attempt_bound_onsite_evidence",
+      "photo_and_summary_tasks_not_fabricated_when_robonix_receipts_are_missing"
+    ]
+  },
+  "mi_request": {
+    "request_id": "request-052b65931483485da6ba850978ae415d",
+    "candidate_mission_id": "mission-ccbd50419e7b47049765615107e92a90",
+    "lifecycle": "Failed",
+    "draft_digest": "sha256:c89c830359a41219235341108315a6dcb504b5e6c75f2311c583fa49d423985c",
+    "issues": [
+      "mission review rejected automatic repair"
+    ],
+    "review_issue_codes": [
+      "non_executable_placeholder_tasks",
+      "planning_gate_embedded_in_execution_objective",
+      "per_robot_target_binding_evidence_gap",
+      "arrival_verification_contract_gap",
+      "photo_and_summary_pipeline_gap"
+    ],
+    "controller_lookup_status": 404,
+    "approval_sent": false
+  },
+  "replay": {
+    "mi_original_response_equal": true,
+    "physical_command_original_receipt_equal": true
+  },
+  "controller_after": {
+    "ready": {
+      "degraded": false,
+      "ready": true,
+      "unknown_attempts": 0
+    },
+    "resource_allocations": []
+  },
+  "scene_start": {
+    "executed": false,
+    "automatic_review_result": "blocked by policy",
+    "more_specific_reason_provided": false
+  },
+  "evidence_root": "C:\\workspace\\DEAIOS\\lab\\rg-two-dog-patrol-20261110",
+  "evidence_files": {
+    "tests-r2.json": {
+      "bytes": 5639,
+      "sha256": "f149e90059aa70d2dfb56ca38463f95d835b7fb5037f01dea5429458b9f4f38e"
+    },
+    "source-r2-manifest.json": {
+      "bytes": 430691,
+      "sha256": "88de67c3df7227cf60c213fb88b5ae173ad865ec59e4ee20fcaeab483271a4f3"
+    },
+    "patrol-source-r2.tar.gz": {
+      "bytes": 17377033,
+      "sha256": "9b30c12f6c51b2b2e51211835a36cddc8acf11c863a2367d4ba30aea06661368"
+    },
+    "dog1-switch-result.json": {
+      "bytes": 1500,
+      "sha256": "583f2bdcb2bc57d185dd2c678fe8fcca7e317086d270702bf65f964ab0ffec69"
+    },
+    "dog2-switch-result.json": {
+      "bytes": 1509,
+      "sha256": "8030f55e5e22d4906d08f03cca2155e98c7295421fd7957a3ca15c9ba47456d1"
+    },
+    "central-after.json": {
+      "bytes": 17081,
+      "sha256": "c3c211e02d19fbdc460d3d84f12304782390a7573398cff2e0adbc7019c7b605"
+    },
+    "software-preflight-result.json": {
+      "bytes": 33794,
+      "sha256": "60d0bd2df8315448d379f6d82effeee34984812e33a47d2f190b7121352fe29c"
+    },
+    "mi-patrol-result.json": {
+      "bytes": 34996,
+      "sha256": "1a11f61c530b8f66b66da45fb4c9861320a0dfd9a28e02ea1abd02e1e59f05bd"
+    },
+    "receipt-replay-verification.json": {
+      "bytes": 39062,
+      "sha256": "d9f525b0cb4f51d181bfdde6e21fc334db776fe0b69daac9a46e62b3fc5cf82a"
+    },
+    "camera-contract-summary.json": {
+      "bytes": 4987,
+      "sha256": "9af162328eb9ce224c5e7f15a585cd424dc45121652ee4310b615c1ac7a545e2"
+    },
+    "scene-mcp-dog1.json": {
+      "bytes": 15141,
+      "sha256": "5922b8dc23caefaba8559b4bf6eda09b9c8e8487027dd95bb7e65e357020c85e"
+    },
+    "scene-mcp-dog2.json": {
+      "bytes": 726,
+      "sha256": "fdca321a483fbb1fc0f0b5d5c3b4cab030cd0e160498f413a64796b285017394"
+    },
+    "map-artifact-dog1.json": {
+      "bytes": 22233,
+      "sha256": "c2b70d2fc61b900e8e2d8d338bdd6f24ac5de2aa5b42423203e140099233f4d3"
+    },
+    "map-artifact-dog2.json": {
+      "bytes": 18705,
+      "sha256": "521f5d77bca6eef597b992b5413ad13267b0ab00dec3ed7e34438de8e101007d"
+    },
+    "stop-preflight.json": {
+      "bytes": 11655,
+      "sha256": "4b23f17b6d9608c28e3ef7d8f06b8862ef8df7e4dec35b10fff07dbbb8bf4976"
+    },
+    "thor-only-final-dog1.json": {
+      "bytes": 3096,
+      "sha256": "845cde0cd2168fe62d3ee1f1a7ce315cd6c837f63be3c66d030eefebebbb1fec"
+    },
+    "thor-only-final-dog2.json": {
+      "bytes": 3097,
+      "sha256": "bfc3067295cbf78ea21b50e72f0b8e61865364d3bc4093864e84c3e43559679b"
+    }
+  }
+}

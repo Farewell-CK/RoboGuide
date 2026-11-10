@@ -17,6 +17,7 @@ from mission.grounding_context import (
     GroundingFreshness,
     GroundingGap,
     MemoryContentStatus,
+    admitted_physical_entity_ids,
     dialogue_digest,
 )
 from mission.grounding_reader import (
@@ -323,6 +324,332 @@ def test_world_state_requires_explicit_payload_schema_admission() -> None:
     snapshot = _reader(transport, frozenset()).capture("request-test", _dialogue(), 30)
 
     assert snapshot.state_evidence == ()
+
+
+def test_filtered_robot_world_reports_preserve_unknown_pose_and_exclude_node_facts() -> None:
+    """Explicit physical schema admission never promotes Node status or unknown pose quality."""
+    schema = "roboguide.world.robot-physical-observation/v0.1"
+    record = _world_record("entity-lite3-dog1", semantic="reported")
+    envelope = cast(JSONObject, record["value"])
+    envelope["payload_schema"] = schema
+    envelope["value"] = {
+        "physical_entity_id": "entity-lite3-dog1",
+        "posture": {"availability": "unavailable", "reported_posture": None},
+        "mapping": {
+            "pose_measurement_time": None,
+            "localization_quality": None,
+            "localization_verified": False,
+        },
+        "arrival_verified": False,
+        "device_stop_verified": False,
+        "motion_authorized": False,
+    }
+    node = json.loads(json.dumps(record))
+    node["object"]["class"] = "node"
+    transport = FakeGroundingTransport(
+        {
+            "http://controller.test/v1/state/records?object_class=world": {
+                "schema": "roboguide.state-query/v0.1",
+                "observed_at_ms": 30,
+                "records": [record, node, _node_record()],
+            },
+            "http://artifact.test/v1/memories": {
+                "schema": "roboguide.memory-catalog/v0.1",
+                "memories": [],
+            },
+        }
+    )
+    snapshot = _reader(transport, frozenset({schema})).capture("physical-report", _dialogue(), 30)
+    assert len(snapshot.state_evidence) == 1
+    assert snapshot.state_evidence[0].semantic == "reported"
+    assert cast(JSONObject, snapshot.state_evidence[0].value)["mapping"] == {
+        "pose_measurement_time": None,
+        "localization_quality": None,
+        "localization_verified": False,
+    }
+    assert admitted_physical_entity_ids(snapshot) == frozenset()
+    assert GroundingContextSnapshot.from_json(snapshot.to_json()) == snapshot
+
+
+def test_only_explicit_fresh_entity_reference_can_ground_a_patrol_actor() -> None:
+    """Physical observations do not grant identity; stale entity refs cannot bind Actors."""
+    schema = "roboguide.world.physical-entity-reference/v0.1"
+    records: list[JSONValue] = []
+    for entity, stale in [("entity-lite3-dog1", False), ("entity-lite3-dog2", True)]:
+        record = _world_record(entity, semantic="reported", stale=stale)
+        payload = cast(JSONObject, record["value"])
+        payload["payload_schema"] = schema
+        payload["value"] = {"entity_id": entity}
+        records.append(record)
+    transport = FakeGroundingTransport(
+        {
+            "http://controller.test/v1/state/records?object_class=world": {
+                "schema": "roboguide.state-query/v0.1",
+                "records": records,
+            },
+            "http://artifact.test/v1/memories": {
+                "schema": "roboguide.memory-catalog/v0.1",
+                "memories": [],
+            },
+        }
+    )
+    snapshot = _reader(transport, frozenset({schema})).capture("entity-report", _dialogue(), 30)
+    assert admitted_physical_entity_ids(snapshot) == frozenset({"entity-lite3-dog1"})
+
+
+def _physical_world_record() -> JSONObject:
+    """Build an original bounded diagnostic report with independent Controller receipt time."""
+    record = _world_record("entity-lite3-dog1", semantic="reported")
+    cast(JSONObject, record["object"])["object_type"] = "robot-physical-observation"
+    envelope = cast(JSONObject, record["value"])
+    envelope["payload_schema"] = "roboguide.world.robot-physical-observation/v0.1"
+    envelope["valid_for_ms"] = 5000
+    envelope["value"] = {
+        "physical_entity_id": "entity-lite3-dog1",
+        "posture": {
+            "availability": "reported_current",
+            "reported_posture": "standing",
+            "aggregate_age_ms": 100,
+            "source_stale_ms": 5000,
+            "remaining_at_publisher_ms": 4900,
+        },
+        "mapping": {
+            "response_availability": "reported_current_response",
+            "response_age_ms": 100,
+            "reported_pose": {"x": 1, "y": 2, "theta": 0},
+            "pose_measurement_time": None,
+            "localization_quality": None,
+            "map_revision_id": None,
+            "localization_verified": False,
+        },
+        "arrival_verified": False,
+        "device_stop_verified": False,
+        "motion_authorized": False,
+    }
+    return record
+
+
+def _capture_physical_report(
+    record: JSONObject, *, observed_at_ms: JSONValue = 22
+) -> GroundingContextSnapshot:
+    """Read one report with same-Controller time metadata while keeping source clocks untouched."""
+    schema = "roboguide.world.robot-physical-observation/v0.1"
+    transport = FakeGroundingTransport(
+        {
+            "http://controller.test/v1/state/records?object_class=world": {
+                "schema": "roboguide.state-query/v0.1",
+                "observed_at_ms": observed_at_ms,
+                "records": [record],
+            },
+            "http://artifact.test/v1/memories": {
+                "schema": "roboguide.memory-catalog/v0.1",
+                "memories": [],
+            },
+        }
+    )
+    return _reader(transport, frozenset({schema})).capture("physical-age", _dialogue(), 999999)
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["remaining-one", "outer-renewal", "missing-budget", "inflated-budget", "false-posture"],
+)
+def test_physical_profile_rejects_expired_or_false_current_inner_posture(change: str) -> None:
+    """Outer receive freshness cannot revive a nearly expired or unqualified posture report."""
+    record = _physical_world_record()
+    envelope = cast(JSONObject, record["value"])
+    posture = cast(JSONObject, cast(JSONObject, envelope["value"])["posture"])
+    if change == "remaining-one":
+        posture.update(aggregate_age_ms=4999, remaining_at_publisher_ms=1)
+    elif change == "outer-renewal":
+        posture.update(aggregate_age_ms=6000, remaining_at_publisher_ms=4900)
+    elif change == "missing-budget":
+        posture.pop("remaining_at_publisher_ms")
+    elif change == "inflated-budget":
+        posture["remaining_at_publisher_ms"] = 5000
+    else:
+        posture["reported_posture"] = "unknown"
+    snapshot = _capture_physical_report(record)
+    assert snapshot.state_evidence == ()
+    assert any("physical_profile_posture" in gap.detail for gap in snapshot.gaps)
+    assert record["stale"] is False
+
+
+@pytest.mark.parametrize("observed_at_ms", [19, None, True, "22"])
+def test_physical_profile_refuses_uncomparable_or_rolled_back_controller_clock(
+    observed_at_ms: JSONValue,
+) -> None:
+    """Only a nonnegative same-Controller receive/observation difference qualifies reports."""
+    snapshot = _capture_physical_report(_physical_world_record(), observed_at_ms=observed_at_ms)
+    assert snapshot.state_evidence == ()
+    assert any("physical_profile_controller_clock" in gap.detail for gap in snapshot.gaps)
+
+
+def test_physical_profile_rejects_mapping_response_after_known_retention() -> None:
+    """A fresh outer record cannot extend a Mapping HTTP response beyond ten seconds."""
+    record = _physical_world_record()
+    value = cast(JSONObject, cast(JSONObject, record["value"])["value"])
+    cast(JSONObject, value["mapping"])["response_age_ms"] = 9999
+    snapshot = _capture_physical_report(record)
+    assert snapshot.state_evidence == ()
+    assert any("physical_profile_mapping_response_expired" in gap.detail for gap in snapshot.gaps)
+
+
+def test_unknown_posture_does_not_allow_an_expired_battery_to_remain_current() -> None:
+    """Each current physical component requires its original remaining source budget."""
+    record = _physical_world_record()
+    value = cast(JSONObject, cast(JSONObject, record["value"])["value"])
+    posture = cast(JSONObject, value["posture"])
+    posture["availability"] = "unknown"
+    posture["reported_posture"] = None
+    posture["remaining_at_publisher_ms"] = 0
+    value["battery"] = {
+        "availability": "reported_current",
+        "percent": 75,
+        "remaining_at_publisher_ms": 1,
+    }
+    snapshot = _capture_physical_report(record)
+    assert snapshot.state_evidence == ()
+    assert any("battery_expired" in gap.detail for gap in snapshot.gaps)
+
+
+def test_physical_profile_accounts_for_local_monotonic_read_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GET and local parsing delay consumes the remaining budget without cross-host subtraction."""
+    clock = iter((0, 5_000_000))
+    monkeypatch.setattr("mission.grounding_reader.time.monotonic_ns", lambda: next(clock))
+    record = _physical_world_record()
+    value = cast(JSONObject, cast(JSONObject, record["value"])["value"])
+    cast(JSONObject, value["posture"]).update(aggregate_age_ms=4995, remaining_at_publisher_ms=5)
+    snapshot = _capture_physical_report(record, observed_at_ms=20)
+    assert snapshot.state_evidence == ()
+    assert any("physical_profile_posture_expired" in gap.detail for gap in snapshot.gaps)
+
+
+@pytest.mark.parametrize("component", ["posture", "battery", "mapping"])
+@pytest.mark.parametrize("delayed_source", ["memory", "planning-world"])
+def test_physical_profile_expires_during_later_acquisition_before_snapshot_freeze(
+    component: str, delayed_source: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A successful initial State read cannot preserve facts expired by later evidence reads."""
+    clock = [0]
+    monkeypatch.setattr("mission.grounding_reader.time.monotonic_ns", lambda: clock[0])
+
+    class DelayedMemoryTransport(FakeGroundingTransport):
+        """Advance only virtual local time during the actual separate Memory GET."""
+
+        def get_json(self, url: str, timeout_seconds: float) -> JSONObject:
+            """Keep original records and consume a bounded virtual Memory-read interval."""
+            result = super().get_json(url, timeout_seconds)
+            if delayed_source == "memory" and url.endswith("/v1/memories"):
+                clock[0] = 10_000_000
+            return result
+
+    def delayed_planning_read(_self: HttpMissionGroundingReader, _gaps: object) -> None:
+        """Consume virtual time in the last optional evidence read, after State and Memory."""
+        clock[0] = 10_000_000
+
+    if delayed_source == "planning-world":
+        monkeypatch.setattr(
+            HttpMissionGroundingReader, "_read_planning_world_evidence", delayed_planning_read
+        )
+    record = _physical_world_record()
+    value = cast(JSONObject, cast(JSONObject, record["value"])["value"])
+    posture = cast(JSONObject, value["posture"])
+    if component == "posture":
+        posture.update(aggregate_age_ms=4995, remaining_at_publisher_ms=5)
+    else:
+        posture.update(availability="unknown", reported_posture=None, remaining_at_publisher_ms=0)
+        if component == "battery":
+            posture["aggregate_age_ms"] = 4995
+            value["battery"] = {
+                "availability": "reported_current",
+                "percent": 75,
+                "remaining_at_publisher_ms": 5,
+            }
+        else:
+            cast(JSONObject, value["mapping"])["response_age_ms"] = 9995
+    before = json.dumps(record, sort_keys=True)
+    schema = "roboguide.world.robot-physical-observation/v0.1"
+    transport = DelayedMemoryTransport(
+        {
+            "http://controller.test/v1/state/records?object_class=world": {
+                "schema": "roboguide.state-query/v0.1",
+                "observed_at_ms": 20,
+                "records": [record],
+            },
+            "http://artifact.test/v1/memories": {
+                "schema": "roboguide.memory-catalog/v0.1",
+                "memories": [_memory_manifest("preserved-memory")],
+            },
+        }
+    )
+    snapshot = _reader(transport, frozenset({schema})).capture("slow-acquisition", _dialogue(), 30)
+    assert snapshot.state_evidence == ()
+    assert len(snapshot.memory_evidence) == 1
+    assert any(
+        "before snapshot freeze" in gap.detail and f"physical_profile_{component}" in gap.detail
+        for gap in snapshot.gaps
+    )
+    assert json.dumps(record, sort_keys=True) == before
+
+
+def test_physical_profile_keeps_original_value_ttl_epoch_and_freshness() -> None:
+    """Qualification changes inclusion only; immutable evidence retains every original field."""
+    record = _physical_world_record()
+    before = json.dumps(record, sort_keys=True)
+    snapshot = _capture_physical_report(record)
+    assert len(snapshot.state_evidence) == 1
+    evidence = snapshot.state_evidence[0]
+    envelope = cast(JSONObject, record["value"])
+    assert evidence.value == envelope["value"]
+    assert evidence.valid_for_ms == envelope["valid_for_ms"]
+    assert evidence.source_epoch == envelope["source_epoch"]
+    assert evidence.source_observed_at_ms == 9000
+    assert evidence.freshness is GroundingFreshness.FRESH
+    assert json.dumps(record, sort_keys=True) == before
+    assert "#physical-profile=v0.1" in snapshot.selection_policy_ref
+
+
+@pytest.mark.parametrize("availability", ["unknown", "unavailable"])
+def test_physical_profile_allows_unknown_posture_without_promoting_it(
+    availability: str,
+) -> None:
+    """Unknown diagnostics remain explicit instead of being rewritten as current posture."""
+    record = _physical_world_record()
+    value = cast(JSONObject, cast(JSONObject, record["value"])["value"])
+    cast(JSONObject, value["posture"]).update(
+        availability=availability, reported_posture=None, remaining_at_publisher_ms=0
+    )
+    snapshot = _capture_physical_report(record)
+    assert len(snapshot.state_evidence) == 1
+    assert cast(JSONObject, snapshot.state_evidence[0].value)["posture"] == value["posture"]
+
+
+def test_physical_profile_rejects_entity_mismatch_without_affecting_other_schemas() -> None:
+    """A report cannot refer to a different entity, while ordinary World rules stay unchanged."""
+    record = _physical_world_record()
+    value = cast(JSONObject, cast(JSONObject, record["value"])["value"])
+    value["physical_entity_id"] = "other-entity"
+    snapshot = _capture_physical_report(record)
+    assert snapshot.state_evidence == ()
+    assert any("physical_profile_entity_mismatch" in gap.detail for gap in snapshot.gaps)
+    transport = FakeGroundingTransport(
+        {
+            "http://controller.test/v1/state/records?object_class=world": {
+                "schema": "roboguide.state-query/v0.1",
+                "records": [_world_record("ordinary-place"), _node_record(), record],
+            },
+            "http://artifact.test/v1/memories": {
+                "schema": "roboguide.memory-catalog/v0.1",
+                "memories": [],
+            },
+        }
+    )
+    ordinary = _reader(transport).capture("ordinary", _dialogue(), 30)
+    assert [item.object_id for item in ordinary.state_evidence] == ["ordinary-place"]
+    assert "#physical-profile=" not in ordinary.selection_policy_ref
 
 
 def test_reader_exposes_only_global_semantic_experience_or_spatial_metadata() -> None:

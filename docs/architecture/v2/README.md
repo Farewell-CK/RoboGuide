@@ -1,5 +1,9 @@
 # RoboGuide V2 现行架构
 
+[ADR-0246](../../decisions/0246-partitioned-patrol-preparation.md)将真机主线转向分区巡检：
+复用原物理实体路由、DAG 与独立到达证据；过滤后的物理 World 报告不接管 Node/Control
+事实，也不由接口完成推导到达、通道清空或停止。运动、资源竞争和接替分别验收。
+
 [ADR-0245](../../decisions/0245-no-motion-photo-handoff.md)定义首轮无运动双节点照片交接：
 原 Mission DAG/`sequential-handoff` 负责先后，现有 Global Memory/Artifact 保留原图来源，
 受限消费者只核验同一原任务和摘要；不新增调度或运动权威。实施与现场验收分别记录。

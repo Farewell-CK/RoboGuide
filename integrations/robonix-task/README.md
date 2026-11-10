@@ -1,5 +1,11 @@
 # Robonix 本机任务接入
 
+当前双狗主线为分区巡检、共享通道与故障接替，照片数据接力作为辅助验证保留。
+见 [ADR-0246](../../docs/decisions/0246-partitioned-patrol-preparation.md) 和
+[本轮预检记录](../../docs/development/acceptance/2026-11-10-two-dog-patrol-preflight.md)。
+`patrol.py` 只生成两个导航 Task 的准备模板；它不是生产提交入口，也没有补造原生拍照、
+到达、清空通道或设备停止证据。物理 World 报告沿既有 Connector 显式启用，Node 原通道保留。
+
 可选的[照片交接配置](deploy/photo-handoff-mission-plan.json)使用一个 Mission 的
 `sequential-handoff`：狗2采图并显式发布一个预分配 Global Memory selector，狗1在
 同一原任务依赖之后读取原摘要字节。部署分别追加

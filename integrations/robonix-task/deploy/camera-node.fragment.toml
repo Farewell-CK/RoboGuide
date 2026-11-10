@@ -1,0 +1,156 @@
+# Existing readonly camera capability; replace ROBOT_ID and NODE_ID per enrolled device.
+# This auxiliary operation is not a substitute for Robonix-owned patrol photo receipts.
+[[local_systems]]
+id = "ROBOT_ID-camera"
+runtime_name = "robonix-camera-capture-adapter"
+runtime_version = "lab-20261102"
+
+[local_systems.health]
+state_pointer = "/state"
+detail_pointer = "/detail"
+online = ["ONLINE"]
+degraded = ["DEGRADED"]
+offline = ["OFFLINE"]
+
+[local_systems.health.step]
+id = "camera-health"
+connection = "camera-http"
+[local_systems.health.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/health"
+[local_systems.health.step.request]
+base = {}
+
+[[connections]]
+driver = "http"
+id = "camera-http"
+local_system = "ROBOT_ID-camera"
+endpoint = "http://127.0.0.1:18112"
+timeout_ms = 10000
+
+[[capability_profiles]]
+contract = "lite3.capture-rgb@v1"
+kind = "observation"
+owner = "ROBOT_ID-camera"
+attributes = {}
+
+[capability_profiles.readiness]
+state_pointer = "/state"
+detail_pointer = "/detail"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+[capability_profiles.readiness.step]
+id = "camera-readiness"
+connection = "camera-http"
+[capability_profiles.readiness.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/readiness"
+[capability_profiles.readiness.step.request]
+base = {}
+
+[[resources]]
+id = "ROBOT_ID-capture-slot"
+kind = "compute"
+capacity = 1
+owner = "ROBOT_ID-camera"
+
+[[sensors]]
+id = "ROBOT_ID-rgb-camera"
+kind = "rgb-camera"
+owner = "ROBOT_ID-camera"
+
+[[state_exports]]
+id = "capture-result"
+owner = "ROBOT_ID-camera"
+object_class = "node"
+object_type = "camera-capture"
+object_id = "NODE_ID"
+semantic = "reported"
+payload_schema = "lite3.camera-capture/v0.1"
+valid_for_ms = 15000
+interval_ms = 500
+value_pointer = ""
+[state_exports.step]
+id = "capture-result-state"
+connection = "camera-http"
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/captures/latest"
+[state_exports.step.request]
+base = {}
+
+[[operations]]
+operation = "lite3.capture-rgb@v1"
+owner = "ROBOT_ID-camera"
+required_resources = ["ROBOT_ID-capture-slot"]
+local_locks = ["ROBOT_ID-capture"]
+
+[operations.workflow]
+poll_interval_ms = 250
+[operations.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/dispatch/execution_id"
+[operations.workflow.execution_state]
+state_pointer = "/steps/status/state"
+reason_pointer = "/steps/status/detail"
+accepted = ["PENDING"]
+running = ["RUNNING"]
+completed = ["SUCCEEDED"]
+failed = ["FAILED"]
+cancelled = ["CANCELED"]
+case_sensitive = false
+
+[[operations.workflow.execute]]
+id = "dispatch"
+connection = "camera-http"
+[operations.workflow.execute.operation]
+kind = "http"
+method = "POST"
+path = "/v1/captures"
+[operations.workflow.execute.request]
+base = {}
+[[operations.workflow.execute.request.bindings]]
+target = "/invocation"
+[operations.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/invocation"
+[[operations.workflow.execute.request.bindings]]
+target = "/attempt_id"
+[operations.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/attempt_id"
+
+[[operations.workflow.status]]
+id = "status"
+connection = "camera-http"
+[operations.workflow.status.operation]
+kind = "http"
+method = "POST"
+path = "/v1/captures/status"
+[operations.workflow.status.request]
+base = {}
+[[operations.workflow.status.request.bindings]]
+target = "/execution_id"
+[operations.workflow.status.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[operations.workflow.cancel]]
+id = "cancel"
+connection = "camera-http"
+[operations.workflow.cancel.operation]
+kind = "http"
+method = "POST"
+path = "/v1/captures/cancel"
+[operations.workflow.cancel.request]
+base = {}
+[[operations.workflow.cancel.request.bindings]]
+target = "/execution_id"
+[operations.workflow.cancel.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+

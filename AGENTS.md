@@ -1,3 +1,11 @@
+ADR-0246 prioritizes partitioned patrol; photo handoff stays auxiliary and original evidence remains.
+physical_observation projects only explicit physical World reports, preserving nested age and unknown
+pose quality/time. Entity references require the accepted deployment route; never rename whole Node
+state, infer arrival/clearance/stop or relax MI World admission. patrol.py prepares fixed independent
+navigation with distinct physical Actors and verifier-evidence; execution-report does not prove arrival.
+No motion/fault injection is implied by preparation. Shared-zone release and recovery require exact
+original stop/exit evidence and authorization; fixed patrol Actors cannot silently change bodies.
+
 ADR-0245 adds opt-in no-motion photo handoff in the existing combined Connector. Keep the original
 Mission DAG and sequential-handoff; publish only the explicitly preallocated photo selector, bind
 original producer/consumer Task/attempt and central manifest/digest, and use restricted read identities.

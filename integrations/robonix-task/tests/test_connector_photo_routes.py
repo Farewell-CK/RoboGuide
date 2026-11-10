@@ -112,6 +112,41 @@ class PhotoRoutesTests(unittest.TestCase):
             )
             self.assertEqual(call("/v1/image-inspections/unknown", {})[0], 404)
             self.assertEqual(call("/v1/image-inspections", {"padding": "x" * 65536})[0], 409)
+            self.assertEqual(call("/v1/world/entity-reference")[0], 404)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_opt_in_world_route_reads_only_the_existing_physical_cache(self) -> None:
+        """Entity identity is explicit and physical GETs contain no Node/control payload."""
+        connector = load_connector()
+
+        class Observer:
+            """Offer a synthetic cached snapshot, with no tool or network implementation."""
+
+            def read(self) -> dict[str, Any]:
+                """Return deployment facts that must be removed by the World projection."""
+                return {"atlas": {"providers": ["private"]}, "resources": ["private"]}
+
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            connector.combined_handler(None, Observer(), physical_entity="entity-dog1"),
+        )
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        origin = "http://127.0.0.1:" + str(server.server_port)
+        try:
+            with opener.open(origin + "/v1/world/entity-reference", timeout=3) as response:
+                self.assertEqual(json.load(response), {"entity_id": "entity-dog1"})
+            with opener.open(origin + "/v1/world/physical-observation", timeout=3) as response:
+                report = json.load(response)
+            self.assertEqual(report["physical_entity_id"], "entity-dog1")
+            self.assertNotIn("atlas", report)
+            self.assertNotIn("resources", report)
+            self.assertIsNone(report["posture"]["reported_posture"])
+            self.assertFalse(report["device_stop_verified"])
         finally:
             server.shutdown()
             server.server_close()

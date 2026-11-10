@@ -1,5 +1,9 @@
 # RoboGuide
 
+真机主线按[分区巡检准备](docs/decisions/0246-partitioned-patrol-preparation.md)推进，
+分别验证到达、共享通道和停止后接替；运动及故障注入另行取得当轮授权。
+此前照片接力保留为辅助验证，不替代巡检或运动协作结果。
+
 [双节点无运动照片交接](docs/decisions/0245-no-motion-photo-handoff.md)复用现有 Mission、
 顺序依赖和 Global Memory/Artifact：一个节点采图，另一个节点读取同摘要的原图并校验。
 新增受限计算能力仍在原 Connector 内，软件通过与现场执行分别记录。
