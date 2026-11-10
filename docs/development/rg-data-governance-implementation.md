@@ -219,3 +219,38 @@ remain materialized. Original external-archive verification remains separate. Th
 API is unchanged; neither memory limits nor integrity checks are weakened. Its added regression
 also corrupts unrelated history and requires the full audit to refuse it. Linux acceptance and
 the complete original-row comparison are pending follow-up evidence.
+
+## Streaming-audit acceptance and remaining release checks
+
+R7 freezes 3206 source files at archive SHA-256
+`995be23b3499add7bc190ccc64d86450bd72c976cefaaa522a9be3d6d41741fd`.
+It passed 221 State tests in release mode and workspace release all-target/all-feature Clippy.
+The new frozen Controller SHA-256 is
+`06913393cce331c33f5a9cef2f358b12fca798bf46c8aff2605b365574808ae4`;
+the Node bytes are unchanged from r5. Its actual posture/MI/content-archive process gates passed
+again, and 30 normal restarts gave readiness P95=0.053606 s.
+
+The streaming audit traversed all 1,465,461 original SQL events / 2,838,491,360 payload bytes,
+retained only 25 protected Catalog inputs, and passed the full reference-index audit in 52.651 s
+with peak RSS 10088 KiB. Recomputed event/checkpoint/651747-command hashes match the original
+field source exactly. The earlier OOM and terminated migration remain recorded failed attempts.
+
+The independent 100-real-software-Node workload completed 300.000 s with zero API/freshness errors,
+Controller peak RSS 101851136 bytes and Inventory/State-read P95=8.806 ms. Average Controller CPU
+was 75.880% of one core under this separate 100-Node stress; this does not pass or replace the
+two-Node idle <=10% CPU gate. No hardware, simulation or model was involved.
+
+Full field-size backup/restore remains pending. Its initial preflight correctly refused SQL
+sidecars (0-byte WAL and 32 KiB SHM left by a read-only connection), without deleting them. The
+follow-up explicitly drains only the owned clone under both original path and inode leases,
+requires SQLite checkpoint not busy, switches journal mode to DELETE and checks every logical
+row/schema before and after. A subsequent cache preflight could not inspect protected user
+session processes; it stopped before cache deletion or SQL replacement. Both failed preflight
+records are retained; they must not be represented as passed restores.
+
+The owned clone's page_count=1393943 and freelist_count=778021 show that successful migration
+leaves reusable pages; its physical size is 5709590528 bytes. Any VACUUM uses a separately
+verified owned candidate, preserves logical SQL, fsyncs candidate bytes and only then replaces
+the clone. The field database is never the VACUUM target. Actual restored SQL, legacy Artifact,
+MI Request database and deployment-version evidence still need end-to-end acceptance before
+the authorized 24-hour two-Node soak and field switch.
