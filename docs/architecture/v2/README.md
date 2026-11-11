@@ -1,5 +1,9 @@
 # RoboGuide V2 现行架构
 
+[ADR-0250](../../decisions/0250-explicit-local-execution-unknown.md)将本机显式 Unknown 保真
+映射归于 Node 声明式执行层：原诊断、持久 attempt/handle 和锁保留，不新增停止、释放、
+接替或重复 Execute 权限；Mission 当前 fail-fast 策略不变。
+
 [ADR-0249](../../decisions/0249-verifier-contract-catalog-preparation.md)通过受信部署能力目录
 向 MI 提供已登记验证源的精确合同声明，保留原 registry/config 摘要与既有目录冻结；
 声明不成为 World/物理事实，原准入权威和执行前状态检查保持。

@@ -276,6 +276,126 @@ fn rejects_unknown_execution_state_mapping() {
     ));
 }
 
+/// Explicit ambiguity maps with its original detail; undeclared local values remain errors.
+#[test]
+fn explicit_unknown_execution_state_mapping_preserves_detail() {
+    let directory = tempfile::tempdir().expect("temporary directory exists");
+    let mut config = valid_config(directory.path().join("local.pb"));
+    config.capabilities[0].workflow.execution_state.unknown = vec!["UNKNOWN".to_string()];
+    let catalog =
+        CompiledLocalCatalog::compile(config, directory.path()).expect("catalog compiles");
+    let workflow = catalog.capabilities()["mobility.reach_region@v1"].workflow();
+    let detail = r#"{"basis":"native-stop-unverified","session":"original"}"#;
+    let mut context = WorkflowContext::new(serde_json::json!({}));
+    context
+        .record_step(
+            "read-state",
+            serde_json::json!({ "state": "unknown", "detail": detail }),
+        )
+        .expect("explicit status records");
+    assert_eq!(
+        workflow
+            .map_execution_state(&context)
+            .expect("explicit ambiguity maps"),
+        MappedExecutionFact {
+            phase: MappedExecutionPhase::Unknown,
+            reason: Some(detail.to_string()),
+        }
+    );
+    let mut context = WorkflowContext::new(serde_json::json!({}));
+    context
+        .record_step(
+            "read-state",
+            serde_json::json!({ "state": "VENDOR_UNKNOWN" }),
+        )
+        .expect("undeclared status records");
+    assert!(workflow.map_execution_state(&context).is_err());
+}
+
+/// Omitting the optional ambiguity channel preserves legacy parsing and rejects no lifecycle fact.
+#[test]
+fn unknown_execution_state_mapping_defaults_to_empty() {
+    let mapping: ExecutionStateMappingConfig = toml::from_str(
+        r#"
+state_pointer = "/state"
+running = ["RUNNING"]
+completed = ["COMPLETED"]
+failed = ["FAILED"]
+cancelled = ["CANCELLED"]
+"#,
+    )
+    .expect("legacy mapping parses without an ambiguity declaration");
+    assert!(mapping.unknown.is_empty());
+}
+
+/// Legacy absent and explicit empty mappings keep the original compiled workflow identity.
+#[test]
+fn unknown_mapping_changes_workflow_digest_only_when_enabled() {
+    let directory = tempfile::tempdir().expect("temporary directory exists");
+    let legacy_mapping = r#"
+state_pointer = "/steps/read-state/state"
+reason_pointer = "/steps/read-state/detail"
+accepted = ["ACCEPTED"]
+running = ["RUNNING"]
+completed = ["SUCCEEDED"]
+failed = ["FAILED"]
+cancelled = ["CANCELED"]
+"#;
+    let digest = |text: &str| {
+        let mut config = valid_config(directory.path().join("local.pb"));
+        config.capabilities[0].workflow.execution_state = toml::from_str(text).unwrap();
+        let catalog = CompiledLocalCatalog::compile(config, directory.path()).unwrap();
+        crate::engine::workflow_digest(
+            &catalog,
+            &catalog.capabilities()["mobility.reach_region@v1"],
+            &serde_json::json!({"parameters": {}}),
+        )
+        .expect("original compiled behavior yields the workflow identity")
+    };
+    let absent = digest(legacy_mapping);
+    let explicit_empty = digest(&format!("{legacy_mapping}\nunknown = []\n"));
+    let enabled = digest(&format!("{legacy_mapping}\nunknown = [\"UNKNOWN\"]\n"));
+    assert_eq!(
+        absent, explicit_empty,
+        "empty optional config cannot drift an old attempt"
+    );
+    assert_ne!(
+        absent, enabled,
+        "new behavior must freeze a different workflow identity"
+    );
+}
+
+/// An explicitly unknown value cannot also grant terminal or running semantics after normalization.
+#[test]
+fn rejects_conflicting_unknown_execution_state_mapping() {
+    let directory = tempfile::tempdir().expect("temporary directory exists");
+    for value in ["SUCCEEDED", "failed", "Canceled", "RUNNING"] {
+        let mut config = valid_config(directory.path().join("local.pb"));
+        config.capabilities[0].workflow.execution_state.unknown = vec![value.to_string()];
+        assert!(matches!(
+            CompiledLocalCatalog::compile(config, directory.path()),
+            Err(CatalogError::Validation { field, .. }) if field == "execution_state"
+        ));
+    }
+}
+
+/// The maintained Robonix deployment declares its actual explicit UNKNOWN response channel.
+#[test]
+fn robonix_task_fragment_declares_explicit_unknown() {
+    let fragment: toml::Value = toml::from_str(include_str!(
+        "../../../../../integrations/robonix-task/deploy/node.task.fragment.toml"
+    ))
+    .expect("Robonix deployment fragment parses");
+    let mapping: ExecutionStateMappingConfig =
+        fragment["operations"][0]["workflow"]["execution_state"]
+            .clone()
+            .try_into()
+            .expect("Robonix execution state mapping parses");
+    assert_eq!(mapping.unknown, vec!["UNKNOWN"]);
+    assert!(!mapping.failed.contains(&"UNKNOWN".to_string()));
+    assert!(!mapping.cancelled.contains(&"UNKNOWN".to_string()));
+}
+
 /// Startup validation rejects handles and requests that depend on unavailable facts.
 #[test]
 fn rejects_unavailable_workflow_sources() {

@@ -1,5 +1,9 @@
 # RoboGuide
 
+[显式本机 Unknown 映射](docs/decisions/0250-explicit-local-execution-unknown.md)让 Node 保真
+上报 Robonix 的未知结果，保留原诊断、attempt 和占用；只查询原 handle，不重复执行。
+软件验收、现场部署与真实到达/停止分别记录，Mission 当前失败传播策略保持。
+
 [Scene 地标接入](docs/decisions/0247-lossless-scene-target-grounding.md)保留本机原定义及摘要，
 经中央 World State 提供给 MI，不将地标存在解释成定位、到达或运动授权。
 

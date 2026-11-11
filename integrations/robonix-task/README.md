@@ -1,5 +1,10 @@
 # Robonix 本机任务接入
 
+Node 的[显式 Unknown 接线](../../docs/decisions/0250-explicit-local-execution-unknown.md)
+要求组合部署保留 `node.task.fragment.toml` 中的 `unknown = ["UNKNOWN"]`。
+有效未知报告立即保留原诊断并进入 reconciliation，原占用与 handle 不释放、不重新派发；
+它不是 Cancelled 或物理停止证明。软件回归与现场部署、真机效果分别验收。
+
 各狗本机 Scene 目标通过[无损 World 接线](../../docs/decisions/0247-lossless-scene-target-grounding.md)
 进入中央与 MI：原目标字符串校验后再解析，不让跨语言浮点重编码改变来源摘要。
 只读地标接入与到达、定位或运动授权分别判断。

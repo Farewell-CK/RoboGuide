@@ -554,6 +554,8 @@ enum StatusFault {
     InvalidResponse,
     /// Local response decoded but lacks the configured state field.
     MissingState,
+    /// Local system explicitly reports ambiguity rather than failing the status read.
+    ReportedUnknown,
 }
 
 /// Driver that proves status reacquisition never repeats physical Execute.
@@ -568,6 +570,8 @@ struct FlakyStatusDriver {
     dispatch_calls: Arc<AtomicUsize>,
     /// Number of status observation calls.
     status_calls: Arc<AtomicUsize>,
+    /// Original durable handles passed to the read-only status route.
+    status_handles: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
     /// Whether the local cancel route accepted a request.
     cancellation_requested: Arc<AtomicBool>,
 }
@@ -581,6 +585,7 @@ impl FlakyStatusDriver {
             terminal_state,
             dispatch_calls: Arc::new(AtomicUsize::new(0)),
             status_calls: Arc::new(AtomicUsize::new(0)),
+            status_handles: Arc::new(std::sync::Mutex::new(Vec::new())),
             cancellation_requested: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -595,7 +600,7 @@ impl LocalDriver for FlakyStatusDriver {
     /// Scripts execute, status, and cancel without retrying Execute inside the driver.
     fn invoke<'a>(&'a self, request: &'a CompiledDriverRequest) -> BoxDriverFuture<'a> {
         Box::pin(async move {
-            let CompiledDriverRequest::Http { path, .. } = request else {
+            let CompiledDriverRequest::Http { path, body, .. } = request else {
                 return Err(DriverError::KindMismatch);
             };
             let payload = match path.as_str() {
@@ -612,6 +617,10 @@ impl LocalDriver for FlakyStatusDriver {
                     serde_json::json!({ "accepted": true })
                 }
                 "/status" => {
+                    self.status_handles
+                        .lock()
+                        .expect("status handle recording lock")
+                        .push(body.clone());
                     let call = self.status_calls.fetch_add(1, Ordering::SeqCst) + 1;
                     if call <= self.failures {
                         match self.fault {
@@ -626,6 +635,10 @@ impl LocalDriver for FlakyStatusDriver {
                                 ));
                             }
                             StatusFault::MissingState => serde_json::json!({ "detail": "missing" }),
+                            StatusFault::ReportedUnknown => serde_json::json!({
+                                "state": "UNKNOWN",
+                                "detail": "abort replied; physical stop remains unverified",
+                            }),
                         }
                     } else if self.cancellation_requested.load(Ordering::SeqCst) {
                         serde_json::json!({ "state": "CANCELLED", "detail": "cancelled" })
@@ -771,6 +784,7 @@ fn gated_catalog_for_contract(
             completed: vec!["COMPLETED".to_string()],
             failed: vec!["FAILED".to_string()],
             cancelled: vec!["CANCELLED".to_string()],
+            unknown: vec!["UNKNOWN".to_string()],
             case_sensitive: false,
         },
     };

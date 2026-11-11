@@ -13,6 +13,7 @@ fn valid_config(_descriptor_set: PathBuf) -> NodeServiceConfig {
         completed: vec!["SUCCEEDED".to_string()],
         failed: vec!["FAILED".to_string()],
         cancelled: vec!["CANCELED".to_string()],
+        unknown: Vec::new(),
         case_sensitive: false,
     };
     let step = |id: &str, connection: &str, operation: LocalOperationConfig| WorkflowStepConfig {

@@ -1,3 +1,10 @@
+ADR-0250 adds optional explicit execution_state.unknown mapping in core/node-service and the
+Robonix deployment fragment. Preserve native detail, original attempt/handle and local locks;
+publish existing Wire Unknown/ReconciliationRequired immediately without Execute replay. Repeat
+identical reports idempotently; original-handle status recovery grants no Controller stop/release
+authority. Keep Mission fail-fast unchanged. Run Node mapping/execution/restart regressions;
+software acceptance does not prove physical stop or arrival and field deployment is separate.
+
 ADR-0249 adds pure verifier_catalog preparation from an authenticated registry view into an
 explicit cached deployment capability description, not World evidence or automatic discovery.
 Preserve exact source/config/target predicates, tenant and original digests; current Control
