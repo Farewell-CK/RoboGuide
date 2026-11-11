@@ -1,5 +1,9 @@
 # RoboGuide V2 现行架构
 
+[ADR-0249](../../decisions/0249-verifier-contract-catalog-preparation.md)通过受信部署能力目录
+向 MI 提供已登记验证源的精确合同声明，保留原 registry/config 摘要与既有目录冻结；
+声明不成为 World/物理事实，原准入权威和执行前状态检查保持。
+
 [ADR-0248](../../decisions/0248-onsite-arrival-verifier-admission.md)将固定目标巡检的人工现场
 到达确认证据接到原 semantic-verifier registry 与 Task satisfaction；独立受限身份只发布
 精确原计划/attempt/实体/目标证据，不增加自动定位、运动、通道清空或停止恢复权限。

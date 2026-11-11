@@ -1,3 +1,11 @@
+ADR-0249 adds pure verifier_catalog preparation from an authenticated registry view into an
+explicit cached deployment capability description, not World evidence or automatic discovery.
+Preserve exact source/config/target predicates, tenant and original digests; current Control
+admission remains authoritative. Record raw and actual MI-normalized Catalog digests separately.
+arrival_plan uses the actual MI codec plus original wire checks and the opaque Core token, creates only
+new exports and grants no action/current-revision authority. Preserve failed real MI drafts,
+require actual model/Review evidence and do not replace unavailable Scene with saved coordinates.
+
 ADR-0248 adds a one-shot restricted manual onsite arrival publisher via the existing semantic
 verifier registry and evidence ingress. Preserve exact accepted plan, all current role attempts,
 tenant, source revision and per-entity target predicate; local Completed cannot release the gate.

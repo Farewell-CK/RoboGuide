@@ -1,0 +1,103 @@
+{
+  "schema": "lab.navigation-preparation-and-scene-simulation/v0.1",
+  "date": "2026-11-11",
+  "evidence_root_windows": "C:\\workspace\\DEAIOS\\lab\\rg-two-dog-navigation-preparation-20261111",
+  "evidence_root_thinkpad": "/home/duchaoke/rg-lab/two-dog-navigation-preparation-20261111",
+  "unit_tests": 220,
+  "isolated_json_simulation_cases": 9,
+  "simulation_passed": true,
+  "actual_controller_node_transport_tested_in_this_simulation": false,
+  "physics_or_obstacle_avoidance_tested": false,
+  "new_real_execution_attempts": 0,
+  "original_attempts": 55,
+  "new_positive_arrival_evidence": 0,
+  "mi_real_baseline": {
+    "request": "request-356b31c1e0b547d4ab03f270ce1194aa",
+    "lifecycle": "Failed"
+  },
+  "mi_source_fixed_v01": {
+    "request": "request-98a39944f7e24c509c5419ab87372ca0",
+    "lifecycle": "AwaitingApproval",
+    "not_for_execution": true,
+    "reason": "expected_effect stronger than supported single-Task predicate"
+  },
+  "v02_actual_model_rehearsal": "not-yet-run",
+  "actual_real_navigation_preflight": "Blocked with chassis off",
+  "mi_catalog_digest": "sha256:e3f14af12b4aae542287122560ddc2cca2456c18b1688f14c9b5e758f509276b",
+  "final_helper_source": "source-r4",
+  "production_source_sha256": {
+    "integrations/robonix-task/robonix_task/verifier_catalog.py": "sha256:ae816c2f27bf3c5135eb653d156a502e19332d21f73d89356177aa0d9b6d17e5",
+    "integrations/robonix-task/robonix_task/arrival_plan.py": "sha256:90eae0d2a49cb0a6bef667954eb825b89ef218ba49518124eb66b7f992cf2fc6",
+    "integrations/robonix-task/robonix_task/navigation_preflight.py": "sha256:43d2d1720bd0cf98d58682e701f9ea8b51403b9bcead3f3a12bd24955f789b40"
+  },
+  "files": {
+    "baseline-result.json": {
+      "sha256": "81d1d29dc2014f05cdfaf1a6cbca15e0e2191e023fe9e3654c384160375b76de",
+      "bytes": 66835
+    },
+    "source-fixed-result.json": {
+      "sha256": "7077518c10d20d310ccd8d3dfd49a16e50da4597847eb388a20dfe790face586",
+      "bytes": 74869
+    },
+    "helper-tests-r1.json": {
+      "sha256": "7d20534b49393dd6d146e4849425e85e00c3eb55fd08c9d2f5e7c3301f215628",
+      "bytes": 2820
+    },
+    "helper-tests-r2.json": {
+      "sha256": "2ce2644e0e2c7f8d7e3c46b37e6c36eaeec3285c7ea0521e0d03019503d72644",
+      "bytes": 3530
+    },
+    "helper-source-manifest.json": {
+      "sha256": "27e6201488a80a5ac308e6539a0397f859e4f0c1657d7bae0902e7258e41b6b8",
+      "bytes": 523
+    },
+    "helper-source-r2-manifest.json": {
+      "sha256": "04a6bc45872394783ac5d6dbdafa13b3272b71d5903b8681d69c5f8239126904",
+      "bytes": 665
+    },
+    "catalog-preparation.json": {
+      "sha256": "323a39bd2c0cb931db473dfddc09c37db80cb3833918763a0594dd5644564e45",
+      "bytes": 2579
+    },
+    "catalog-publication.json": {
+      "sha256": "dd0d64020091f11236cdcbe39539a5e7de972071afe569a8e826e9c3deb89d03",
+      "bytes": 1036
+    },
+    "catalog-publication-r2.json": {
+      "sha256": "545afce99a2b81bd919ba916454a945ea9c5c21a4e3a5e6bfdf7c8727ecfa329",
+      "bytes": 2855
+    },
+    "real-accepted-plan-export.json": {
+      "sha256": "e3206744ffe09c2427e74ffed42934fdf200d1960d3e623455d7c7c53b19b426",
+      "bytes": 1178
+    },
+    "real-accepted-plan-export-r2.json": {
+      "sha256": "1d8f8bea5b9d416ecfa9d5fcc0799a25d245c73814d3ad9684ce13e65266c6eb",
+      "bytes": 1316
+    },
+    "scene-simulation-r2-launch.json": {
+      "sha256": "80dce3729b4111b92cb6afff67bc00c71604af588e053fe539297d11cc26ac33",
+      "bytes": 1336
+    },
+    "navigation-source-r4-manifest.json": {
+      "sha256": "88867595d0bda9e0e4664370884b8fc87b82a2b5c3781b2e8a9b1491331fffb3",
+      "bytes": 417
+    },
+    "final-tests.json": {
+      "sha256": "c11729030685ecbf94ad792ecd1247b47a65300494dd09fdc01ab4fd72fffb58",
+      "bytes": 4084
+    },
+    "scene-simulation-r3-evidence/result.json": {
+      "sha256": "c6c059e7ad09978472c83a02d2488c93314ee47231f852631c61d20b735c32b1",
+      "bytes": 1487
+    },
+    "scene-simulation-r3-evidence/export-manifest.json": {
+      "sha256": "c28af06444c5138f6958adc3369a456bb15e8a1eda8453a4c86dbdc3d3e93796",
+      "bytes": 924
+    },
+    "real-navigation-preflight-1794390922181200346.json": {
+      "sha256": "e4e376ff30b6c13ae8c5818a2eaa336b1a7f9f71365c1484153c8fe6925b272e",
+      "bytes": 41032
+    }
+  }
+}

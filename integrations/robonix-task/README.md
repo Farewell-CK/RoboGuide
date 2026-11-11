@@ -362,3 +362,43 @@ unknown 只写本地 journal，不发正证据、不增加 sequence，不推动�
 `tests/arrival_verifier_process_gate.py` 要求显式 --controller、--node、全新 --output，
 使用两台 loopback 软件 Node、独立 mTLS 和原公开事件，检查原始回执、后继屏障、
 Unknown、资源、双 Node/Controller 冷重启和无重复 Execute；不能替代真实到达验收。
+
+
+## MI 规划中的已登记验证合同
+
+`verifier_catalog.build_arrival_catalog(catalog, registry_view, source_config)` 只生成显式
+部署能力目录及 provenance；调用者必须先认证 Controller 原 registry 读取。它严格
+核对实际注册与固定目标配置，仅向既有 arrival capability description 追加选中来源的
+精确谓词、revision和摘要。拒绝歧义源或重复追加，不新增操作/参数，不暴露其他租户，
+不把配置快照称为实时发现或 World 证据。发布保留旧目录，通过原 MI 配置读取，实际
+规范化 catalog_digest 由 MI 既有 provenance 冻结。Controller 仍检查当前来源权威。
+
+`arrival_plan.encode_plan_for_arrival(plan_document, admission, tenant)` 在中央主机使用
+实际 MI codec 重建原 compact UTF-8 body，必须匹配原 admission 的 wire SHA，并核对同 Mission 的受信 tenant 投影。
+Core source_plan_digest 是内部计划摘要，不等于 MI 公共JSON规范摘要，须作为opaque token
+保留，不离线宣称认证或重算该权威。三个输入应来自原 MI 计划和认证 Controller 原投影；工具不能
+替调用者认证 JSON。`save_plan(..., Path)` 只创建并 fsync 一个0600新文件，不覆盖。
+需把 `mission/src` 和 `integrations/robonix-task` 加入 PYTHONPATH；它不进行网络请求或
+任务提交。文件作为 publisher 的 --plan 输入，实际发布仍须原 Task AwaitingSatisfaction、
+完整当前 attempts 和明确现场确认，不能凭历史导出文件授权动作。
+
+见 [ADR-0249](../../docs/decisions/0249-verifier-contract-catalog-preparation.md)。
+
+
+## 导航准备与无运动模拟
+
+`navigation_preflight.assess_navigation_preflight(world_state, node_state, inventory,
+physical_registry, verifier_view, source_config, local_read_elapsed_ms=...)` 仅接收原认证
+Controller投影，在各狗自身Scene目标、Mapping报告地图/位置、姿态、目标来源及已登记
+到达合同之间联合检查，并扣同Controller后续留存和本地总读取耗时。位置窗口较长
+不能盖过姿态原生较短窗口。照片/汇总缺口单列，不阻塞导航准备。
+
+这是该实验的纯预检入口，不发送请求或授予动作，不是新的Core通用准入规则，也未
+自动接入所有MI审批入口。中央实验工具应在实际批准前读取最新来源并调用；仍需
+现场条件和授权，本机定位质量及即时安全归Robonix。
+
+`tests/navigation_scene_simulation_gate.py --output 全新目录` 通过真实采样/投影/读取代码
+验证正常和8类错误；源IO及Controller JSON来自隔离夹具，不创建真实Controller/Node
+或socket，不写现场State。正常软件预检可等待现场授权，错误地图、旧位置、切图、
+摘要损坏、过期、源故障、重启未采样和缺epoch均须拒绝。没有动力学、避障或真实
+定位验收承诺。详见[预演记录](../../docs/development/acceptance/2026-11-11-two-dog-navigation-preparation.md)。
