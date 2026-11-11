@@ -1,3 +1,14 @@
+ADR-0248 adds a one-shot restricted manual onsite arrival publisher via the existing semantic
+verifier registry and evidence ingress. Preserve exact accepted plan, all current role attempts,
+tenant, source revision and per-entity target predicate; local Completed cannot release the gate.
+The five-second monotonic report budget is not a sensor measurement timestamp. Persist original
+input/evidence before send; ambiguous delivery never auto-replays or renews TTL. Unknown retains
+ownership. Keep old grants/receipts/history, and scope the catalog rule to fixed named-goal patrol.
+No new daemon, automatic pose/stillness claim, shared-clearance or stop/recovery authority. Run
+publisher/registration tests and the independent mTLS Controller/Node gate before field enrollment;
+record code/software/registration/physical acceptance separately. Existing 0.5m draft remains blocked
+by unproven native bounded-motion contract and incomplete local conditions, not fixed by this source.
+
 ADR-0247 transports Scene target definitions as exact definition_json UTF-8 in World v0.2.
 Hash original string bytes before strict parsing; never round coordinates, accept epsilon digest
 comparisons, or rehash cross-language floating projections. Preserve source unknowns and native

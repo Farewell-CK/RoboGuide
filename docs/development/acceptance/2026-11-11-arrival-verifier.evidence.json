@@ -1,0 +1,191 @@
+{
+  "schema": "lab.onsite-arrival-field-acceptance/v0.1",
+  "date": "2026-11-11",
+  "evidence_root_windows": "C:\\workspace\\DEAIOS\\lab\\rg-arrival-verifier-20261111",
+  "evidence_root_thinkpad": "/home/duchaoke/rg-lab/arrival-verifier-20261111",
+  "statuses": {
+    "code": "passed",
+    "isolated_software": "passed",
+    "field_registration": "passed",
+    "physical_arrival": "not-tested",
+    "automatic_arrival": "not-implemented",
+    "motion_readiness": "not-accepted"
+  },
+  "tests": {
+    "integration": 193,
+    "mission": 739,
+    "process_gate_groups": 9,
+    "unique_software_execute": 4
+  },
+  "source_id": "onsite-patrol-arrival",
+  "source_revision": 1,
+  "producer_principal": "rg-patrol-verifier",
+  "tenant_id": "local",
+  "registration_receipt": {
+    "accepted_at_ms": 1794387214751,
+    "authority_subject": "field-operator:33457",
+    "command_id": "enroll-onsite-arrival-c5aee3b1a2af412797b7dd7b03ad0b78",
+    "input_digest": "sha256:f307119b124b39ca8c7e4513ec982c7c056f96c740ec206bf4b7877b35a29fa7",
+    "kind": "semantic_verifier",
+    "registry_digest": "sha256:d7efe11460c1b4e52ffd5ca5f7c9e0530ffe949abe9d86836e3538bc3622c063",
+    "revision": 1
+  },
+  "actual_robot_tasks_submitted": 0,
+  "actual_verifier_evidence_published": 0,
+  "last_mi_grounding_gaps": [
+    {
+      "code": "state_record_rejected",
+      "source": "controller-state",
+      "detail": "record 4: scene_targets_not_current"
+    },
+    {
+      "code": "state_record_rejected",
+      "source": "controller-state",
+      "detail": "record 5: scene_targets_not_current"
+    }
+  ],
+  "last_all_nodes_reachable": true,
+  "runtime_source": "/home/duchaoke/rg-lab/arrival-verifier-20261111/source-r3",
+  "files": {
+    "python-tests-r1.json": {
+      "sha256": "858bbe77efcf5689507a9fab497f990e95bd2ebc3fda47451b076bc716533c11",
+      "bytes": 3745
+    },
+    "python-tests-r3.json": {
+      "sha256": "80af6cceb43972180d1ccc09a68c41c49d1b29bc2a4bab179288e7f3927d24d5",
+      "bytes": 2690
+    },
+    "arrival-source-r1-summary.json": {
+      "sha256": "fc30e955c09d254666337f75e35ebffae919642a1d6ce4edf9e9c080aab34a74",
+      "bytes": 124
+    },
+    "arrival-source-r3-summary.json": {
+      "sha256": "8eb0fda119a36813e0a5bc2dbc5df4a088bad9462494cdad7729020bf1b3f8d6",
+      "bytes": 549
+    },
+    "arrival-source-r3-manifest.json": {
+      "sha256": "358e0b3ea24d50f7c8b46212bc681bcf6d2b159c4020271a782db5d0b53b3c86",
+      "bytes": 433603
+    },
+    "field-preparation.json": {
+      "sha256": "61c1abdd78934f292c69f3b7787ca4a1956e1c09e693794bdf0e6f68c8ae8c44",
+      "bytes": 69896
+    },
+    "field-enrollment-result.json": {
+      "sha256": "bfcda5d9a76b9ac4fa955d263623ff7d6f9f98203ad3823c81f14f10914e1629",
+      "bytes": 7522
+    },
+    "field-enrollment-result-r3.json": {
+      "sha256": "9bfef079eb3979c290851254e8951bf63879fa28f66aeae56e73fe30538171e4",
+      "bytes": 8965
+    },
+    "mi-deploy-cold-restore.json": {
+      "sha256": "848dae91a7d99d866ed0662d59a1c6bea0df99afbac50e5810ac346ccab9195f",
+      "bytes": 3340
+    },
+    "final-verification-r3.json": {
+      "sha256": "07442064cf2fe5f9a85d44dbb030af50968674ae18375889f83048ae2b4d80e4",
+      "bytes": 17181
+    },
+    "network-repair.json": {
+      "sha256": "dad3cfbcba2efd35adf560bb305a8633318f00aa96a324a125d4089275073cf6",
+      "bytes": 3410
+    },
+    "stable-server-transport.json": {
+      "sha256": "4477638accbef46c938b88a70b845da7d44509e050f4dffcb2d929a32793defe",
+      "bytes": 422
+    },
+    "dog1-stable-transport.json": {
+      "sha256": "b1ceb30137be781bc53112bd1aebdbeca6b9fa5d7831a7c7e32030584d7b6c86",
+      "bytes": 801
+    },
+    "dog2-stable-transport.json": {
+      "sha256": "91d2ccee545241e18b0ded92c270c9cee9ad4632844814c7bca1bbb8a1c3413f",
+      "bytes": 807
+    },
+    "field-enrollment-public/verifier-source-command.json": {
+      "sha256": "09ee87f58c244816aab42522bf6c4c9041a4e798e387296761fdaef7340730bb",
+      "bytes": 1231
+    },
+    "field-enrollment-public/verifier-source-receipt.json": {
+      "sha256": "f61f7365ab194809d461c2014927b77abba8cbd8118162b053ece35ff29f1053",
+      "bytes": 502
+    },
+    "field-enrollment-public/verifier-permission-probes.json": {
+      "sha256": "bed86a22799144e3548bf409f750ceee59484c778a5fed5d415905165da8a09e",
+      "bytes": 84
+    },
+    "process-gate-r2-evidence/result.json": {
+      "sha256": "8dfd3d4248acd6133aa4359969eaab8ed73687d17ba00ab8e074af4b6baf465d",
+      "bytes": 5784
+    },
+    "process-gate-r2-evidence/r1-failure.json": {
+      "sha256": "9856390fe26320536e0b2899f8479fe45679eb32ab82a5f1fae3eabec7fd97b4",
+      "bytes": 807
+    },
+    "process-gate-r2-evidence/export-manifest.json": {
+      "sha256": "0e732a93a1b1f55487e81660b1e3ce1addbc8ee71ac3f3b8542ae04594337307",
+      "bytes": 3777
+    },
+    "cold-original-history-1794387839404799226.json": {
+      "sha256": "3345a8cf777b8eb8fb752aa1dcbadef77b17622e2209b4a3f515b915af4bf6de",
+      "bytes": 275360
+    },
+    "field-enrollment-exact/result.json": {
+      "sha256": "d66b8effe8e0c61846f6ea159d0f0460ac4e0c11c70b16fc584a425a5958e4cb",
+      "bytes": 338
+    },
+    "field-enrollment-exact/verifier-permission-probes.json": {
+      "sha256": "111279e0dae3a0911995a6788fcd541477462bba4ba6b2989141b988df314a43",
+      "bytes": 67
+    },
+    "field-enrollment-exact/verifier-source-command.json": {
+      "sha256": "f307119b124b39ca8c7e4513ec982c7c056f96c740ec206bf4b7877b35a29fa7",
+      "bytes": 933
+    },
+    "field-enrollment-exact/verifier-source-readback.json": {
+      "sha256": "d7efe11460c1b4e52ffd5ca5f7c9e0530ffe949abe9d86836e3538bc3622c063",
+      "bytes": 828
+    },
+    "field-enrollment-exact/verifier-source-receipt.json": {
+      "sha256": "408d672409d2eff59c1dab026be5dd97c75851fa2506edb0b034b2cb6c77afa9",
+      "bytes": 437
+    },
+    "completion-state-1794387943986875384.json": {
+      "sha256": "00084cf16455b8b9eeb4550fb99980be696f3386cd5127f4556f77801d5bfaec",
+      "bytes": 3984
+    }
+  },
+  "mission_python_files_unchanged_from_tested_r1": 101,
+  "cold_history": {
+    "evidence_file": "cold-original-history-1794387839404799226.json",
+    "missions_with_attempts": 52,
+    "attempts": 55,
+    "projections_exact": true,
+    "original_mission_list_404_is_not_proof": true
+  },
+  "canonical_receipt_directory": "field-enrollment-exact",
+  "evidence_correction": "Original public-text exports retained; field-enrollment-exact matches original host bytes. Original 404 history comparison is superseded by per-Mission successful projections.",
+  "source_production_files": {
+    "integrations/robonix-task/robonix_task/arrival_verifier.py": "94e8dc9066b7b835419aa690801e868c7b5c7babf5af071b278d40bbe7d03a6c",
+    "integrations/robonix-task/robonix_task/arrival_verifier_store.py": "ff8d515abb881aaff09d48082088149be5f9bade68121c1756350f118eb62e18",
+    "integrations/robonix-task/deploy/register_arrival_verifier.py": "24943b2104529059f86c94ebfb18c9db0355b8cc58fa4f08ebf58f10da071ecf",
+    "integrations/robonix-task/deploy/patrol-capability-catalog.json": "b00b44b890942501d93fe5ebaacd54bf91de5be9d0b783bb4a0ac156f148ac56",
+    "integrations/robonix-task/tests/arrival_verifier_process_gate.py": "a647dcec1cda409fd9ae1f46bf306de6ff635896d64308c2cf76fe07f6fa7fe1"
+  },
+  "completion_state": {
+    "controller_ready": true,
+    "mi_ready": true,
+    "unknown_attempts": 0,
+    "allocations": 0,
+    "nodes_reachable": [
+      "lite3-dog1",
+      "lite3-dog2"
+    ],
+    "task_delegate_available": {
+      "lite3-dog1": false,
+      "lite3-dog2": false
+    },
+    "verifier_receipts": 0
+  }
+}

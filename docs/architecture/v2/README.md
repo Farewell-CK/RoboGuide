@@ -1,5 +1,9 @@
 # RoboGuide V2 现行架构
 
+[ADR-0248](../../decisions/0248-onsite-arrival-verifier-admission.md)将固定目标巡检的人工现场
+到达确认证据接到原 semantic-verifier registry 与 Task satisfaction；独立受限身份只发布
+精确原计划/attempt/实体/目标证据，不增加自动定位、运动、通道清空或停止恢复权限。
+
 [ADR-0247](../../decisions/0247-lossless-scene-target-grounding.md)将各狗原 Scene 地标通过
 独立 World 通道接入 MI；原定义用精确 JSON 字符串及摘要保留，时效与运动权限分别判断。
 

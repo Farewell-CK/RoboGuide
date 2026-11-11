@@ -303,3 +303,62 @@ uv run --with grpcio==1.71.0 --with protobuf==5.29.4 \
 继续拒绝；本地完整 objective 和原 Task/session identity 保持原样传给 Robonix。
 此元数据不增加本机动作、重试或停止权限。完整配置与 Unknown 行为见
 [MI 姿态观察器说明](../../mission/README.md)。
+
+## 独立人工现场到达源
+
+`robonix_task.arrival_verifier` 是一次性发布工具，不是机器人命令或常驻服务。
+首版由现场人员明确确认指定狗已到指定目标并停稳，再用独立 verifier mTLS 证书发布。
+它核对原已接纳 wire plan 的字节摘要、Controller plan digest、租户、固定实体/Node、
+精确目标谓词及全部当前 Completed attempts；只有 AwaitingSatisfaction 可接收新报告。
+当前 v0.1 仅支持 plan revision 0、5000ms 的固定命名目标巡检，缺失或变更绑定直接拒绝。
+
+登记在 Controller 主机执行：先准备已审核的精确 source profile，单独签发 clientAuth
+证书及 mode600 私钥；该工具不签发证书，也不接纳 Task。source profile 的 targets
+各含 entity_id、node_id、target_name、map_id、region_id、region_source_digest、predicate，
+谓词必须匹配上述六项原引用的规范 JSON 摘要。其余字段见 validate_config。
+
+```bash
+python3 integrations/robonix-task/deploy/register_arrival_verifier.py \
+  --source-profile /deployment/arrival-source-profile.json \
+  --operator-role-map /deployment/operator-authorization.json \
+  --certificate /deployment/arrival-verifier.crt --private-key /deployment/arrival-verifier.key \
+  --controller-origin https://CONTROLLER:8080 --client-ca /deployment/ca.crt \
+  --admin-cert /deployment/admin.crt --admin-key /deployment/admin.key \
+  --output-dir /deployment/new-enrollment-evidence
+```
+
+工具保留原所有 grants，增加明确租户的 verifier grant 并升级 operator-authorization
+v0.3，通过原热更新持久权威同步；原全局管理员再以 command_id/expected_revision 注册
+enabled、非 continuous 的精确 source，保留原命令/typed receipt/GET readback。
+受限证书仅能读必要原 Mission/状态和写 verifier-evidence，不能创建/取消任务或登记来源。
+重复运行必须使用原参数和原 output-dir；它复用原命令并要求原回执，不产生新修订。
+进程中止遗留 .enrollment.lock 时，先核对没有安装进程，再人工移除锁并恢复原目录。
+身份、来源或外部修订发生冲突时保留原文件，不能用新 command 绕过。
+登记期间必须独占部署 role-map 的更新；本地 output 锁不构成对其他部署工具的全局 CAS。
+
+确认流程分两步：先通过 `inspect` 读取原任务待验上下文；现场人员在实际观察后填写
+新的 confirmation（包含独立 observation_id、observer_id、全部 inspect 上下文、
+verdict=arrived-and-stopped 或 unknown）。同一文件被工具接收的时刻是人工报告接收时间，
+不代表定位测量时刻。正报告必须显式传 `--confirm-arrived-and-stopped`。
+
+```bash
+PYTHONPATH=integrations/robonix-task python3 -m robonix_task.arrival_verifier inspect \
+  --config /deployment/arrival-source-profile.json --plan /evidence/accepted-plan.raw.json \
+  --controller https://CONTROLLER:8080 --ca /deployment/ca.crt \
+  --certificate /deployment/arrival-verifier.crt --private-key /deployment/arrival-verifier.key \
+  --mission-id EXACT_MISSION --task-id EXACT_TASK
+```
+
+`publish` 使用同样配置/TLS/plan 参数，另外传 `--journal` 和 `--confirmation`，
+不再传 mission-id/task-id；正报告再加上述显式确认开关。五秒总预算覆盖绑定读取、
+落盘和发送，保守预留冻结 evidence 的 Controller 接收后有效期。SQLite 先保存原人工
+输入、来源配置、原 evidence 和 sequence 再 POST。丢响应或重启留下 publishing，
+不得自动重发/续鲜；有原回执的重复输入只返回原回执，异输入冲突。
+unknown 只写本地 journal，不发正证据、不增加 sequence，不推动后继或解除占用。
+
+本轮没有自动定位/速度/停稳检测、共享门口清空、device-stop 或恢复接替权威；
+登记不解锁 0.5m 相对移动。已有 execution-report 历史保持原合同。
+详见 [ADR-0248](../../docs/decisions/0248-onsite-arrival-verifier-admission.md)。
+`tests/arrival_verifier_process_gate.py` 要求显式 --controller、--node、全新 --output，
+使用两台 loopback 软件 Node、独立 mTLS 和原公开事件，检查原始回执、后继屏障、
+Unknown、资源、双 Node/Controller 冷重启和无重复 Execute；不能替代真实到达验收。
