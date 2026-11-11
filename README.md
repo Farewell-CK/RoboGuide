@@ -1,5 +1,8 @@
 # RoboGuide
 
+[Scene 地标接入](docs/decisions/0247-lossless-scene-target-grounding.md)保留本机原定义及摘要，
+经中央 World State 提供给 MI，不将地标存在解释成定位、到达或运动授权。
+
 真机主线按[分区巡检准备](docs/decisions/0246-partitioned-patrol-preparation.md)推进，
 分别验证到达、共享通道和停止后接替；运动及故障注入另行取得当轮授权。
 此前照片接力保留为辅助验证，不替代巡检或运动协作结果。

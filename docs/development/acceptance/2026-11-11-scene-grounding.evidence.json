@@ -1,0 +1,167 @@
+{
+  "schema": "lab.scene-grounding-field-acceptance/v0.2",
+  "date": "2026-11-11",
+  "motion_authorized": false,
+  "navigation_submitted": false,
+  "field_pipeline_evidence": "scene-v02-pipeline-verification-1794363978622262627.json",
+  "field_source_gaps": [],
+  "mi_state_schemas": [
+    "roboguide.world.physical-entity-reference/v0.1",
+    "roboguide.world.scene-targets/v0.2",
+    "roboguide.world.robot-physical-observation/v0.1",
+    "roboguide.world.physical-entity-reference/v0.1",
+    "roboguide.world.scene-targets/v0.2",
+    "roboguide.world.robot-physical-observation/v0.1"
+  ],
+  "mi_gaps": [],
+  "controller_plan_validation": {
+    "decision": "blocked",
+    "deployment_digest": null,
+    "execution_lifetime": null,
+    "execution_topology": null,
+    "issues": [
+      {
+        "code": "verifier.source_unavailable",
+        "message": "Mission requires one authorized independent verifier source per Task",
+        "path": "/tasks"
+      }
+    ],
+    "issues_truncated": false,
+    "mission_id": "two-dog-scene-navigation-draft-20261111",
+    "plan_body_sha256": "sha256:630e5a76020f6e856d3bd010cecffb3442df4dfbcecc88b3f85097d37e8d7074",
+    "schema_version": "roboguide.plan-validation/v0.2",
+    "scope": "published-contracts",
+    "verifier_source_digest": null,
+    "world_identity": null
+  },
+  "disabled_arrival_source": {
+    "schema_version": "roboguide.patrol-verifier-preparation/v0.1",
+    "registered": false,
+    "published": false,
+    "producer_identity_enrolled": false,
+    "motion_authorized": false,
+    "registry": {
+      "schema_version": "roboguide.semantic-verifier-registry/v0.1",
+      "registry_id": "two-dog-patrol-arrival-20261111",
+      "revision": 1,
+      "sources": {
+        "onsite-patrol-arrival": {
+          "source_id": "onsite-patrol-arrival",
+          "revision": 1,
+          "tenant_id": "local",
+          "producer_principals": [
+            "onsite-patrol-observer"
+          ],
+          "verifier": {
+            "namespace": "observation.patrol",
+            "name": "verify-arrival",
+            "version": "v1"
+          },
+          "predicates": [
+            "onsite-arrival/v0.1 entity-lite3-dog1 arrived-and-stopped at 茶水间门口 target-reference-sha256:95d77200fdbb7159de0e5b6e22180b7715693717a7a6d1aa1b00c958bf5e9df1",
+            "onsite-arrival/v0.1 entity-lite3-dog2 arrived-and-stopped at 王老师办公室门口 target-reference-sha256:6694e310089dd066178c71a874cb774d5b76c8505d65a13766b0454d09bbf2dd"
+          ],
+          "max_age_ms": 5000,
+          "stop_timeout_ms": 5000,
+          "enabled": false,
+          "continuous": false,
+          "require_artifact": false
+        }
+      }
+    }
+  },
+  "tests": {
+    "integration_passed": 157,
+    "mi_full_passed_r3": 739,
+    "mi_target_passed_r4": 109,
+    "mi_files_identical_r3_r4": 108,
+    "integration_r3_failure": "unknown Scene query route fell through; fixed with explicit404 and entire integration rerun"
+  },
+  "targets": [
+    {
+      "node_id": "lite3-dog1",
+      "entity_id": "entity-lite3-dog1",
+      "target_name": "茶水间门口",
+      "region_id": "anno.2cb4c8ba",
+      "map_id": "1101_visual_dog2",
+      "region_source_digest": "sha256:ea3ac063819dfa39461fa9350eba141b60f875c602a1f732bc11f3e5f0c1dc49",
+      "localization_verified": false,
+      "immutable_map_revision_verified": false,
+      "map_binding_atomicity_verified": false
+    },
+    {
+      "node_id": "lite3-dog2",
+      "entity_id": "entity-lite3-dog2",
+      "target_name": "王老师办公室门口",
+      "region_id": "anno.4c5ac08a",
+      "map_id": "1101_visual_dog2",
+      "region_source_digest": "sha256:e7dec2ac15aa35ee0180e383f9368bd3fce2a54151707a42c4ffbef1992d0bfa",
+      "localization_verified": false,
+      "immutable_map_revision_verified": false,
+      "map_binding_atomicity_verified": false
+    }
+  ],
+  "evidence_root": "C:\\workspace\\DEAIOS\\lab\\rg-two-dog-patrol-20261111",
+  "evidence_files": {
+    "scene-source-r4.tar.gz": {
+      "bytes": 17423651,
+      "sha256": "4d1c204169e28282b794ebecebf13db8e3e8e6f0db4ca54a32747392c86bd8e2"
+    },
+    "scene-source-r4-manifest.json": {
+      "bytes": 432381,
+      "sha256": "903a8b5ba704bfcba2f69093ead4012c522f8349c2951dd078d82122f991869f"
+    },
+    "scene-tests-r3.json": {
+      "bytes": 5802,
+      "sha256": "a7edf1e0f6c12f1804a42e75496702b97aeeba362d5833687c6acb242ef501d5"
+    },
+    "scene-tests-r4.json": {
+      "bytes": 5095,
+      "sha256": "512c2a763f0e6bde589da46ee3d866ed894622a978da6f0aca21529d80649530"
+    },
+    "scene-pipeline-verification-1794363450650310220.json": {
+      "bytes": 59126,
+      "sha256": "4f3b35bb45f66eb05deac65aca6e7c9f22b4f3766b62b1327c4bd63ae6e70e2c"
+    },
+    "scene-v02-pipeline-verification-1794363978622262627.json": {
+      "bytes": 92151,
+      "sha256": "a96fcc06d2572727ba96053f2d696e62746a348041679e0218b14cb962632d97"
+    },
+    "dog1-scene-v02-deploy-result.json": {
+      "bytes": 4731,
+      "sha256": "179eca14ff77aaf1f4f047d56a78d0f5edc0618ec13dba60eb7d227b5e9f28f8"
+    },
+    "dog2-scene-v02-deploy-result.json": {
+      "bytes": 4722,
+      "sha256": "73017724b3fd8df0a908572593686e01161aed2ac17265599221cbdb2fedef04"
+    },
+    "mi-scene-v02-deploy-result.json": {
+      "bytes": 521,
+      "sha256": "195cd743602d049c24a1e76a53f4f21188be9afe44aded259c1d232e775a39da"
+    },
+    "stand-original-control-events-1794363265174693230.json": {
+      "bytes": 17510,
+      "sha256": "6fc0ecb28b7fc470cd8d7574f330a5654261dce595b9073682fc57b2df3c8490"
+    },
+    "stand-observation-1794362699599605138.json": {
+      "bytes": 16409,
+      "sha256": "4278e278d2c3f1078dcee14becf77688ce46c457bbfcf3e0b3a1b5a5de56f322"
+    },
+    "dog1-stand-draft.json": {
+      "bytes": 26989,
+      "sha256": "e39fe1a86f5b04493cbdc5d2ee98aa71fc3ef0aec2ba37cc7c8f39f0a20cb8b6"
+    },
+    "dog2-stand-draft.json": {
+      "bytes": 26459,
+      "sha256": "37b53dfc107ea5e2245f0957bf38ee51a874952e5ef8ba27b4adea8c7544c26a"
+    },
+    "dog1-stand-approval-result.json": {
+      "bytes": 26183,
+      "sha256": "c48d3a5636cb364195811b7f93fe7af0ab49488c12a738ea8371eb9f0b2473a8"
+    },
+    "dog2-stand-approval-result.json": {
+      "bytes": 25893,
+      "sha256": "26eeaea80499e9697aad3dfe032599d56a05a9e1fe8c264608f1e52578c46b1e"
+    }
+  }
+}

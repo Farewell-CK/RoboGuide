@@ -1,5 +1,8 @@
 # RoboGuide V2 现行架构
 
+[ADR-0247](../../decisions/0247-lossless-scene-target-grounding.md)将各狗原 Scene 地标通过
+独立 World 通道接入 MI；原定义用精确 JSON 字符串及摘要保留，时效与运动权限分别判断。
+
 [ADR-0246](../../decisions/0246-partitioned-patrol-preparation.md)将真机主线转向分区巡检：
 复用原物理实体路由、DAG 与独立到达证据；过滤后的物理 World 报告不接管 Node/Control
 事实，也不由接口完成推导到达、通道清空或停止。运动、资源竞争和接替分别验收。

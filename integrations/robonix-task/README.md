@@ -1,5 +1,9 @@
 # Robonix 本机任务接入
 
+各狗本机 Scene 目标通过[无损 World 接线](../../docs/decisions/0247-lossless-scene-target-grounding.md)
+进入中央与 MI：原目标字符串校验后再解析，不让跨语言浮点重编码改变来源摘要。
+只读地标接入与到达、定位或运动授权分别判断。
+
 当前双狗主线为分区巡检、共享通道与故障接替，照片数据接力作为辅助验证保留。
 见 [ADR-0246](../../docs/decisions/0246-partitioned-patrol-preparation.md) 和
 [本轮预检记录](../../docs/development/acceptance/2026-11-10-two-dog-patrol-preflight.md)。

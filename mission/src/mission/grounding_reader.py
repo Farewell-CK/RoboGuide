@@ -37,6 +37,7 @@ from mission.planning_world_evidence import (
     PlanningWorldEvidenceError,
 )
 from mission.request_record import DialogueTurn
+from mission.scene_grounding import SCENE_TARGETS_SCHEMA, qualify_scene_targets
 from mission.security_context import authenticated_tenant
 from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticEvidenceError
 
@@ -267,6 +268,8 @@ class HttpMissionGroundingReader:
         self._selection_policy_ref = grounding_selection_policy_ref(admitted_world_payload_schemas)
         if PHYSICAL_REPORT_SCHEMA in admitted_world_payload_schemas:
             self._selection_policy_ref += "#physical-profile=v0.1"
+        if SCENE_TARGETS_SCHEMA in admitted_world_payload_schemas:
+            self._selection_policy_ref += "#scene-targets-profile=v0.2"
         if admitted_memory_content_schemas:
             self._selection_policy_ref += "#memory-content=" + ",".join(
                 sorted(admitted_memory_content_schemas)
@@ -624,6 +627,17 @@ def _state_evidence(
             controller_observed_at_ms=controller_observed_at_ms,
             local_read_elapsed_ms=local_read_elapsed_ms,
         )
+    elif payload_schema == SCENE_TARGETS_SCHEMA:
+        qualify_scene_targets(
+            object_ref,
+            payload,
+            source=item.get("source"),
+            channel_id=item.get("channel_id"),
+            semantic=semantic,
+            stale=item.get("stale"),
+            controller_observed_at_ms=controller_observed_at_ms,
+            local_read_elapsed_ms=local_read_elapsed_ms,
+        )
     stale = item.get("stale")
     if not isinstance(stale, bool):
         raise GroundingContextError("World State record must carry a freshness assessment")
@@ -672,13 +686,36 @@ def _physical_state_before_freeze(
     """
     retained: list[StateGroundingEvidence] = []
     for item in evidence:
-        if item.payload_schema != PHYSICAL_REPORT_SCHEMA:
+        if item.payload_schema not in {PHYSICAL_REPORT_SCHEMA, SCENE_TARGETS_SCHEMA}:
             retained.append(item)
             continue
         try:
             if read_clock is None:
                 raise GroundingContextError("physical_profile_original_read_clock_missing")
             observed_at_ms, started_ns = read_clock
+            if item.payload_schema == SCENE_TARGETS_SCHEMA:
+                qualify_scene_targets(
+                    {
+                        "class": "world",
+                        "object_type": item.object_type,
+                        "object_id": item.object_id,
+                    },
+                    {
+                        "value": item.value,
+                        "received_at_ms": item.received_at_ms,
+                        "valid_for_ms": item.valid_for_ms,
+                        "source_epoch": item.source_epoch,
+                        "sequence": item.sequence,
+                    },
+                    source=item.source,
+                    channel_id=item.channel_id,
+                    semantic=item.semantic,
+                    stale=item.freshness is GroundingFreshness.STALE,
+                    controller_observed_at_ms=observed_at_ms,
+                    local_read_elapsed_ms=math.ceil((time.monotonic_ns() - started_ns) / 1_000_000),
+                )
+                retained.append(item)
+                continue
             _qualify_physical_report(
                 {"object_id": item.object_id},
                 {

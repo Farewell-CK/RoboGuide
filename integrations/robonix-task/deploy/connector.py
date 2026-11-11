@@ -24,6 +24,7 @@ from robonix_task.photo_jobs import PhotoInspectionJobs
 from robonix_task.physical_observation import entity_reference, physical_observation
 from robonix_task.position import annotate_mapping_age
 from robonix_task.protocol import Liaison
+from robonix_task.scene_targets import SceneTargetObserver
 from status_bridge import Status
 from status_bridge import handler_type as observer_handler
 
@@ -37,6 +38,7 @@ def combined_handler(
     image_jobs=None,
     photo_memory=None,
     physical_entity=None,
+    scene_targets=None,
 ):
     """Keep the existing route implementations and disambiguate readiness paths."""
     camera = camera_handler(captures)
@@ -54,7 +56,14 @@ def combined_handler(
 
         def do_GET(self):
             """Select the module by the fixed Node workflow route."""
-            if self.path in ("/v1/world/entity-reference", "/v1/world/physical-observation"):
+            if self.path.startswith("/v1/world/scene-targets"):
+                if self.path != "/v1/world/scene-targets":
+                    self.reply(404, {"error": "unknown Scene World route"})
+                elif scene_targets is None:
+                    self.reply(404, {"error": "Scene World export disabled"})
+                else:
+                    self.reply(200, scene_targets.read())
+            elif self.path in ("/v1/world/entity-reference", "/v1/world/physical-observation"):
                 if physical_entity is None:
                     self.reply(404, {"error": "physical World export disabled"})
                 elif self.path.endswith("/entity-reference"):
@@ -274,6 +283,11 @@ def main():
         server = Server(args.port, pilot)
         try:
             observer = Status(args.codegen)
+            scene_targets = (
+                SceneTargetObserver(args.physical_entity, args.node_id)
+                if args.physical_entity is not None and args.node_id is not None
+                else None
+            )
             chassis = ChassisStateObserver() if args.chassis_state else None
             if chassis is not None:
                 cleanup.callback(chassis.close)
@@ -354,10 +368,18 @@ def main():
                 image_jobs,
                 photo_memory,
                 args.physical_entity,
+                scene_targets,
             )
             server.timeout = 0.5
+
+            def sample_sensors():
+                """Sample Scene with sensors while chassis keeps its independent worker."""
+                observer.sample()
+                if scene_targets is not None:
+                    scene_targets.sample()
+
             workers = ObservationWorkers(
-                observer.sample, chassis.sample if chassis is not None else None, stopping
+                sample_sensors, chassis.sample if chassis is not None else None, stopping
             )
             cleanup.callback(workers.close)
             workers.start()

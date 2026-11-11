@@ -152,6 +152,37 @@ class PhotoRoutesTests(unittest.TestCase):
             server.server_close()
             thread.join()
 
+    def test_scene_route_serves_only_the_selected_cached_observer(self) -> None:
+        """The fixed GET returns existing cache bytes without calling a sampler or another route."""
+        connector = load_connector()
+
+        class SceneCache:
+            """Expose only a known cached unavailable result with no HTTP or sample function."""
+
+            def read(self) -> dict[str, Any]:
+                """Return an explicitly unknown source rather than creating target evidence."""
+                return {"availability": "unknown", "definition_json": None}
+
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", 0), connector.combined_handler(None, None, scene_targets=SceneCache())
+        )
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            url = "http://127.0.0.1:" + str(server.server_port) + "/v1/world/scene-targets"
+            with opener.open(url, timeout=3) as response:
+                self.assertEqual(
+                    json.load(response), {"availability": "unknown", "definition_json": None}
+                )
+            with self.assertRaises(urllib.error.HTTPError) as rejected:
+                opener.open(url + "?entity=another-body", timeout=3)
+            self.assertEqual(rejected.exception.code, 404)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
 
 if __name__ == "__main__":
     unittest.main()

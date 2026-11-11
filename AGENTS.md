@@ -1,3 +1,8 @@
+ADR-0247 transports Scene target definitions as exact definition_json UTF-8 in World v0.2.
+Hash original string bytes before strict parsing; never round coordinates, accept epsilon digest
+comparisons, or rehash cross-language floating projections. Preserve source unknowns and native
+budgets; reported targets do not prove localization, map atomicity, arrival or movement authority.
+
 ADR-0246 prioritizes partitioned patrol; photo handoff stays auxiliary and original evidence remains.
 physical_observation projects only explicit physical World reports, preserving nested age and unknown
 pose quality/time. Entity references require the accepted deployment route; never rename whole Node
