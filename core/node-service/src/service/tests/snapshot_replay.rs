@@ -41,6 +41,20 @@ async fn modern_cancel_without_execute_cannot_manufacture_a_stopped_execution() 
     );
     assert!(incoming.try_recv().is_err());
     assert!(engine.snapshots().unwrap().is_empty());
+    // An exact maintenance selection can report this tombstone without changing normal replay.
+    let maintenance = NodeService::new(engine.clone())
+        .with_unadmitted_cancellation_observation("unit-never-executed".into())
+        .unwrap();
+    let observations = maintenance.execution_snapshots().unwrap();
+    assert_eq!(observations.len(), 1);
+    assert_eq!(observations[0].execution_id, "unit-never-executed");
+    assert_eq!(observations[0].phase, ExecutionPhase::Cancelled as i32);
+    assert_eq!(observations[0].last_sequence, 1);
+    assert!(engine.snapshots().unwrap().is_empty());
+    let absent = NodeService::new(engine)
+        .with_unadmitted_cancellation_observation("not-cancelled".into())
+        .unwrap();
+    assert!(absent.execution_snapshots().unwrap().is_empty());
 }
 
 /// Holds one real engine dispatch before its local handle arrives, without wall-clock races.

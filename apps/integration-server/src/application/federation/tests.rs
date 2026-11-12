@@ -123,6 +123,7 @@ fn original_receipt_does_not_follow_current_phase_or_renew_time() {
 /// Builds the actual standalone Controller projection, without registering any Node or capability.
 fn controller(log: &state::SqliteEventLog) -> ControllerState {
     ControllerState {
+        published_deployments: Default::default(),
         federation: Default::default(),
         runtime_revisions: Default::default(),
         mission_admissions: Default::default(),

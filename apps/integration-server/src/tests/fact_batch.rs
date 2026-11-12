@@ -104,6 +104,11 @@ fn registration(index: usize) -> wire::NodeRegistration {
 impl Fixture {
     /// Negotiates two pending/accepted routes using the same production fact driver under test.
     async fn new() -> Self {
+        Self::with_registration(registration).await
+    }
+
+    /// Uses an explicit source declaration while retaining both real transport and Control paths.
+    async fn with_registration(registration: fn(usize) -> wire::NodeRegistration) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let events = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
         let clock = Arc::new(TestClock(AtomicU64::new(1)));
@@ -127,6 +132,7 @@ impl Fixture {
                 .await
         });
         let controller = Arc::new(Mutex::new(ControllerState {
+            published_deployments: Default::default(),
             federation: Default::default(),
             bridge: IntegrationRuntimeBridge::new(
                 control::ControlPlane::new(),
@@ -159,6 +165,7 @@ impl Fixture {
             server,
         };
         for index in 0..2 {
+            let declared = registration(index);
             let mut client =
                 wire::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient::connect(
                     format!("http://{address}"),
@@ -171,7 +178,7 @@ impl Fixture {
                     message: Some(NodePayload::Hello(wire::Hello {
                         node_id: format!("worker-{index}"),
                         protocol_versions: vec![wire::PROTOCOL_VERSION.into()],
-                        node_contract_versions: vec![wire::NODE_CONTRACT_VERSION.into()],
+                        node_contract_versions: vec![declared.node_contract_version.clone()],
                     })),
                 })
                 .unwrap();
@@ -187,7 +194,7 @@ impl Fixture {
             sender
                 .send(wire::NodeMessage {
                     message: Some(NodePayload::Register(wire::Register {
-                        registration: Some(registration(index)),
+                        registration: Some(declared),
                     })),
                 })
                 .unwrap();
@@ -385,6 +392,195 @@ impl Fixture {
         self.ack(1, 1).await;
         attempts
     }
+}
+
+/// Declares source-owned no-effects support only on the first synthetic peer.
+fn no_effects_registration(index: usize) -> wire::NodeRegistration {
+    let mut value = registration(index);
+    if index == 0 {
+        value.node_contract_version = wire::SAFETY_NODE_CONTRACT_VERSION.into();
+        value.local_systems[0].metadata.insert(
+            domain::EXECUTION_SAFETY_METADATA_KEY.into(),
+            serde_json::json!({
+                "schema":"roboguide.execution-safety/v0.2", "operations":[{
+                    "operation":{"namespace":"compute","name":"work","version":"v1"},
+                    "safe_state_export_id":"task-effects", "max_evidence_age_ms":10,
+                    "stop_deadline_ms":100, "min_confidence_millionths":null,
+                    "assurance":"no-effects"
+                }]
+            })
+            .to_string(),
+        );
+        value.state_exports.push(wire::StateExportDescriptor {
+            export_id: "task-effects".into(),
+            local_system_id: "worker-runtime".into(),
+            object_class: wire::StateObjectClass::Node as i32,
+            object_type: "task-effects".into(),
+            object_id: value.node_id.clone(),
+            semantic: wire::StateSemantic::Observed as i32,
+            payload_schema: domain::TASK_EFFECT_OBSERVATION_SCHEMA.into(),
+            valid_for_ms: 10,
+        });
+    }
+    value
+}
+
+/// A late original cancellation cannot roll back an unrelated peer's completion or disable writes.
+#[tokio::test]
+async fn late_no_effects_terminal_preserves_other_peer_fact_in_same_batch() {
+    let mut fixture = Fixture::with_registration(no_effects_registration).await;
+    fixture.submit(None);
+    let attempts = fixture.start().await;
+    let first = attempts[0].command();
+    let first_id = attempts[0].execution_id();
+    let session = fixture.peers[0].session.clone();
+    let correlation = domain::CorrelationId::new("late-task-cancel-batch").unwrap();
+    fixture.events.begin_batch().unwrap();
+    {
+        let mut live = fixture.controller.lock().unwrap();
+        application::safety_stop::admit(
+            &mut live,
+            first.group_id(),
+            first.task_ref(),
+            first.role_id(),
+            domain::TimestampMs::new(6),
+            100,
+        )
+        .unwrap();
+        application::safety_stop::receipt(
+            &mut live,
+            first.node_id(),
+            &session,
+            &wire::CommandReceipt {
+                session_id: session.clone(),
+                command_id: format!("cancel-{first_id}"),
+                execution_id: first_id.into(),
+                kind: wire::CommandKind::CommandCancel as i32,
+                sequence: 2,
+                status: wire::CommandReceiptStatus::CommandPersisted as i32,
+                reason: String::new(),
+            },
+            domain::TimestampMs::new(7),
+            domain::TimestampMs::new(7),
+        )
+        .unwrap();
+        let ControllerState {
+            bridge,
+            orchestrator,
+            ..
+        } = &mut *live;
+        orchestrator
+            .request_cancel(
+                first.mission_id(),
+                bridge.control_mut(),
+                domain::TimestampMs::new(8),
+                &correlation,
+                &mut fixture.events.clone(),
+            )
+            .unwrap();
+        live.bridge.consume(
+            integration::GrpcNodeEvent::NodeMessage {
+                node_id: first.node_id().to_string(), session_id: session.clone(),
+                message: wire::NodeMessage {
+                    message: Some(NodePayload::StateObservationBatch(wire::StateObservationBatch {
+                        session_id: session.clone(), sequence: 1,
+                        observations: vec![wire::StateObservation {
+                            export_id: "task-effects".into(),
+                            json_value: serde_json::to_vec(&serde_json::json!({"observations":[{
+                                "execution_id":first_id, "execution_generation":1,
+                                "command_id":format!("cancel-{first_id}"), "terminal_state":"CANCELLED",
+                                "safe_state":true, "assurance":"no-effects", "task_effects":{
+                                    "native_session_id":"first-native-session", "native_task_id":"first-native-task",
+                                    "disposition":"no-effects", "evidence_digest":format!("sha256:{}","a".repeat(64))
+                                }
+                            }]})).unwrap(),
+                            has_source_observed_at: false, source_observed_at_ms: 0,
+                            has_confidence: false, confidence_millionths: 0,
+                        }],
+                    })),
+                },
+            }, domain::TimestampMs::new(105), &correlation,
+        ).unwrap();
+        fixture
+            .events
+            .save_checkpoint(
+                SERVER_CHECKPOINT_SCHEMA,
+                &server_checkpoint_json(&live).unwrap(),
+            )
+            .unwrap();
+    }
+    fixture.events.commit_batch().unwrap();
+    fixture.events = fixture
+        .events
+        .clone()
+        .with_write_failure_fence("late-cancel-fact-batch")
+        .unwrap();
+    let late = fixture
+        .execution(0, first_id, 2, wire::ExecutionPhase::Cancelled, 106)
+        .await;
+    let unrelated = fixture
+        .execution(
+            1,
+            attempts[1].execution_id(),
+            2,
+            wire::ExecutionPhase::Completed,
+            106,
+        )
+        .await;
+    fixture.clock.0.store(107, Ordering::Relaxed);
+    fixture
+        .run(vec![late, unrelated])
+        .expect("normal late ingress cannot abort another peer's fact");
+    loop {
+        let message =
+            tokio::time::timeout(Duration::from_secs(2), fixture.peers[0].incoming.message())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+        match message.message {
+            Some(ServerPayload::Cancel(cancel)) => assert_eq!(cancel.execution_id, first_id),
+            Some(ServerPayload::Ack(ack)) => {
+                assert_eq!(ack.sequence, 2);
+                break;
+            }
+            other => panic!("unexpected original peer response {other:?}"),
+        }
+    }
+    fixture.ack(1, 2).await;
+    assert!(fixture.events.write_status().unwrap().write_enabled);
+    let live = fixture.controller.lock().unwrap();
+    assert_eq!(
+        live.bridge.terminal_received_at(first_id),
+        Some(domain::TimestampMs::new(106))
+    );
+    assert_eq!(
+        live.orchestrator
+            .execution(first.mission_id())
+            .unwrap()
+            .lifecycle(),
+        orchestration::MissionExecutionLifecycle::Cancelling
+    );
+    assert_eq!(
+        live.orchestrator
+            .execution(attempts[1].command().mission_id())
+            .unwrap()
+            .lifecycle(),
+        orchestration::MissionExecutionLifecycle::Completed
+    );
+    assert_eq!(
+        live.bridge
+            .control()
+            .allocation_snapshot(domain::TimestampMs::new(107))
+            .unwrap()
+            .allocations()
+            .len(),
+        1
+    );
+    let purpose = serde_json::to_value(&live.safety_stops).unwrap()[first_id].clone();
+    assert_eq!(purpose["record"]["phase"], "manual_escalation");
+    assert_eq!(purpose["record"]["deadline"], 106);
+    assert!(purpose.get("settlement").is_none());
 }
 
 /// 1/N keep exact event/checkpoint authority for the same ordered inputs and original receive times.

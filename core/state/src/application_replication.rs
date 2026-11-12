@@ -176,17 +176,33 @@ impl ApplicationCommitBatch {
 
 /// Checks immutable event envelope and typed codec without interpreting its authority semantics.
 pub fn validate_persisted_event(event: &PersistedEvent) -> Result<(), SqliteEventLogError> {
-    EventId::new(event.event_id.clone())
+    decode_persisted_event(event).map(|_| ())
+}
+
+/// Decodes one original envelope once, retaining the same identity and typed-schema validation.
+pub(super) fn decode_persisted_event(
+    event: &PersistedEvent,
+) -> Result<EventRecord, SqliteEventLogError> {
+    let event_id = EventId::new(event.event_id.clone())
         .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?;
-    CorrelationId::new(event.correlation_id.clone())
+    let correlation_id = CorrelationId::new(event.correlation_id.clone())
         .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?;
-    if let Some(cause) = &event.causation_id {
-        EventId::new(cause.clone())
-            .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?;
-    }
+    let causation_id = event
+        .causation_id
+        .as_ref()
+        .map(|cause| EventId::new(cause.clone()))
+        .transpose()
+        .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?;
     let payload: EventPayload = serde_json::from_str(&event.payload_json)
         .map_err(|error| SqliteEventLogError::Codec(error.to_string()))?;
-    validate_payload_schema(&event.payload_schema, &payload)
+    validate_payload_schema(&event.payload_schema, &payload)?;
+    Ok(EventRecord::new(
+        event_id,
+        TimestampMs::new(event.timestamp_ms),
+        correlation_id,
+        causation_id,
+        payload,
+    ))
 }
 
 impl SqliteEventLog {
@@ -205,6 +221,12 @@ impl SqliteEventLog {
     }
     /// Installs an optional quorum port before the application shares this store or creates authority.
     pub fn with_replicator(mut self, replicator: Arc<dyn ApplicationBatchReplicator>) -> Self {
+        if self.catalog_checkpoint_enabled {
+            let _ = self.disable_writes(
+                "storage v2 requires a standalone writer; replica projection not negotiated",
+                false,
+            );
+        }
         self.replicator = Some(replicator);
         self
     }
@@ -275,6 +297,11 @@ impl SqliteEventLog {
         commands: &[ControlCommandJournalEntry],
         recovery: Option<&ReplicaRecoveryProjection>,
     ) -> Result<(), SqliteEventLogError> {
+        if self.catalog_checkpoint_enabled {
+            return Err(SqliteEventLogError::Codec(
+                "storage v2 replica materialization is not negotiated".into(),
+            ));
+        }
         self.require_writes_enabled()?;
         self.ensure_no_open_batch()?;
         if let Some(recovery) = recovery {

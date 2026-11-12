@@ -103,9 +103,12 @@ impl LocalIntegrationEngine {
                     Err(error) => {
                         consecutive_observation_failures =
                             consecutive_observation_failures.saturating_add(1);
-                        if !status_observation_is_reacquirable(&error)
-                            || consecutive_observation_failures
-                                >= MAX_CONSECUTIVE_STATUS_OBSERVATION_FAILURES
+                        if !status_observation_is_reacquirable(&error) {
+                            engine.record_ambiguous(&execution_id, error.to_string());
+                            return;
+                        }
+                        if consecutive_observation_failures
+                            == MAX_CONSECUTIVE_STATUS_OBSERVATION_FAILURES
                         {
                             engine.record_ambiguous(
                                 &execution_id,
@@ -115,7 +118,6 @@ impl LocalIntegrationEngine {
                                     consecutive_observation_failures
                                 ),
                             );
-                            return;
                         }
                         tokio::time::sleep(status_reacquisition_delay(
                             capability.workflow().poll_interval_ms(),

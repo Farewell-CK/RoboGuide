@@ -1,5 +1,49 @@
 # RoboGuide V2 现行架构
 
+[ADR-0243](../../decisions/0243-catalog-recovery-checkpoint.md)定义显式 standalone 存储 v2：
+State 在原事件事务内维护带原始来源、覆盖序号及摘要的 Catalog 恢复投影，正常启动只读
+相关记录；旧历史完整保留，旧 writer 拒绝新代际。任务和恢复权威不迁移到投影；复制部署
+及高频历史归档仍须分别接线验收。当前实现和隔离验收已完成，未部署现场。
+
+[ADR-0242](../../decisions/0242-online-deployment-publications.md)将在线物理实体发布归于
+现有管理员写入和 Control provenance，将新请求的可行性版本归于应用层受检历史；
+原 Actor 绑定、Control 限制和运行期候选保留原证据。当前物理路由仍须显式部署输入，
+不由 checkpoint 恢复；在线版本、身份、能力、World 来源与设备事实分别验证。
+
+[ADR-0241](../../decisions/0241-reported-posture-goal-profile.md)将姿态目标的判定接到既有
+Task satisfaction 通路：本机执行完成后等待确切任务的验证证据，更新的报告不符则拒绝目标，
+离线、旧样本与未知状态不推进依赖。纯评估器只证明有来源的 reported-state 谓词；
+身份、结算、持久化与恢复仍由原 Controller 权威负责。本轮仅完成隔离软件验证，未部署现场。
+
+[ADR-0239](../../decisions/0239-online-static-node-identity-adoption.md)将静态 Node 证书到
+生命周期管理的在线采用归于原管理员写入/Commit/传输发布通路；显式完整归属与
+v0.2 原采用凭证保持历史绑定、活跃会话和冷恢复边界，不自动推断身份或硬件信任。
+
+[ADR-0240](../../decisions/0240-reported-chassis-posture-state.md)使 RG 通过周期 State 检查
+Robonix 报告的底盘姿态。统一 Connector 可选采集固定只读 chassis/state，中央读取器
+校验确切来源及内外层时效，不为每次检查创建 Pilot 任务，也不推导阻尼或遥控器状态。
+
+[ADR-0238](../../decisions/0238-local-eaios-delegation-objective-boundary.md)约束任务级委派的
+MI 解释边界：RG 承担选机、身份与租户授权、审批及派发，本机 EAIOS 接收完整本机目标和
+动作限制。不得要求 Pilot 反查 RG 集群或再次执行 RG 委派；适配器不删改模型生成目标。
+
+[ADR-0237](../../decisions/0237-host-enrollment-with-unavailable-chassis.md)区分计算主机
+在线、Node 身份和机器人能力可用性。统一 Connector 的只读 host inspection 复用正常
+Task/资源和 Node State；两台主机分别使用独立凭据及存储，不将在线解释为运动就绪。
+
+[ADR-0236](../../decisions/0236-unadmitted-cancellation-snapshots.md)补齐 Node 对持久取消
+但从未进入本地执行的快照回放；不生成原执行记录，不授予物理停止或自动续跑权限。
+起点操作采用既有定量 Compute class 合同，与相机槽明确区分。
+
+[ADR-0235](../../decisions/0235-origin-memory-grounding.md)把实验起点记录归于正常 Task
+调用的 Node 只读观察操作，复用现有 Memory provider、Artifact CAS 和 Node 会话发布。
+明确选择 Global 的单条记录才进入共享发现；MI 仅在配置准入、原 bytes 摘要及来源核对后
+读入 v0.4 grounding 快照。历史报告位置不授予当前定位或运动权限，首轮计划必须停在审阅。
+
+[ADR-0233](../../decisions/0233-local-administrator-cancel-settlement.md)将缺少原生终态的
+本机取消人工结案归于 Local EAIOS 适配模块的离线运维入口，保留原证据并拒绝旧 writer。
+RG Controller 继续独立处理原取消及认证管理员结案；两者都不产生物理停止或自动续跑权限。
+
 [ADR-0214](../../decisions/0214-replicated-federation-deployment.md)将复制部署的 Federation
 配置归于 supervisor 的显式进程输入：原 domain、authorization 和可选 root peer 文件进入
 共同 policy identity，并传给唯一 owned child。它接线既有 v60 权威，不创建额外账本、
@@ -142,6 +186,11 @@ Compute、Space、Time 上进行联合决策，并保留执行过程、证据、
 全局侧协调 `What / Who / When / Shared Where`。Local EAIOS 保留 `Immediate How`、局部规划、
 感知、导航、运动、硬件控制与最终即时安全。Node、PhysicalEntity、Host、LocalSystem 是不同身份，
 不因同进程、同机器或证书注册而自动等同。
+
+真机接入的演进提案区分本机具身操作系统接入与设备接入。前者向本机系统委派完整目标，
+后者通过已有 runtime 或本地执行适配层提供明确的设备能力。两者共用 RG 的任务、资源、
+状态与恢复机制。本机任务内部的基础动作由 Local EAIOS 管理。显式部署的 `task.delegate@v1`
+已通过狗2站立闭环，职责、实现范围与后续验收见 [ADR-0231](../../decisions/0231-local-eaios-and-device-integration.md)。
 
 ## 2. 逻辑架构
 
@@ -548,3 +597,10 @@ V2 取代 [V1.1](../v1.1/README.md)。本次按当前代码整理叙述，不另
 普通增量实现应更新对应现行章节及来源基线；演进历史进入 ADR/验收，不继续前插到正文形成互相矛盾的清单。
 
 <a id="2026-10-14"></a>
+## 取消交接补充（ADR-0232）
+
+Local EAIOS 报告原任务是否产生执行副作用，及相关执行是否已满足本机交接条件。
+RG 依据原 attempt、generation、来源和时效结束对应资源义务。未派发的任务取消
+可以结束占用，不产生设备停止证明。人工对账只允许结束原 Mission 的取消占用，
+保留原停止记录和截止时间，不授予自动续跑、换机或物理交接权限。
+见 [ADR-0232](../../decisions/0232-task-cancellation-settlement.md)。

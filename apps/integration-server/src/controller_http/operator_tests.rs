@@ -9,6 +9,15 @@ mod plan_validation_tests;
 #[path = "write_recovery_tests.rs"]
 mod write_recovery_tests;
 
+#[path = "readiness_tests.rs"]
+mod readiness_tests;
+
+#[path = "identity_adoption_tests.rs"]
+mod identity_adoption_tests;
+
+#[path = "deployment_management_tests.rs"]
+mod deployment_management_tests;
+
 /// Metrics-only identity is explicitly global yet cannot read business projections or any mutation.
 #[tokio::test]
 async fn metrics_reader_cannot_read_business_or_acquire_mutation_authority() {
@@ -125,6 +134,7 @@ fn integrated_legacy_wrappers_retain_original_verifier_configuration_fence() {
 /// Creates an empty Controller using the existing application and SQLite authority only.
 fn controller(log: &state::SqliteEventLog) -> Arc<Mutex<ControllerState>> {
     Arc::new(Mutex::new(ControllerState {
+        published_deployments: Default::default(),
         federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
@@ -237,6 +247,7 @@ async fn viewer_cannot_mutate_and_headers_cannot_elevate_authority() {
         "/v1/groups/a/recover",
         "/v1/executions/a/recover",
         "/v1/executions/a/cancel",
+        "/v1/executions/a/safety-stop/reconcile",
         "/v1/maintenance/archive",
     ] {
         let response = route(
@@ -310,6 +321,21 @@ async fn viewer_cannot_mutate_and_headers_cannot_elevate_authority() {
         role: Some(RECOVERY_ADMIN_ROLE.into()),
         mtls: false,
     };
+    assert!(
+        route(
+            &controller,
+            &log,
+            &operator,
+            &request(
+                "POST",
+                "/v1/executions/a/safety-stop/reconcile",
+                b"{}",
+                None
+            )
+        )
+        .await
+        .starts_with("HTTP/1.1 403")
+    );
     assert!(
         route(
             &controller,
@@ -834,17 +860,31 @@ async fn actual_mtls_viewer_and_unmapped_certificate_cannot_submit() {
 /// Builds an empty application whose registry and transport use the same explicit lifecycle profile.
 fn identity_controller(log: &state::SqliteEventLog) -> Arc<Mutex<ControllerState>> {
     let registry = domain::NodeIdentityRegistry::new("test-deployment");
+    identity_controller_with_policy(
+        log,
+        integration::NodeIdentityPolicy::require_lifecycle(registry).unwrap(),
+    )
+}
+
+/// Creates an otherwise empty application with an exact explicit transport identity profile.
+fn identity_controller_with_policy(
+    log: &state::SqliteEventLog,
+    policy: integration::NodeIdentityPolicy,
+) -> Arc<Mutex<ControllerState>> {
     let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
     let (_service, router) = integration::GrpcIntegrationService::new_with_observer_and_identity(
         events,
         ports::NodeProtocolPolicy::default(),
         Arc::new(runtime::SystemMonotonicClock::new()),
         ports::DiagnosticHandle::default(),
-        integration::NodeIdentityPolicy::require_lifecycle(registry.clone()).unwrap(),
+        policy.clone(),
     );
     let mut control = control::ControlPlane::new();
-    control.bootstrap_node_identity_registry(registry).unwrap();
+    if let integration::NodeIdentityPolicy::CertificateLifecycle(registry) = policy {
+        control.bootstrap_node_identity_registry(registry).unwrap();
+    }
     Arc::new(Mutex::new(ControllerState {
+        published_deployments: Default::default(),
         federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control,

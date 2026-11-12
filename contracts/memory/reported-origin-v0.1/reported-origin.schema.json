@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://roboguide.local/contracts/memory/reported-origin-v0.1/reported-origin.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "node_id",
+    "memory_id",
+    "attempt_id",
+    "source_mission_id",
+    "source_task_id",
+    "source_execution_id",
+    "schema_version",
+    "captured_at_ns",
+    "position",
+    "mapping_observation",
+    "pose_measurement_time",
+    "localization_verified",
+    "motion_authorized"
+  ],
+  "properties": {
+    "node_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "memory_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attempt_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_mission_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_execution_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "const": "roboguide.reported-origin/v0.1"
+    },
+    "captured_at_ns": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "map_id",
+        "x_m",
+        "y_m",
+        "yaw_rad",
+        "map_revision",
+        "frame_basis"
+      ],
+      "properties": {
+        "map_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "x_m": {
+          "type": "number"
+        },
+        "y_m": {
+          "type": "number"
+        },
+        "yaw_rad": {
+          "type": "number"
+        },
+        "map_revision": {
+          "type": "null"
+        },
+        "frame_basis": {
+          "const": "local Mapping map; shared physical frame unverified"
+        }
+      }
+    },
+    "mapping_observation": {
+      "type": "object"
+    },
+    "pose_measurement_time": {
+      "type": "null"
+    },
+    "localization_verified": {
+      "const": false
+    },
+    "motion_authorized": {
+      "const": false
+    }
+  }
+}

@@ -7,13 +7,32 @@ use std::collections::BTreeMap;
 
 /// Checks exact stored strings and complete original envelopes before a current Catalog can replay adoption.
 pub(crate) fn validate_adoption_sources(records: &[crate::PersistedEvent]) -> Result<(), String> {
-    let mut originals = BTreeMap::new();
+    let mut validator = AdoptionSourceValidator::default();
     for row in records {
         let payload: EventPayload =
             serde_json::from_str(&row.payload_json).map_err(|error| error.to_string())?;
+        validator.observe(row, &payload)?;
+    }
+    Ok(())
+}
+
+/// Incremental original-publication checks retaining only the evidence adoption actually needs.
+#[derive(Default)]
+pub(crate) struct AdoptionSourceValidator {
+    /// First complete original bytes for each independently qualified published revision.
+    originals: BTreeMap<MemorySelector, crate::PersistedEvent>,
+}
+
+impl AdoptionSourceValidator {
+    /// Validates a decoded row in original sequence order, never rewriting source bytes.
+    pub(crate) fn observe(
+        &mut self,
+        row: &crate::PersistedEvent,
+        payload: &EventPayload,
+    ) -> Result<(), String> {
         match payload {
             EventPayload::MemoryManifestPublished { manifest } => {
-                originals
+                self.originals
                     .entry(manifest.selector().clone())
                     .or_insert_with(|| row.clone());
             }
@@ -24,10 +43,13 @@ pub(crate) fn validate_adoption_sources(records: &[crate::PersistedEvent]) -> Re
                     domain::MemoryRevisionId::new(manifest.selector().revision_id().as_str())
                         .map_err(|error| error.to_string())?,
                 );
-                originals.entry(selector).or_insert_with(|| row.clone());
+                self.originals
+                    .entry(selector)
+                    .or_insert_with(|| row.clone());
             }
             EventPayload::ArtifactCatalogLegacyAdopted { receipt } => {
-                let original = originals
+                let original = self
+                    .originals
                     .get(&receipt.record.selector)
                     .ok_or("legacy adoption lost its original stored publication")?;
                 let actual = domain::LegacyCatalogPublication {
@@ -48,8 +70,8 @@ pub(crate) fn validate_adoption_sources(records: &[crate::PersistedEvent]) -> Re
             }
             _ => {}
         }
+        Ok(())
     }
-    Ok(())
 }
 
 /// Independent original publications, including released history and equal hashes in distinct owners.

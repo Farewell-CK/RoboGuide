@@ -1,3 +1,212 @@
+ADR-0243 adds explicit standalone Controller storage v2. Its one-time migration validates all
+original history atomically; each append maintains Catalog recovery coverage in the same SQL
+transaction. Normal v2 recovery validates protected source envelopes and coverage rather than
+scrubbing old unrelated telemetry. Full-history audit remains available. Never silently rebuild a
+missing v2 projection, strip its version fence, enable unnegotiated replica/export tooling, or delete
+original task/Unknown evidence. Legacy streaming still validates unrelated rows. Field deployment
+requires separate acceptance; tests must run with bounded resources away from the live Controller.
+Controller startup streaming reuses State's original typed validation and Catalog archive
+contract. catalog_recovery_events scans one consistent original prefix/tail, discards unrelated
+telemetry after validation, preserves the clock floor and exact publication/adoption evidence.
+Catalog collects localization evidence in the same pass; main consumes it once. Never bypass
+bad unrelated rows to improve timing or claim the legacy O(history) scan has become O(1).
+See docs/development/controller-startup-streaming-2026-11-09.md for measured acceptance,
+the explicit standalone v2 projection, and separate still-unimplemented telemetry retention.
+
+ADR-0242 adds online physical/feasibility publications in application/deployment_management,
+using the original global recovery-admin, FIFO writer, Control digest history and SQL command
+journal. New closed RegistryCommandKind values fence old writers; historical wrappers cannot
+hide this authority. Physical routing is never restored from checkpoint: cold startup explicitly
+supplies the latest current physical file. Feasibility retains original source documents and
+startup lineage, and runtime revisions reattach their own original digest, not the current one.
+Normal Mission admission/Federation Prepare resolve current publication inside the writer.
+Never renew reset/preference/measurement clocks or reinterpret declarations as Node/device facts.
+Run affected deployment/runtime/Control tests, workspace all-target/all-feature Clippy and
+check_online_deployment_processes.py with actual current Controller/Node and a genuine prior
+Controller; also retain identity-adoption and posture-goal process regression boundaries.
+ADR-0242 maintenance keeps unchanged Mission/Group retries on original accepted authority,
+under current authorization/exact tenant and the original writer, without new dispatch or clocks.
+Published profiles share nonserialized immutable caches; cold restore validates all original
+documents/receipts/lineage before installing caches. Unrelated HTTP routes never resolve them.
+Run hot/completed/cold Mission replay and conflicting-plan process checks plus cache/restore tests.
+ADR-0239 adds explicit recovery-admin static Node identity adoption in the existing
+application/node_identity writer. Domain node_identity_adoption owns the exact original
+map/explicit ownership and required v0.2 receipt. Control also checks pre-Bind reservations;
+Integration validates actual current transport and cold original-map reattachment. Never infer
+tenants, drop old bindings, relax MI scope or create device facts. Run affected identity/core
+tests, workspace Clippy, Ruff/mypy/function docs and check_hot_node_enrollment_processes.py
+with actual current Controller/Node and an archived prior Controller. The 2026-11-09 isolated
+process gate passed, including hot existing-session/task preservation, new Node execution,
+cold original-map restore and actual old-writer refusal; see hot-node-enrollment acceptance.
+Field deployment is separate.
+ADR-0241 adds a pure reported-posture goal assessor, not a deployed verifier service.
+Use the existing generic Task satisfaction ingress with exact source/tenant/plan/current
+attempt bindings. Capture the anchor only after local Completed/AwaitingSatisfaction;
+require newer native identity and same source epoch. Unknown/stale/offline cannot satisfy
+a goal. Respect the shortest native stale_ms, RG ceiling and Controller TTL; a publisher
+must additionally budget publication delay. No action/retry or stop authority is created.
+The private posture_goal_process_gate.py validates software only; preserve historical field
+execution-report lifecycles and do not claim physical or production goal verification.
+The maintenance merge of d247e03c reserves 0241 for that goal profile and keeps posture State
+at 0240 and identity adoption at 0239. Its merged 86 tests/54 subtests and 17 actual private
+process checks passed with the current hot-adoption Controller/Node. No field deployment.
+The 2026-11-09 field issue/branch audit is docs/development/rg-experiment-maintenance.md.
+ThinkPad main was clean; deployed lab sources are separate from that Git checkout. Preserve
+the primary Windows worktree's uncommitted phone probe. The three hot-enrollment gaps in
+that ledger have independent statuses; all three are software-accepted, field deployment separate.
+The maintenance branch merges delegation@89dca456's five historical mobile documentation
+commits, with a current-contract note. It does not include the primary checkout's phone probe
+or constitute Android acceptance; main and field deployments have not been changed.
+The same maintenance line also integrates dog2-origin-memory-grounding@1cec0b46,
+retaining both parent histories. Resolve the duplicate posture ADR as 0240 while identity
+adoption keeps 0239. Merge acceptance is docs/development/branch-merge-acceptance-20261109.md.
+Planner/Reviewer/Repairer tests compare original UTF-8 bytes just like the frozen production
+asset reader; do not normalize production Prompt bytes or weaken provider identity checks.
+ADR-0240 adds opt-in --chassis-state in the existing combined Connector. It samples only the
+fixed Robonix chassis/state tool through Atlas/MCP, closes its own session/channel and adds
+cached chassis evidence to the existing robot-state export. Central posture inspection GETs
+only authenticated Controller State/inventory and refuses expired/unknown/foreign evidence.
+Retain the source's shorter stale_ms through Controller retention; evidence output uses a
+new file and unavailable exits 2. Merge review regression reproduces both original failures.
+Do not replace Robonix posture logic with joint-angle inference or infer damping/remote state.
+63 integration tests, strict package mypy, Ruff and function docs pass. The dog2 field check
+read standing via an earlier readonly Task, then down via the new State source; do not infer
+who changed its posture. Real Connector-stop expiry/refusal/recovery passed with 33 runs/569
+events unchanged; no extra Node, adapter process or Pilot task was needed for state polling.
+The reader is diagnostic; no universal Controller posture admission rule or MI World schema
+is added. For this experiment the operator approval flow explicitly calls the RG reader.
+The new real MI stand Mission mission-eb543d2500dd4bfb900fa15ddc9f271a completed through
+Pilot with state/one stand/state, fresh standing and user-confirmed stable standing. A separately
+authorized structured down Mission dog2-down-after-mi-stand-20261109T031448Z called down once,
+returned down/unknown then fresh standing; the user saw one in-place stepping motion and no
+lie-down. Pilot marked the stop/report branch done and RG Completed under execution-report.
+Preserve that lifecycle but report the down physical goal as not achieved. State reads alone
+do not install a Controller goal verifier. No down retry is authorized by this observation.
+Final ownership/Unknown are zero; native history is 36 runs/641 events with original 32/555 intact.
+ADR-0238 keeps RG selection, identity/tenant authorization, approval and dispatch out of
+Local EAIOS execution objectives. Planner/Reviewer/Repairer and experiment catalog metadata
+retain all local goals/action limits, without making Pilot prove cluster uniqueness or match
+its local name to an RG alias. Never strip generated text in the adapter or weaken participant
+scope. Run catalog, Requests, Planner and Review regressions and a new real MI Request.
+Real MI initially met a pre-admission 503: the operator profile was scoped but Nodes used static
+certificate mapping. The original Request remains fenced, with no Mission/admission/attempt.
+The existing field certificate bindings were software-gated against a copied actual Controller,
+then bootstrapped into rg-field-thinkpad-20261109, tenant local. Existing 41 Missions already had
+local ownership; zero migrations were needed. Original attempts and leafs remain; no Node or
+Robonix restart was issued. This is lifecycle software authority, not hardware attestation.
+The next MI Task was Failed because Pilot could not prove RG identity/uniqueness; its original
+native record contains no plan. Retain both failures; only a new Request may test the boundary fix.
+The final actual MI Request request-0a6d8da23fa74c05a8e411b4e62aaf27 passed Review/approval
+after a new dialogue fixed Interpreter participant scope. Its Mission bb7896922a4f4fdebb478c6a682cf17d
+dispatched only to dog2, with one native stand. Native returned standing/unknown, then fresh down
+at 82 percent; the user confirmed no stand-up. Pilot and RG correctly Failed, allocations and
+Unknown are zero, no motion retry. Full MI transport is exercised, physical standing failed.
+Do not relabel an earlier conditional Completed/read-only branch as standing success. User's
+confirmed onsite facts belong to this one stand experiment; do not invent future confirmations.
+ADR-0237 separates host enrollment from Local EAIOS and chassis readiness. The optional
+host GET in the existing combined Connector uses a normal two-role Task and typed Compute
+pools; no new adapter process or Pilot submission is involved. Use unique Node leaf keys,
+IDs and fresh storage when recovering a copied deployment. Static mTLS trust is not the
+dynamic identity lifecycle or a physical attestation. Run host/adapter unittests, strict
+package mypy, Ruff, function docs and the isolated two-Node host_process_gate.py.
+The 2026-11-09 field host Task completed on distinct dog1/dog2 Nodes, with fresh State,
+zero Unknown/allocations and unchanged original native journals. Both RG services are
+enabled with linger; dog1 Node restart/rejoin is separately checked. Chassis were off by
+operator report; no motion, MI planning or two-robot physical collaboration was tested.
+After chassis power-on, the separate dog2-poweron-read-20261109T014552Z Mission completed
+through RG and Robonix Pilot with one chassis/state call: down, 97 percent, fresh source.
+Original 28/492 journal rows were preserved; one new run and 13 events were added. Slot and
+Unknown are zero. MI/static World and movement were not validated. User excluded dog1
+repair; do not investigate, modify or restart dog1 without later explicit authorization.
+ADR-0231 defines opt-in Local EAIOS task delegation and device-provider integration.
+ADR-0235 adds an opt-in reported-origin capture operation in the existing combined Connector.
+Normal Task/resource admission owns capture; original attempts freeze immutable local evidence.
+Only explicitly global records enter existing Node provider/Artifact publication. MI defaults to
+metadata; admitted origins require exact bytes/hash/size and original Task provenance, frozen in
+grounding v0.4. Older snapshot readers refuse this generation. Never claim current localization,
+typed map publication, private request-Memory support or motion permission from an origin.
+Run origin/adapter tests, Mission grounding/requests, strict Linux mypy, Ruff and function docs.
+Initial field scope is capture/publication/grounding and approved-plan holding, with zero motion.
+The origin gate passes with real isolated Controller/Node/CAS and a synthetic readonly source.
+76 related Mission and 56 integration tests pass; full Mission retains one baseline-reproduced
+certificate-rotation 404. Thor2 went offline before deployment: no field origin capture, real
+model planning or movement was performed. Keep this explicit in the origin acceptance note.
+ADR-0234 adds Mapping response-age metadata in the existing combined Connector and a Controller-only
+reported-position reader in robonix_task.position. It uses only authenticated State/inventory GETs,
+retains nested/source freshness gaps and grants no motion, localization, Memory or MI authority.
+Run integration unittests, Ruff, strict package mypy and function-doc checks. Field checks create
+zero new native tasks; unavailable or mismatched data must never become an invented current pose.
+The 2026-11-06 field check passed live Controller-only inspection, wrong-map refusal and actual
+Node-stop expiry/recovery. Native history stayed 28 runs/492 events. The current World query is
+empty; MI world/schema admission and origin Memory remain unimplemented for this deployment.
+Reported Mapping response freshness never proves original localization quality or a shared frame.
+ADR-0232 adds cancel-only task settlement in application/safety_stop/settlement and the existing
+Robonix facade. Explicit no-effects State v0.4 and execution-safety v0.2 never grant physical stop,
+resume or handoff authority. Administrator reconciliation retains original history and clocks.
+New nested closed settlement fields fence prior writers; historical wrapper downgrades refuse.
+Run task-settlement/Node/Domain tests, workspace Clippy and the real-process gate with a frozen
+prior Controller. The gate owns only isolated loopback software processes and private test SQL.
+The 2026-11-05 field trial deployed 8fd00c4d, formally settled the original no-effects hold,
+and passed three native planning cancellations, a read-only task and service restart retention.
+See its acceptance note. Motion cancellation and physical stopping remain unverified.
+The same-day authorized stand recheck failed: the user observed stand then down; native stand
+returned standing/unknown and Pilot left its task in progress. RG retains the original Unknown,
+ManualEscalation and resource ownership. See the separate stand acceptance; never replay or erase it.
+ADR-0233 adds explicit offline Local EAIOS administrator cancellation closure under the journal OS
+lock, exact original row/event digest and actual local principal. Keep native bytes and old state;
+v2 fences old writers and validates all receipts on restore. Never export no-effects or device-stop
+proof from this decision. Controller cancellation settlement remains independent and authenticated.
+On the afternoon dog2 boot, both exact attempts were formally settled with this local tool and
+the existing Controller mTLS administrator route. Original events/clocks remain; allocations and
+Unknown are zero. The one new stand retry produced zero plans because native VLM returned HTTP
+401 API_KEY_DISABLED. User then restored credentials: one RG read completed and one authorized
+stand failed with fresh down posture; the user saw no stand-up. Native Task failed, RG received
+Failed and released resources normally, without cancellation or manual settlement. No actuator
+retry is implicit. See the separate model-restored stand acceptance; device cause is unconfirmed.
+The separately authorized 15:07 stand recheck completed: one native stand, fresh standing state,
+original Task done, RG Completed and zero allocations/Unknown. No RG code changed for that recheck.
+The user subsequently confirmed stable standing onsite. Keep the earlier failures and a transient
+readiness 503; the exact device cause remains unprovided. See the stand-recheck-success acceptance.
+The next P1 field batch passed one stand/down pair with onsite confirmation, readonly hold-down,
+Mission duplicate/conflict and two readonly Missions serialized on the original task slot. This
+does not revalidate Node attempt transport replay. See the P1 acceptance and motion-stop gap.
+Readiness now waits in the original FIFO application writer before inspecting committed authority;
+keep real storage/quorum/epoch and write-failure refusal. Its real HTTP batch regression reproduces
+the old false 503, while disabled authority stays unavailable. No protocol or physical scope changes.
+The readiness release 2d6a043c is deployed with exact selected-history retention. One explicitly
+authorized supervised company-entrance arrival completed through RG and Robonix, with onsite
+confirmation. This does not establish motion cancellation, link-loss recovery or handoff. RG sends
+task goals and tracks results; local navigation and safety remain Robonix owned.
+The subsequent return was interrupted by battery loss. Its exact cancelled Unknown was formally
+closed after the user reported battery replacement and separately authorized a new return. That
+new Mission dog2-return-after-battery-20261105T090824Z timed out while native planning; its scoped
+abort only reported stop requested. That hold was retained until the next explicit stand/return
+authorization and formal exact cancellation closure after an actual zero-active-plans observation.
+The new stand, return and separately authorized down Missions completed, with onsite return
+confirmation, fresh standing/down and zero remaining allocations/Unknown. Preserve the return's
+three native navigation calls and its done-versus-arrival result discrepancy: Native Task done and
+RG Completed do not independently prove the delegated physical goal. See the stand-then-return
+acceptance. Never replay or relabel the earlier failed/cancelled returns as successes.
+The real-task pipeline note traces 17 original Controller events and exact Node/native identities.
+This field batch used the structured MissionPlan HTTP entry, not Mission Intelligence. Its three
+single-Task independent Missions were externally sequenced; do not claim an RG multi-Task DAG,
+SequentialHandoff, spatial route reservation or automatic arrival verification was exercised.
+Late cancellation terminals retain their original ingress time and stop deadline. Expire only the
+affected purpose to manual handling; ordinary late results must not disable the shared writer.
+Physical trials validate RG's task, resource, execution and recovery behavior. Both integration
+forms use the existing Node authority boundaries; local primitives remain Local EAIOS owned.
+`integrations/robonix-task` owns the Robonix-side protocol facade and its durable native identities.
+An opt-in deployment catalog and ordinary Node workflow completed one real dog2 stand task.
+Keep local motion/result decisions in Robonix and preserve unknown execution ownership.
+Motion cancellation, native restart lookup and multi-participant acceptance remain pending.
+The P0-P3 dog2 trial found missing operation-owned safety exports: native cancellation can be
+terminal while Controller retains ManualEscalation. Preserve unresolved holds and original clocks;
+declaration updates cannot retroactively prove stopping. Formal settlement retains original history.
+Known-handle status reads continue with bounded backoff after the Unknown fence, never Execute.
+Run its real-loopback unittest suite, Ruff and function-doc checks; run Catalog tests on Linux.
+The rejected-dispatch maintenance example uses the existing locked journal and exact operator
+attestation after independently established no-dispatch evidence. Run its Rust tests and Clippy.
+
 ADR-0221 verifies retired local Controller projections against exact completed private Archive
 packages in the same uniquely paired parent/member Root when protected/tail coverage has moved.
 Original authority, qualified owner/hash/size, complete package checks, conflicting-prefix refusal

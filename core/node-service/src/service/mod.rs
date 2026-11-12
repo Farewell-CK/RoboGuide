@@ -38,6 +38,8 @@ const MAX_STATE_BATCH_BYTES: usize = 512 * 1024;
 pub struct NodeService {
     /// Generic local catalog, drivers, locks, journal, and workflow tasks.
     engine: LocalIntegrationEngine,
+    /// Exact operator-selected pre-admission cancellations; normal sessions do not infer terminals.
+    unadmitted_cancellation_observations: BTreeSet<String>,
 }
 
 /// Fences interrupted provider side effects, including dropped futures and session teardown.
@@ -68,7 +70,41 @@ impl Drop for MemoryImportGuard {
 impl NodeService {
     /// Creates the single node-side service around an immutable local engine.
     pub const fn new(engine: LocalIntegrationEngine) -> Self {
-        Self { engine }
+        Self {
+            engine,
+            unadmitted_cancellation_observations: BTreeSet::new(),
+        }
+    }
+
+    /// Enables one bounded maintenance observation, never a physical stop or future Execute.
+    pub fn with_unadmitted_cancellation_observation(
+        mut self,
+        execution_id: String,
+    ) -> Result<Self, NodeServiceError> {
+        if execution_id.trim().is_empty()
+            || execution_id.len() > 1024
+            || self.unadmitted_cancellation_observations.len() >= 16
+        {
+            return Err(NodeServiceError::Protocol(
+                "invalid exact cancellation observation".into(),
+            ));
+        }
+        self.unadmitted_cancellation_observations
+            .insert(execution_id);
+        Ok(self)
+    }
+
+    /// Combines normal run replay with only explicitly selected, journal-qualified observations.
+    fn execution_snapshots(
+        &self,
+    ) -> Result<Vec<integration::grpc::v0_4::ExecutionSnapshot>, EngineError> {
+        let mut snapshots = self.engine.snapshots()?;
+        for execution in &self.unadmitted_cancellation_observations {
+            if let Some(snapshot) = self.engine.unadmitted_cancellation_snapshot(execution)? {
+                snapshots.push(snapshot);
+            }
+        }
+        Ok(snapshots)
     }
 
     /// Recovers durable executions and reconnects forever after session loss.
@@ -768,8 +804,7 @@ impl NodeService {
                     integration::grpc::v0_4::CommandReceiptStatus::CommandRejected
                 } else {
                     let snapshot = self
-                        .engine
-                        .snapshots()?
+                        .execution_snapshots()?
                         .into_iter()
                         .find(|snapshot| snapshot.execution_id == execution_id);
                     let snapshot = snapshot.or_else(|| {
@@ -1129,7 +1164,7 @@ impl NodeService {
         session_id: &str,
         outbound: &mpsc::UnboundedSender<NodeMessage>,
     ) -> Result<(), NodeServiceError> {
-        for mut snapshot in self.engine.snapshots()? {
+        for mut snapshot in self.execution_snapshots()? {
             snapshot.session_id = session_id.to_string();
             outbound
                 .send(NodeMessage {

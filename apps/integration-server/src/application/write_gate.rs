@@ -35,6 +35,16 @@ pub(crate) struct WriteGuard<'a> {
 }
 
 impl ApplicationWriter {
+    /// Exposes only test synchronization for an actual queued original writer turn.
+    #[cfg(test)]
+    pub(crate) fn queued_turns_for_test(&self) -> u64 {
+        let state = self
+            .state
+            .lock()
+            .expect("test writer queue remains available");
+        state.next.saturating_sub(state.serving).saturating_sub(1)
+    }
+
     /// Enqueues once; timers and Node facts cannot repeatedly overtake an already waiting command.
     pub(crate) fn lock(&self) -> Result<WriteGuard<'_>, String> {
         let mut state = self

@@ -52,7 +52,10 @@ pub use archive_abort::{
 mod authority_journal;
 #[path = "catalog_archive.rs"]
 mod catalog_archive;
+#[path = "catalog_checkpoint.rs"]
+mod catalog_checkpoint;
 pub use archive_operation::{ArchiveContent, ArchiveIntent, ArchiveRequest};
+pub use catalog_archive::CatalogRecoveryEvents;
 #[path = "timer_transaction.rs"]
 mod timer_transaction;
 #[path = "write_availability.rs"]
@@ -290,6 +293,8 @@ pub struct SqliteEventLog {
     connection: Arc<Mutex<controller_storage::ManagedConnection>>,
     /// Actual private mutation target; the legacy events view remains read-only in v1.
     events_table: &'static str,
+    /// Explicit standalone storage v2; every append maintains its original recovery projection.
+    catalog_checkpoint_enabled: bool,
     /// Process-local event counter used for deterministic event identities.
     next_event_number: Arc<Mutex<u64>>,
     /// Start sequence retained while an application-level event batch is open.
@@ -421,13 +426,27 @@ impl SqliteEventLog {
             connection.busy_timeout(std::time::Duration::from_millis(250))?;
         }
         let fenced = controller_storage::is_fenced(&connection)?;
-        if fenced && format != Some(ControllerStorageFormat::V1) {
+        if fenced
+            && !matches!(
+                format,
+                Some(ControllerStorageFormat::V1 | ControllerStorageFormat::V2)
+            )
+        {
             return Err(SqliteEventLogError::Codec(
-                "Controller storage v1 requires the actual managed v1 writer".into(),
+                "Controller fenced storage requires its actual managed versioned writer".into(),
             ));
         }
         if fenced {
-            controller_storage::validate(&connection)?;
+            let version: u64 =
+                connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+            controller_storage::validate_version(
+                &connection,
+                if format == Some(ControllerStorageFormat::V2) {
+                    version
+                } else {
+                    1
+                },
+            )?;
         }
         if let Some(writer) = &writer {
             writer.verify()?;
@@ -438,7 +457,15 @@ impl SqliteEventLog {
         }
         connection.pragma_update(None, "synchronous", "FULL")?;
         if fenced {
-            controller_storage::validate(&connection)?;
+            let version: u64 =
+                connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+            if format == Some(ControllerStorageFormat::V2) && version == 1 {
+                controller_storage::drain(&mut connection)?;
+                let transaction =
+                    connection.transaction_with_behavior(TransactionBehavior::Exclusive)?;
+                catalog_checkpoint::initialize(&transaction)?;
+                transaction.commit()?;
+            }
         } else {
             connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS events (
@@ -492,9 +519,14 @@ impl SqliteEventLog {
                 sequence
              ) WHERE payload_schema = 'domain.EventPayload.json/v29';",
         )?;
-            if format == Some(ControllerStorageFormat::V1) {
-                controller_storage::upgrade(&mut connection)?;
+            if let Some(selected @ (ControllerStorageFormat::V1 | ControllerStorageFormat::V2)) =
+                format
+            {
+                controller_storage::upgrade(&mut connection, selected)?;
             }
+        }
+        if format == Some(ControllerStorageFormat::V2) {
+            catalog_checkpoint::read(&connection)?;
         }
         if let Some(writer) = &writer {
             writer.verify()?;
@@ -533,11 +565,15 @@ impl SqliteEventLog {
             connection: Arc::new(Mutex::new(controller_storage::ManagedConnection::new(
                 connection, writer,
             ))),
-            events_table: if format == Some(ControllerStorageFormat::V1) {
+            events_table: if matches!(
+                format,
+                Some(ControllerStorageFormat::V1 | ControllerStorageFormat::V2)
+            ) {
                 "controller_v1_events"
             } else {
                 "events"
             },
+            catalog_checkpoint_enabled: format == Some(ControllerStorageFormat::V2),
             next_event_number: Arc::new(Mutex::new(next_event_number)),
             batch_start_number: Arc::new(Mutex::new(None)),
             batch_start_changes: Arc::new(Mutex::new(None)),
@@ -1536,8 +1572,28 @@ impl SqliteEventLog {
                 params![sequence.to_string()],
             )
         };
+        let update_catalog = |connection: &Connection| -> Result<(), String> {
+            if self.catalog_checkpoint_enabled {
+                catalog_checkpoint::append(
+                    connection,
+                    &PersistedEvent {
+                        sequence,
+                        event_id: record.event_id().as_str().to_string(),
+                        timestamp_ms: record.timestamp().as_millis(),
+                        correlation_id: record.correlation_id().as_str().to_string(),
+                        causation_id: record.causation_id().map(|id| id.as_str().to_string()),
+                        payload_schema: payload_schema.to_string(),
+                        payload_json: payload_json.clone(),
+                    },
+                    record.payload(),
+                )
+                .map_err(|error| error.to_string())?;
+            }
+            Ok(())
+        };
         if batch_start.is_some() {
             insert(&connection).map_err(|error| error.to_string())?;
+            update_catalog(&connection)?;
             update_counter(&connection).map_err(|error| error.to_string())?;
             Ok(())
         } else {
@@ -1545,6 +1601,7 @@ impl SqliteEventLog {
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(|error| error.to_string())?;
             insert(&transaction).map_err(|error| error.to_string())?;
+            update_catalog(&transaction)?;
             update_counter(&transaction).map_err(|error| error.to_string())?;
             transaction.commit().map_err(|error| error.to_string())
         }

@@ -3,6 +3,76 @@
 use super::*;
 use std::time::Duration;
 
+/// Adoption changes only policy; the original live session and response route survive unchanged.
+#[test]
+fn static_adoption_requires_the_exact_old_map_and_preserves_live_routes() {
+    let (router, _receiver, _) = router();
+    let bindings = BTreeMap::from([("node".into(), "a".repeat(64))]);
+    *router.identity_policy.lock().unwrap() =
+        NodeIdentityPolicy::RequirePeerCertificate(bindings.clone());
+    let command = domain::NodeIdentityAdoptionCommand {
+        schema: domain::NODE_IDENTITY_ADOPTION_SCHEMA.into(),
+        command_id: "adopt".into(),
+        registry_id: "adopted".into(),
+        expected_bindings: bindings.clone(),
+        owners: BTreeMap::from([(
+            "node".into(),
+            domain::NodeIdentityAdoptionOwner {
+                tenant_id: "local".into(),
+                domain_id: "domain".into(),
+                expires_at_ms: 0,
+            },
+        )]),
+    };
+    let registry = command.build_registry(0, "admin").unwrap();
+    let mut wrong = command.clone();
+    wrong
+        .expected_bindings
+        .insert("node".into(), "c".repeat(64));
+    assert!(
+        router
+            .publish_identity_registry(wrong.build_registry(0, "admin").unwrap())
+            .is_err()
+    );
+    assert!(matches!(
+        *router.identity_policy.lock().unwrap(),
+        NodeIdentityPolicy::RequirePeerCertificate(_)
+    ));
+    assert!(
+        router
+            .publish_identity_registry(crate::NodeIdentityRegistry::new("unproven"))
+            .is_err()
+    );
+    router
+        .validate_identity_registry_projection(&registry)
+        .unwrap();
+    router.publish_identity_registry(registry.clone()).unwrap();
+    assert!(router.validate_identity("node", "session").is_ok());
+    assert_eq!(
+        router.sessions.lock().unwrap()["node"].session_id,
+        "session"
+    );
+    assert!(
+        NodeIdentityPolicy::RequirePeerCertificate(bindings.clone())
+            .validate_registry_projection(&registry)
+            .is_ok()
+    );
+    assert!(
+        NodeIdentityPolicy::TrustedLoopback
+            .validate_registry_projection(&registry)
+            .is_err()
+    );
+    let mut changed = registry.clone();
+    changed.adoption.as_mut().unwrap().command.command_id = "replacement".into();
+    assert!(router.publish_identity_registry(changed).is_err());
+    let mut expanded = registry;
+    expanded
+        .register("new-node", "local", "domain", "b".repeat(64), 1)
+        .unwrap();
+    router.publish_identity_registry(expanded).unwrap();
+    assert!(router.validate_identity("node", "session").is_ok());
+}
+
 /// Owns a route with a real response channel and a deployment lifecycle registry.
 fn router() -> (
     GrpcNodeRouter,

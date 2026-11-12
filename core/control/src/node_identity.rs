@@ -64,6 +64,74 @@ impl ControlPlane {
             .map_err(|error| ControlError::InvalidLease(error.to_string()))
     }
 
+    /// Installs explicit static ownership atomically after all historical Mission bindings agree.
+    pub fn adopt_node_identity_registry(
+        &mut self,
+        state: &impl ports::SharedNodeStateReader,
+        command: &domain::NodeIdentityAdoptionCommand,
+        now: TimestampMs,
+        subject: &str,
+    ) -> Result<domain::NodeIdentityAdoptionReceipt, ControlError> {
+        if let Some(current) = &self.node_identity_registry {
+            return current
+                .adoption
+                .as_deref()
+                .filter(|receipt| receipt.command == *command)
+                .cloned()
+                .ok_or_else(|| {
+                    ControlError::InvalidLease(
+                        "Node identity adoption conflicts with installed authority".into(),
+                    )
+                });
+        }
+        let registry = command
+            .build_registry(now.as_millis(), subject)
+            .map_err(|e| ControlError::InvalidLease(e.to_string()))?;
+        registry
+            .validate()
+            .map_err(|e| ControlError::InvalidLease(e.to_string()))?;
+        let receipt = registry
+            .adoption
+            .as_deref()
+            .expect("adoption builder supplied receipt")
+            .clone();
+        let mut candidate = self.clone();
+        candidate.bootstrap_node_identity_registry(registry)?;
+        candidate.validate_mission_tenant_authority()?;
+        // Commit may retain reservations before Bind creates a Group. Check those owners too.
+        if candidate
+            .actor_bindings
+            .values()
+            .any(|binding| !candidate.node_tenant_allowed(binding.mission_id(), binding.node_id()))
+            || candidate
+                .reservations
+                .iter()
+                .any(|(resource, reservation)| {
+                    let owners: Vec<_> = state
+                        .nodes()
+                        .into_iter()
+                        .filter(|node| {
+                            node.registration()
+                                .resources()
+                                .iter()
+                                .any(|r| r.id() == resource)
+                        })
+                        .collect();
+                    owners.len() != 1
+                        || !candidate.node_tenant_allowed(
+                            reservation.task_ref.mission_id(),
+                            owners[0].node_id(),
+                        )
+                })
+        {
+            return Err(ControlError::InvalidLease(
+                "static adoption conflicts with retained pre-Bind or Actor ownership".into(),
+            ));
+        }
+        *self = candidate;
+        Ok(receipt)
+    }
+
     /// Checks whether a current identity is active at the fresh Control decision time.
     pub(crate) fn identity_is_eligible(&self, node_id: &domain::NodeId, now: TimestampMs) -> bool {
         self.identity_transport_is_current(node_id, now)

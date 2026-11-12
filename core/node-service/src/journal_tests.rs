@@ -12,6 +12,47 @@ use domain::{
 };
 use tempfile::TempDir;
 
+/// Cold pre-admission cancellation is observable without inventing an execution or replaying effects.
+#[test]
+fn unadmitted_cancellation_replays_and_later_execute_is_suppressed() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("journal.sqlite3");
+    let journal = ExecutionJournal::open(&path).unwrap();
+    journal.request_cancellation("never-admitted").unwrap();
+    assert_eq!(
+        journal.unadmitted_cancellations().unwrap(),
+        vec!["never-admitted"]
+    );
+    assert!(journal.get("never-admitted").unwrap().is_none());
+    drop(journal);
+    let journal = ExecutionJournal::open(&path).unwrap();
+    assert_eq!(
+        journal.unadmitted_cancellations().unwrap(),
+        vec!["never-admitted"]
+    );
+    let spec = ExecutionSpec::new(b"{}".to_vec(), "original-workflow", vec![]).unwrap();
+    let PrepareDispatch::Existing(record) =
+        journal.prepare_dispatch("never-admitted", &spec).unwrap()
+    else {
+        panic!("persisted cancellation must suppress dispatch");
+    };
+    assert_eq!(record.status(), JournalStatus::Cancelled);
+    assert_eq!(record.sequence(), 1);
+    assert_eq!(record.reason(), "cancelled before local dispatch");
+    assert!(journal.unadmitted_cancellations().unwrap().is_empty());
+}
+
+/// A cancellation intent for known or uncertain work must never be treated as pre-admission proof.
+#[test]
+fn admitted_work_is_excluded_from_unadmitted_cancellations() {
+    let root = tempfile::tempdir().unwrap();
+    let journal = ExecutionJournal::open(root.path().join("journal.sqlite3")).unwrap();
+    let spec = ExecutionSpec::new(b"{}".to_vec(), "original-workflow", vec![]).unwrap();
+    journal.prepare_dispatch("already-admitted", &spec).unwrap();
+    journal.request_cancellation("already-admitted").unwrap();
+    assert!(journal.unadmitted_cancellations().unwrap().is_empty());
+}
+
 /// Supplies immutable metadata for deterministic journal tests, never registered device evidence.
 fn preparation() -> domain::MemoryPreparation {
     let original = continuity("prepared-import");

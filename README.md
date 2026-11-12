@@ -1,5 +1,58 @@
 # RoboGuide
 
+[Controller 启动优化](docs/development/controller-startup-streaming-2026-11-09.md)先将
+Catalog 恢复改为单次流式校验，只保留相关事件，并复用同轮定位证据。
+原日志及权限校验不变。显式 standalone [存储 v2](docs/decisions/0243-catalog-recovery-checkpoint.md)
+进一步在原事件事务内维护恢复投影，首次迁移后正常重启只读相关记录；高频历史保留策略
+仍独立实施，现场及复制部署不会自动切换。
+
+[ADR-0242](docs/decisions/0242-online-deployment-publications.md)补齐物理实体与可行性来源的
+在线发布。更新沿现有认证管理员、单写入事务和 Control 防回退通路，旧绑定及运行期计划
+保留原来源。合同与恢复输入见[在线部署信息发布](docs/development/online-deployment-publications-v0.1.md)。
+
+[ADR-0239](docs/decisions/0239-online-static-node-identity-adoption.md)增加显式在线采用原静态
+Node 证书映射的管理入口，保留原凭据和任务归属后进入生命周期热注册；原采用凭证
+进入 v0.2 registry 并用于冷恢复。接口与独立进程验收见[接入合同](docs/development/hot-node-enrollment-v0.1.md)。
+
+[ADR-0235](docs/decisions/0235-origin-memory-grounding.md)增加显式启用的起点记录操作和
+MI 起点内容解码。正常 Task 调用统一 Connector 的只读观察，现有 Node provider 发布
+Memory/Artifact；MI 校验原始 bytes、摘要、大小及任务来源后冻结到 grounding v0.4。
+Global 共享需要原操作明确选择；历史报告起点不授予当前定位或运动权限。
+
+[ADR-0234](docs/decisions/0234-controller-reported-position-inspection.md)补齐统一 Connector
+的 Mapping 缓存年龄与 Controller-only 位置诊断工具；保留地图版本、定位质量与
+MI grounding 尚未接通的边界，不增加运动权限。
+[2026-11-06 现场验收](docs/development/acceptance/2026-11-06-dog2-controller-position.md)
+已通过真实 State 查询、错图拒绝、Node 断开后的过期拒绝及重连恢复，零新原生任务。
+起点记忆与 MI 的剩余工作见[接线缺口](docs/development/dog2-spatial-memory-mi-gaps-2026-11-06.md)。
+
+[狗2真实任务执行流水](docs/development/dog2-real-task-pipeline-2026-11-05.md)
+逐步核对实际 HTTPS 入口、Match/Commit/Bind、Node workflow、Robonix 事件回传和协作模式。
+本轮固定计划由外部操作端构造，站立/返程/趴下为三个 independent Mission 的外部串接。
+
+2026-11-05 的[本轮 P1 真机验收](docs/development/acceptance/2026-11-05-dog2-p1-posture-and-admission.md)
+完成了狗2站立→趴下、Mission 重传/冲突和同槽只读竞争。另修复
+[Controller readiness 写入竞态](docs/development/acceptance/2026-11-05-controller-readiness-writer.md)。
+修复已部署并保留历史；随后完成现场监护的[公司门口导航到达](docs/development/acceptance/2026-11-05-dog2-company-entrance-navigation.md)。
+后续[返程与换电记录](docs/development/acceptance/2026-11-05-dog2-return-after-battery.md)
+保留断电取消及新任务规划超时；再次授权后完成了
+[站立、返程及趴下](docs/development/acceptance/2026-11-05-dog2-stand-then-return.md)，
+现场确认已返回停稳。原生任务结束与目标达成的结果语义仍有差异，记录中分别保留。
+运动取消、失联和自动恢复仍需[本机停止接口](docs/development/robonix-motion-stop-integration-gap-2026-11-05.md)
+提供原任务终止及停止观察，当前 no-effects 声明不授予运动停止能力。
+
+[ADR-0233 本机取消人工结案](docs/decisions/0233-local-administrator-cancel-settlement.md)
+补齐原生进程重启后 UNKNOWN 的离线运维路径，保留原任务及审计；Controller 仍通过
+原认证接口独立结案，不把管理员决定解释为设备停止证明。
+
+[ADR-0232 取消结案候选](docs/decisions/0232-task-cancellation-settlement.md)在独立分支实现
+未产生副作用的自动取消收尾及管理员对账。实现复用现有 Node/State 和 Connector，
+不授予物理停止、恢复或交接权限。
+2026-11-05 的[现场无动作验收](docs/development/acceptance/2026-11-05-dog2-cancellation-field-validation.md)
+已完成部署、旧任务正式结案、3 次新任务自动取消及服务重启保持。运动取消另行验证。
+软件进程、旧 writer 拒绝和检查结果见
+[取消结案验收](docs/development/acceptance/2026-11-04-task-cancellation-settlement.md)。
+
 当前代码维护和 E1 待办以[统一基线与进度对账（2026-10-30）](docs/development/code-and-e1-baseline-2026-10-30.md)
 为入口：main 保存已验证基线，dev 用于日常开发；实验始终冻结各自代码与配置。
 下文整改验收和历史开发分支按其原时点阅读，不代表另有一份待合并的最新实现。
@@ -18,6 +71,15 @@
 持久保存，执行绑定已展示版本，风险审批保持独立。自然语言操作先展示明确选项。
 连接、mTLS、用法和验证范围见[第二版说明](docs/development/conversation-workbench-v0.2.md)；
 [第一版记录](docs/development/conversation-workbench-v0.1.md)保留原验收范围。
+
+真机接入的专题设计见 [ADR-0231 两类接入与本机任务委派](docs/decisions/0231-local-eaios-and-device-integration.md)。
+该提案以验证 RG 的任务、调度、执行与恢复为目标，区分已有具身操作系统的参与者和
+设备参与者。[Robonix 本机任务模块](integrations/robonix-task/README.md)与显式部署目录
+已完成一次狗2站立闭环，原始身份、失败修复与后续验证见
+[真机验收记录](docs/development/acceptance/2026-11-04-robonix-task-delegation.md)。
+后续 [P0–P3 实测](docs/development/acceptance/2026-11-04-dog2-p0-p3-validation.md)
+已确认部署重启、幂等与原任务取消回传，并发现安全状态证据和人工对账解除的接入缺口。
+该轮原占用已在上述 2026-11-05 验收中正式结案，原历史与期限保留；导航尚未执行。
 
 ## 当前整改状态 · 2026-10-26
 

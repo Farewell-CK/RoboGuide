@@ -36,19 +36,31 @@ pub(crate) fn load_physical_entity_registry_file(
     path: &Path,
 ) -> Result<domain::PhysicalEntityRegistrySnapshot, Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(path)?;
-    let file: PhysicalEntityRegistryFile = serde_json::from_str(&content)?;
+    parse_document(serde_json::from_str(&content)?).map_err(Into::into)
+}
+
+/// Validates the same closed deployment document for authenticated online administration.
+pub(super) fn parse_document(
+    document: serde_json::Value,
+) -> Result<domain::PhysicalEntityRegistrySnapshot, String> {
+    parse_file(document).map_err(|e| e.to_string())
+}
+
+/// Converts validated document fields into the existing unique entity/Node routing snapshot.
+fn parse_file(
+    document: serde_json::Value,
+) -> Result<domain::PhysicalEntityRegistrySnapshot, Box<dyn std::error::Error>> {
+    let file: PhysicalEntityRegistryFile = serde_json::from_value(document)?;
     if file.schema != PHYSICAL_ENTITY_REGISTRY_SCHEMA {
         return Err(format!(
-            "physical entity registry {} uses unsupported schema {}",
-            path.display(),
+            "physical entity registry uses unsupported schema {}",
             file.schema
         )
         .into());
     }
     if file.routing_profile != "one-routable-entity-per-node" {
         return Err(format!(
-            "physical entity registry {} uses unsupported routing profile {}",
-            path.display(),
+            "physical entity registry uses unsupported routing profile {}",
             file.routing_profile
         )
         .into());
@@ -69,4 +81,9 @@ pub(crate) fn load_physical_entity_registry_file(
         domain::PhysicalEntityRoutingProfile::OneRoutableEntityPerNode,
         registrations,
     )?)
+}
+
+/// Projects canonical sorted complete routing evidence without creating any Node or binding.
+pub(super) fn document(snapshot: &domain::PhysicalEntityRegistrySnapshot) -> serde_json::Value {
+    serde_json::json!({"schema":PHYSICAL_ENTITY_REGISTRY_SCHEMA,"registry_id":snapshot.registry_id(),"revision":snapshot.revision(),"routing_profile":snapshot.routing_profile(),"entities":snapshot.entities().map(|e| serde_json::json!({"entity_id":e.entity_id(),"node_id":e.node_id()})).collect::<Vec<_>>()})
 }

@@ -345,6 +345,16 @@ pub(crate) fn flush_unisolated_commands(
 
 /// Rejects old wrappers carrying hold/generation fields that an older binary would silently ignore.
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
+    if saved.schema != SERVER_CHECKPOINT_SCHEMA
+        && saved
+            .safety_stops
+            .values()
+            .any(|purpose| purpose.uses_task_settlement_contract())
+    {
+        return Err(
+            "historical wrapper cannot carry task cancellation settlement authority".into(),
+        );
+    }
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
