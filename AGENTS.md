@@ -902,7 +902,7 @@ actual retained commands offline. These are software-process/file proofs, never 
 
 ## Project Structure & Module Organization
 
-ADR-0234 adds installed chat v0.4 global and explicitly selected project model profiles, first-run setup, local status and
+ADR-0254 adds installed chat v0.4 global and explicitly selected project model profiles, first-run setup, local status and
 scope-bound session navigation. Existing displayed-reference confirmation and original pending
 command fences remain. Exact-plan `/check` reuses only assessment ports. Explicit two-stage cancel
 keeps Request and Controller authority independent; one original POST/Unknown survives loss, and
@@ -914,7 +914,7 @@ invalidate earlier action proposals before any early return. Initialization reta
 and handles publication failure by exact inode ownership; nested JSON/log credential forms are
 redacted only in bounded feedback copies, retaining original evidence.
 
-ADR-0233 adds bounded evidence conversation and a lightweight asynchronous terminal. Natural
+ADR-0253 adds bounded evidence conversation and a lightweight asynchronous terminal. Natural
 language selects closed read tools only; generated explanations cite current evidence beside host
 facts. One foreground owner persists session/commands; independent background watchers never change
 selection or grant authority. v0.2 sessions copy into v0.3, retaining original pending command IDs.
@@ -929,7 +929,7 @@ checkpointed visible references; hidden results cannot change ordinal targets. T
 queries retain literal IDs after resolution. Strict response framing and bounded address fallback
 preserve unavailable outcomes. Generated v0.3 migration-copy names remain explicitly resumable.
 
-ADR-0232 adds explicit opt-in Mission Request v0.5 submission intent. Plan-only requests remain
+ADR-0252 adds explicit opt-in Mission Request v0.5 submission intent. Plan-only requests remain
 AwaitingExecution across edits/restarts; execute grants only the displayed exact revision/digest
 and never grants risk approval. Original mode is immutable and old decoders refuse v0.5. Legacy
 v0.4 remains unchanged. Every actual submit rechecks original intent. Workbench v0.2 preserves
@@ -937,7 +937,7 @@ scope-bound private sessions and original idempotency keys before I/O; response 
 observation/reconciliation, never command replay. Watch interruption is local observation only.
 Tests: test_submission_intent.py and test_workbench_v2.py plus original Mission/HTTP regressions.
 
-ADR-0231 adds the read-only `roboguide` conversation workbench in the independent
+ADR-0251 adds the read-only `roboguide` conversation workbench in the independent
 `mission/src/roboguide_workbench` namespace. Model routing selects only closed queries;
 host-rendered inventory/Mission facts remain scoped to one configured Controller and authenticated
 identity. Displayed-ID follow-ups perform fresh GETs; health/liveness reports never become Control

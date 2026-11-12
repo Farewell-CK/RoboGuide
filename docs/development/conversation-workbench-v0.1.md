@@ -4,7 +4,7 @@
 
 范围：终端对话入口，支持当前 Controller、当前身份可见的集群概览、节点详情、能力检索、
 指定 Mission 及其 Task 状态。复用现有查询接口，不创建 Mission，不改变 Planner 输入、
-Control 承诺、Node、存储或恢复合同。决策见 [ADR-0231](../decisions/0231-readonly-conversation-workbench.md)。
+Control 承诺、Node、存储或恢复合同。决策见 [ADR-0251](../decisions/0251-readonly-conversation-workbench.md)。
 
 1. 冻结会话层的职责、工具范围及证据解释。
 2. 实现固定 origin 的 GET 客户端，校验完整响应，保留租户与 mTLS、超时和字节限制。

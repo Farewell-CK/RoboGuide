@@ -1,4 +1,4 @@
-# ADR-0234: Installed chat configuration and explicit local operator workflow
+# ADR-0254: Installed chat configuration and explicit local operator workflow
 
 Status: Accepted; implemented with installed-wheel, pseudo-terminal and native software cancellation acceptance
 

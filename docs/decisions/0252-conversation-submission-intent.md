@@ -1,4 +1,4 @@
-# ADR-0232: Conversation sessions and explicit Mission submission intent
+# ADR-0252: Conversation sessions and explicit Mission submission intent
 
 Status: Accepted; implemented with software validation
 

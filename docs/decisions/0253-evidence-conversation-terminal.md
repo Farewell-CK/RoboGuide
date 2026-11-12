@@ -1,4 +1,4 @@
-# ADR-0233: Evidence conversation and concurrent terminal observation
+# ADR-0253: Evidence conversation and concurrent terminal observation
 
 Status: Accepted; implemented with actual Provider and software-Node acceptance
 

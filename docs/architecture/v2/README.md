@@ -147,7 +147,7 @@ Compute、Space、Time 上进行联合决策，并保留执行过程、证据、
 
 | 职责 | 当前权威 | 代码位置 |
 | --- | --- | --- |
-| Conversation Workbench | 当前身份的证据查询解释、会话恢复、后台任务跟踪；显式用户动作通过 Mission Service 的仅规划/执行意图及原审批链推进，增加全局初始化、会话管理、精确计划检查、显式取消与本地反馈，不取得 Control 权威（ADR-0232/0233/0234） | [workbench](../../../mission/src/roboguide_workbench/) |
+| Conversation Workbench | 当前身份的证据查询解释、会话恢复、后台任务跟踪；显式用户动作通过 Mission Service 的仅规划/执行意图及原审批链推进，增加全局初始化、会话管理、精确计划检查、显式取消与本地反馈，不取得 Control 权威（ADR-0252/0253/0254） | [workbench](../../../mission/src/roboguide_workbench/) |
 | Mission Intelligence | 原 Request、Dialogue、Grounding、完整计划草案、Review、Repair、审批及提交对账；模型输出为候选 | [mission](../../../mission/src/mission/) |
 | Orchestration | 接纳完整 MissionPlan、DAG readiness、逻辑调度优先级、Task satisfaction、Mission 生命周期、hold 与计划版本历史 | [orchestration](../../../core/orchestration/src/) |
 | Control | eligibility、资源/日历承诺、Group membership、Actor/Role binding、tenant quota、恢复与显式 takeover 决策 | [control](../../../core/control/src/) |

@@ -1,4 +1,4 @@
-# ADR-0231: Read-only conversation workbench
+# ADR-0251: Read-only conversation workbench
 
 Status: Accepted; implemented with isolated software validation
 
