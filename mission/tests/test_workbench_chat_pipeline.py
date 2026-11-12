@@ -209,6 +209,7 @@ def test_model_mission_list_preserves_incomplete_source_status(tmp_path: Path) -
 
     class MissingLifecycle(ObservedController):
         def missions(self) -> JSONObject:
+            """Return an accepted target with no usable runtime lifecycle evidence."""
             return {
                 "schema": "roboguide.state-query/v0.1",
                 "records": [

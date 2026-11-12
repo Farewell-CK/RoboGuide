@@ -207,6 +207,7 @@ def _bounded_text(value: str, limit: int = _EVIDENCE_TEXT_BYTES) -> tuple[str, b
     tail_budget = available - head_budget
 
     def fit(text: str, budget: int, from_end: bool = False) -> str:
+        """Select complete Unicode characters within an exact UTF-8 byte budget."""
         selected: list[str] = []
         total = 0
         values = reversed(text) if from_end else iter(text)
