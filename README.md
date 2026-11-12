@@ -57,6 +57,9 @@ MI grounding 尚未接通的边界，不增加运动权限。
 软件进程、旧 writer 拒绝和检查结果见
 [取消结案验收](docs/development/acceptance/2026-11-04-task-cancellation-settlement.md)。
 
+MI 新增显式宿主目标草案格式：见 [ADR-0255](docs/decisions/0255-host-owned-mission-objective.md)与
+[分支接入验证指南](docs/development/mi-host-objective-v0.1.md)。
+
 当前代码维护和 E1 待办以[统一基线与进度对账（2026-10-30）](docs/development/code-and-e1-baseline-2026-10-30.md)
 为入口：main 保存已验证基线，dev 用于日常开发；实验始终冻结各自代码与配置。
 下文整改验收和历史开发分支按其原时点阅读，不代表另有一份待合并的最新实现。

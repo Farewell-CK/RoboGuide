@@ -1,5 +1,10 @@
 # RoboGuide V2 current architecture
 
+[ADR-0255](../../decisions/0255-host-owned-mission-objective.md) introduces an explicit
+`host-objective-v1` Provider draft profile. MI assembles the original objective from the frozen
+GroundedIntent; models generate candidate plans and independent Review receives the complete goal.
+Legacy echo remains the default. [Integration and verification](../../development/mi-host-objective-v0.1.md).
+
 [ADR-0214](../../decisions/0214-replicated-federation-deployment.md) assigns replicated Federation
 configuration to explicit supervisor process inputs. Original domain, authorization and optional
 root peer files enter the common policy identity and reach its unique owned child. This wires

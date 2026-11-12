@@ -21,6 +21,10 @@ from mission.contract_values import (
     JSONValue,
 )
 
+ECHO_OBJECTIVE_PROFILE = "echo-objective-v1"
+HOST_OBJECTIVE_PROFILE = "host-objective-v1"
+PROVIDER_PLAN_PROFILES = frozenset({ECHO_OBJECTIVE_PROFILE, HOST_OBJECTIVE_PROFILE})
+
 
 class ProviderMissionPlanError(ValueError):
     """Report malformed provider schemas or MissionPlan DTO output."""
@@ -101,12 +105,19 @@ def adapt_mission_plan_schema_for_provider(schema: JSONObject) -> JSONObject:
     return adapted
 
 
-def build_mission_plan_provider_schema(schema: JSONObject, *, mission_id: str) -> JSONObject:
+def build_mission_plan_provider_schema(
+    schema: JSONObject,
+    *,
+    mission_id: str,
+    profile: str = ECHO_OBJECTIVE_PROFILE,
+) -> JSONObject:
     """Build a strict provider DTO fenced to one request's Mission ID.
 
     The canonical schema stays generic. The request-specific constraint is
     placed only on the copied provider projection, before any model call.
     """
+    if profile not in PROVIDER_PLAN_PROFILES:
+        raise ProviderMissionPlanError("unsupported provider plan profile")
     adapted = adapt_mission_plan_schema_for_provider(schema)
     projected = _project_strict_provider_schema(adapted)
     provider = _object(projected, "provider schema")
@@ -123,11 +134,27 @@ def build_mission_plan_provider_schema(schema: JSONObject, *, mission_id: str) -
     if mission_id_schema.get("$ref") != "#/$defs/id":
         raise ProviderMissionPlanError("provider Mission identity schema is unexpected")
     mission_properties["id"] = {"type": "string", "enum": [mission_id]}
+    if profile == HOST_OBJECTIVE_PROFILE:
+        if mission_properties.get("objective") != {"type": "string"}:
+            raise ProviderMissionPlanError("canonical Mission objective schema is unexpected")
+        del mission_properties["objective"]
+        mission_schema["required"] = [
+            key
+            for key in _array(mission_schema.get("required"), "mission.required")
+            if key != "objective"
+        ]
+        root_properties["provider_profile"] = {"type": "string", "enum": [profile]}
+        required = _array(provider.get("required"), "provider.required")
+        provider["required"] = [*required, "provider_profile"]
     return provider
 
 
 def normalize_mission_plan_provider_output(
-    value: JSONObject, canonical_schema: JSONObject
+    value: JSONObject,
+    canonical_schema: JSONObject,
+    *,
+    profile: str = ECHO_OBJECTIVE_PROFILE,
+    objective: str | None = None,
 ) -> JSONObject:
     """Normalize provider null sentinels and parameter entries to canonical form.
 
@@ -137,17 +164,32 @@ def normalize_mission_plan_provider_output(
     malformed, duplicated, blank, or non-scalar entries. Canonical required-nullable
     values and optional properties whose canonical schema admits null are preserved.
     """
+    if profile not in PROVIDER_PLAN_PROFILES:
+        raise ProviderMissionPlanError("unsupported provider plan profile")
     normalized = deepcopy(value)
     selected = _canonical_provider_version(canonical_schema)
     accepted = (
         {MISSION_PLAN_ACTOR_VERSION, MISSION_PLAN_VERSION}
-        if selected == MISSION_PLAN_VERSION
+        if selected == MISSION_PLAN_VERSION and profile == ECHO_OBJECTIVE_PROFILE
         else {selected}
     )
     if normalized.get("schema_version") not in accepted:
         raise ProviderMissionPlanError(
             f"provider MissionPlan output must use {' or '.join(sorted(accepted))}"
         )
+
+    if profile == HOST_OBJECTIVE_PROFILE:
+        if normalized.get("provider_profile") != profile:
+            raise ProviderMissionPlanError("provider plan profile is missing or mismatched")
+        mission = _object(normalized.get("mission"), "mission")
+        if "objective" in mission:
+            raise ProviderMissionPlanError("host-owned mission.objective must be omitted")
+        if not isinstance(objective, str) or not objective.strip():
+            raise ProviderMissionPlanError("host-owned objective requires the frozen original")
+        del normalized["provider_profile"]
+        mission["objective"] = objective
+    elif "provider_profile" in normalized:
+        raise ProviderMissionPlanError("legacy provider output cannot carry provider_profile")
 
     _normalize_optional_null_sentinels(normalized, canonical_schema, canonical_schema)
     tasks = _array(normalized.get("tasks"), "tasks")

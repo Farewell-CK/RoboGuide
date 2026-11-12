@@ -35,7 +35,7 @@ from mission.operation_effect_review import operation_effect_composition_review
 from mission.plan_validation import PlanValidationError, reference_issues
 from mission.planning_profile import DeploymentPlanningProfile
 from mission.planning_world_evidence import planning_world_review_payload
-from mission.provenance import ensure_provider_budget, provider_call
+from mission.provenance import ensure_provider_budget, provider_call, record_plan_assembly
 from mission.provider_errors import (
     MissionIdentityError,
 )
@@ -43,6 +43,8 @@ from mission.provider_errors import (
     MissionProviderError as MissionProviderError,
 )
 from mission.provider_mission_plan import (
+    ECHO_OBJECTIVE_PROFILE,
+    HOST_OBJECTIVE_PROFILE,
     ProviderMissionPlanError,
     build_mission_plan_provider_schema,
     normalize_mission_plan_provider_output,
@@ -192,10 +194,16 @@ def _validated_provider_draft(
     execution_profile: DeploymentExecutionProfile | None,
     execution_planning_evidence: ExecutionPlanningEvidence | None = None,
     plan_validator: Callable[[MissionPlan], None] | None = None,
+    provider_plan_profile: str = ECHO_OBJECTIVE_PROFILE,
 ) -> MissionPlan:
     """Normalize and admit a Planner or Repairer output with durable rejection payloads."""
     try:
-        normalized = normalize_mission_plan_provider_output(provider_output, canonical_schema)
+        normalized = normalize_mission_plan_provider_output(
+            provider_output,
+            canonical_schema,
+            profile=provider_plan_profile,
+            objective=grounded_intent.objective,
+        )
     except (MissionPlanError, ProviderMissionPlanError) as error:
         raise RejectedPlanError(
             str(error),
@@ -218,6 +226,8 @@ def _validated_provider_draft(
             execution_profile,
             execution_planning_evidence,
         )
+        if provider_plan_profile == HOST_OBJECTIVE_PROFILE:
+            record_plan_assembly(provider_output, plan.to_json(), grounded_intent.to_json())
         if plan_validator is not None:
             try:
                 plan_validator(plan)
@@ -353,6 +363,13 @@ class _ResponsesClient:
                 settings.prompts.repairer_path,
             )
         }
+        if settings.provider_plan_profile == HOST_OBJECTIVE_PROFILE:
+            path = settings.prompts.host_objective_path
+            if path is None or not path.is_file():
+                raise MissionProviderError(
+                    "host-objective profile Prompt asset is missing", configuration_failure=True
+                )
+            self._asset_digests[path] = hashlib.sha256(path.read_bytes()).hexdigest()
 
     def _read_frozen_asset(self, path: Path) -> str:
         """Reject changed Prompt/schema bytes before a provider effect under the old identity."""
@@ -379,7 +396,23 @@ class _ResponsesClient:
         self, canonical_schema: JSONObject, mission_id: str
     ) -> JSONObject:
         """Bind the strict provider DTO to this request's exact Mission identity."""
-        return build_mission_plan_provider_schema(canonical_schema, mission_id=mission_id)
+        return build_mission_plan_provider_schema(
+            canonical_schema,
+            mission_id=mission_id,
+            profile=self._settings.provider_plan_profile,
+        )
+
+    def _plan_instructions(self, path: Path) -> str:
+        """Select the frozen output profile before generation, never repair a returned goal."""
+        prompt = self._load_prompt(path)
+        if self._settings.provider_plan_profile == HOST_OBJECTIVE_PROFILE:
+            profile_path = self._settings.prompts.host_objective_path
+            if profile_path is None:
+                raise MissionProviderError(
+                    "host-objective Prompt is missing", configuration_failure=True
+                )
+            prompt += "\n\n" + self._load_prompt(profile_path)
+        return prompt
 
     def _load_prompt(self, path: Path) -> str:
         """Load a nonblank, versioned prompt asset without interpolating mission data."""
@@ -586,7 +619,7 @@ class ResponsesMissionPlanner:
             payload["prevalidation_recovery_feedback"] = feedback
         response = self._client._request(
             model=self._settings.llm.model,
-            instructions=self._client._load_prompt(self._settings.prompts.planner_path),
+            instructions=self._client._plan_instructions(self._settings.prompts.planner_path),
             input_text=json.dumps(
                 _with_planning_world_evidence(
                     _with_semantic_goal(
@@ -614,6 +647,7 @@ class ResponsesMissionPlanner:
             self._execution_profile,
             self._execution_planning_evidence,
             self._plan_validator,
+            self._settings.provider_plan_profile,
         )
 
 
@@ -835,7 +869,7 @@ class ResponsesMissionRepairer:
             raise TimeoutError("deployment recovery deadline expired before Provider call")
         response = self._client._request(
             model=self._settings.llm.model,
-            instructions=self._client._load_prompt(self._settings.prompts.repairer_path),
+            instructions=self._client._plan_instructions(self._settings.prompts.repairer_path),
             input_text=json.dumps(
                 _with_planning_world_evidence(
                     _with_semantic_goal(
@@ -881,6 +915,7 @@ class ResponsesMissionRepairer:
                     self._execution_profile,
                     self._execution_planning_evidence,
                     self._plan_validator,
+                    self._settings.provider_plan_profile,
                 )
             explanation = raw["explanation"]
             if not isinstance(explanation, str):
@@ -1018,7 +1053,7 @@ class ResponsesMissionRepairer:
         )
         response = self._client._request(
             model=self._settings.llm.model,
-            instructions=self._client._load_prompt(self._settings.prompts.repairer_path),
+            instructions=self._client._plan_instructions(self._settings.prompts.repairer_path),
             input_text=json.dumps(
                 _with_planning_world_evidence(
                     repair_payload,
@@ -1043,6 +1078,7 @@ class ResponsesMissionRepairer:
             self._execution_profile,
             self._execution_planning_evidence,
             self._plan_validator,
+            self._settings.provider_plan_profile,
         )
 
 

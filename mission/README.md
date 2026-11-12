@@ -1,5 +1,9 @@
 # Mission Intelligence
 
+通过 `[mission] provider_plan_profile = "host-objective-v1"` 显式启用宿主目标组装；
+模型草案省略目标字段，MI 从本轮冻结输入带入并完整校验。旧回显模式保持默认。
+详见[接入指南](../docs/development/mi-host-objective-v0.1.md)和[ADR-0255](../docs/decisions/0255-host-owned-mission-objective.md)。
+
 `mission/` 负责把用户文本 instruction 经解释、澄清和风险审批转换为版本化 Task Graph，
 并生成内部 Mission/Task/Context/Role identity；不负责 Node Assignment、Resource Commit、
 Execution Group 或本地设备控制。

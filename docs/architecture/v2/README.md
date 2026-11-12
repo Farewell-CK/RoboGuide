@@ -48,6 +48,10 @@ Task/资源和 Node State；两台主机分别使用独立凭据及存储，不�
 本机取消人工结案归于 Local EAIOS 适配模块的离线运维入口，保留原证据并拒绝旧 writer。
 RG Controller 继续独立处理原取消及认证管理员结案；两者都不产生物理停止或自动续跑权限。
 
+[ADR-0255](../../decisions/0255-host-owned-mission-objective.md)增加显式 `host-objective-v1`
+模型草案格式。MI 从本轮冻结 GroundedIntent 组装原目标，模型生成候选计划，独立 Review
+仍审查完整原目标。旧回显格式保持默认；[接入与验证](../../development/mi-host-objective-v0.1.md)。
+
 [ADR-0214](../../decisions/0214-replicated-federation-deployment.md)将复制部署的 Federation
 配置归于 supervisor 的显式进程输入：原 domain、authorization 和可选 root peer 文件进入
 共同 policy identity，并传给唯一 owned child。它接线既有 v60 权威，不创建额外账本、
