@@ -97,3 +97,12 @@ CA更早于2026-12-05到期；没有在本轮实现长期证书自动轮换。
 单次计划。为下一轮准备独立lab gate r2（默认仍要求standing），仅在明确允许本机
 必要起身的scope下可接受down，其他身份、地图、源、TTL和资源门槛不变，运动授权
 字段仍false。新一轮需要重新确认现场及含必要起身的单次导航范围；不自动重发。
+
+新真实MI草稿及独立复核通过，仍AwaitingApproval，未产生Execute：
+Request `request-e5d5ab86d8414c188a44851982723ed2`，Mission
+`mission-0508773633184b72b32d4b3d700a7320`，revision1，digest
+`sha256:101fb626ad3727f599bae5550dbcd4199d01ef1c71f3d1f95a9edd3a50b72d5a`。
+本机目标要求从本次新鲜list_regions逐字复制稳定ID，参数逐字核对，reachable=true
+才导航；至多必要起身一次及导航一次。未把文字提醒当成已修复Robonix的工程保证。
+最终只读复核总attempt58→59，仅本轮失败新增一项；原58项逐值不变、无正到达证据、
+allocations为空、Unknown0。新一轮确认仍待用户，不能使用旧授权自动批准此草稿。
