@@ -165,6 +165,7 @@ and pending cancellation, recovery and multi-participant acceptance.
 
 | Responsibility | Authority | Implementation |
 | --- | --- | --- |
+| Scene / physical World ingress | Readonly explicitly attributed entity/source reports retain original definition bytes and remaining freshness; MI qualification supplies grounding without localization, arrival or motion authority (ADR-0247) | [Scene ingress](../../../integrations/robonix-task/robonix_task/scene_targets.py), [MI qualification](../../../mission/src/mission/scene_grounding.py) |
 | Conversation Workbench | Scoped evidence explanations, durable sessions and background Mission watch; explicit user actions enter Mission Service through plan-only/submission intent and original approval gates, with installed setup, scoped session navigation, preflight, explicit cancel and local feedback, without Control authority (ADR-0252/0253/0254) | [workbench](../../../mission/src/roboguide_workbench/) |
 | Mission Intelligence | Original Request/Dialogue/Grounding, drafts, independent Review, bounded Repair, approval and submission reconciliation; model outputs are candidates | [mission](../../../mission/src/mission/) |
 | Orchestration | Complete-plan admission, DAG readiness, logical dispatch priority, Task satisfaction, Mission lifecycle, holds and plan history | [orchestration](../../../core/orchestration/src/) |

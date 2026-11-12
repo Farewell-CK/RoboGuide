@@ -645,14 +645,14 @@ jobs:
           uv run ruff format --check mission apps/mission-service apps/recovery-tool
           tools/quality tools/deployment tools/observability integrations/robonix-map-service
           integrations/memory-provider integrations/spatial-provider integrations/habitat-local-eaios
-          evaluation website
+          evaluation website integrations/robonix-task
 
       - name: Run Ruff
         run: >
           uv run ruff check mission apps/mission-service apps/recovery-tool
           tools/quality tools/deployment tools/observability integrations/robonix-map-service
           integrations/memory-provider integrations/spatial-provider integrations/habitat-local-eaios
-          evaluation website
+          evaluation website integrations/robonix-task
 
       - name: Run mypy
         run: >
@@ -677,9 +677,14 @@ jobs:
           uv run python tools/quality/check_python_function_docs.py
           mission apps/mission-service apps/recovery-tool tools/quality tools/deployment tools/observability
           integrations/robonix-map-service integrations/memory-provider integrations/spatial-provider
-          integrations/habitat-local-eaios evaluation website
+          integrations/habitat-local-eaios evaluation website integrations/robonix-task
 
       - name: Run tests
         run: uv run pytest -q
         env:
           ROBOGUIDE_HABITAT_PYTHON: ${{ steps.deployment-python.outputs.python-path }}
+
+      - name: Check independent Robonix adapter
+        run: |
+          PYTHONPATH=integrations/robonix-task uv run --with grpcio==1.71.0 --with protobuf==5.29.4 python -m unittest discover -s integrations/robonix-task/tests -v
+          uv run --with grpcio==1.71.0 --with protobuf==5.29.4 mypy --strict --ignore-missing-imports integrations/robonix-task/robonix_task

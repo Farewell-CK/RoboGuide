@@ -1,8 +1,12 @@
 # RoboGuide
 
+[本次通用能力整合](docs/development/selective-main-integration-plan-20261112.md)保留 chat，
+接入与启动基础、显式存储治理、通用 Scene/物理观察、Node Unknown 和可选 MI objective
+profile 分批验收。固定双狗巡逻、人工到达发布器及照片交接暂不纳入；原分支与证据保留。
+
 [数据治理实施记录](docs/development/rg-data-governance-implementation.md)跟踪独立整合分支的
 v3 无损正文去重、恢复工具、保留策略、归档与 MI 姿态验证；代码、隔离验收、现场启用和
-真机效果分别记录，当前尚未部署 ThinkPad。
+真机效果分别记录。历史现场恢复副本实验不代表本次 main 已部署或正式长期验收通过。
 
 [Controller 启动优化](docs/development/controller-startup-streaming-2026-11-09.md)先将
 Catalog 恢复改为单次流式校验，只保留相关事件，并复用同轮定位证据。

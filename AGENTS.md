@@ -1,3 +1,14 @@
+Selective main integration retains the complete general foundation through 7fd7b2d1 and the
+governance/recovery chain through 516dfdf4. Later generic Scene/physical World and Node Unknown
+changes are explicitly transplanted; fixed patrol assignments, onsite arrival publishers and
+photo-handoff profiles remain on their source branches. ADR-0247 preserves exact Scene definition
+bytes, attributed entity/source and original freshness through Connector and Mission; observations
+grant no localization, arrival or motion authority. ADR-0250 maps declared local Unknown to the
+original reconciliation journal without releasing locks or redispatching Execute. Request v0.5
+explicitly accepts verified-origin GroundingContext v0.4 while retaining exact draft grants and
+independent approval. CI checks the independent robonix-task adapter separately; its transports are
+not chat package dependencies. See selective-main-integration-plan-20261112.md for staged scope.
+
 ADR-0244 introduces opt-in standalone Controller storage v3. Preserve exact original event bytes,
 per-observation source time/epoch/sequence/TTL, original external command receipts and protected
 decision evidence. Deduplicate immutable State values only; never reintroduce full duplicate State

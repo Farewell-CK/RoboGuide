@@ -204,6 +204,7 @@ Compute、Space、Time 上进行联合决策，并保留执行过程、证据、
 
 | 职责 | 当前权威 | 代码位置 |
 | --- | --- | --- |
+| Scene / physical World 接入 | 显式实体和来源的只读报告，保留原字节摘要与剩余时效；MI 校验后仅作为 grounding，不授予定位、到达或运动权限（ADR-0247） | [Scene 接入](../../../integrations/robonix-task/robonix_task/scene_targets.py)、[MI 校验](../../../mission/src/mission/scene_grounding.py) |
 | Conversation Workbench | 当前身份的证据查询解释、会话恢复、后台任务跟踪；显式用户动作通过 Mission Service 的仅规划/执行意图及原审批链推进，增加全局初始化、会话管理、精确计划检查、显式取消与本地反馈，不取得 Control 权威（ADR-0252/0253/0254） | [workbench](../../../mission/src/roboguide_workbench/) |
 | Mission Intelligence | 原 Request、Dialogue、Grounding、完整计划草案、Review、Repair、审批及提交对账；模型输出为候选 | [mission](../../../mission/src/mission/) |
 | Orchestration | 接纳完整 MissionPlan、DAG readiness、逻辑调度优先级、Task satisfaction、Mission 生命周期、hold 与计划版本历史 | [orchestration](../../../core/orchestration/src/) |
