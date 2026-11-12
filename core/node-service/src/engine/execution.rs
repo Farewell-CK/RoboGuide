@@ -689,21 +689,27 @@ impl LocalIntegrationEngine {
             MappedExecutionPhase::Cancelled => {
                 (JournalStatus::Cancelled, ExecutionPhase::Cancelled, true)
             }
+            MappedExecutionPhase::Unknown => (
+                JournalStatus::ReconciliationRequired,
+                ExecutionPhase::Unknown,
+                false,
+            ),
         };
         let current = self
             .inner
             .journal
             .get(execution_id)?
             .ok_or_else(|| EngineError::UnknownExecution(execution_id.to_string()))?;
-        if current.status() == journal_status {
+        let reason = fact.reason.unwrap_or_default();
+        // An explicit ambiguity report is a valid observation, not an unavailable read. Keep
+        // its original detail (including a changed detail after an earlier fence), retain locks,
+        // and continue polling only the same durable handle. Identical reports remain idempotent.
+        if current.status() == journal_status
+            && (fact.phase != MappedExecutionPhase::Unknown || current.reason() == reason.as_str())
+        {
             return Ok(terminal);
         }
-        self.record_fact(
-            execution_id,
-            journal_status,
-            phase,
-            fact.reason.unwrap_or_default(),
-        )?;
+        self.record_fact(execution_id, journal_status, phase, reason)?;
         Ok(terminal)
     }
 

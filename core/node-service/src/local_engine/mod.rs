@@ -532,6 +532,8 @@ pub enum MappedExecutionPhase {
     Failed,
     /// Local work confirmed terminal cancellation.
     Cancelled,
+    /// Local system explicitly cannot establish the physical execution outcome.
+    Unknown,
 }
 
 /// Canonical execution fact projected from current workflow context.

@@ -425,6 +425,12 @@ pub(super) fn compile_execution_state(
         MappedExecutionPhase::Cancelled,
         config.case_sensitive,
     )?;
+    insert_states(
+        &mut states,
+        config.unknown,
+        MappedExecutionPhase::Unknown,
+        config.case_sensitive,
+    )?;
     Ok(CompiledExecutionStateMapping {
         state_pointer: config.state_pointer,
         reason_pointer: config.reason_pointer,

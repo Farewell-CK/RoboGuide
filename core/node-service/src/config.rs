@@ -693,6 +693,9 @@ pub struct ExecutionStateMappingConfig {
     pub failed: Vec<String>,
     /// Local values mapped to Cancelled.
     pub cancelled: Vec<String>,
+    /// Explicit local ambiguity reports; these retain ownership and require reconciliation.
+    #[serde(default)]
+    pub unknown: Vec<String>,
     /// Whether mappings compare local values with case sensitivity.
     #[serde(default)]
     pub case_sensitive: bool,

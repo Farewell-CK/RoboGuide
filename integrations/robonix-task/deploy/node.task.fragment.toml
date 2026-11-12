@@ -95,6 +95,7 @@ running = ["RUNNING"]
 completed = ["SUCCEEDED"]
 failed = ["FAILED"]
 cancelled = ["CANCELED"]
+unknown = ["UNKNOWN"]
 case_sensitive = false
 
 [[operations.workflow.execute]]

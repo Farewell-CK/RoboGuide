@@ -506,6 +506,31 @@ async fn wait_for_local_phase(
     .expect("expected local phase arrives within the bounded retry window");
 }
 
+/// Waits for one explicitly reported Unknown, rejecting other attempts and unexpected terminal facts.
+async fn wait_for_reported_unknown(
+    events: &mut tokio::sync::broadcast::Receiver<crate::LocalExecutionEvent>,
+    execution_id: &str,
+) -> crate::LocalExecutionEvent {
+    use integration::grpc::v0_4::ExecutionPhase;
+
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let event = events.recv().await.expect("local event stream stays open");
+            assert_eq!(
+                event.execution_id, execution_id,
+                "only the original attempt may report"
+            );
+            match event.phase {
+                ExecutionPhase::Unknown => return event,
+                ExecutionPhase::Accepted | ExecutionPhase::Started => {}
+                unexpected => panic!("expected explicit Unknown before {unexpected:?}"),
+            }
+        }
+    })
+    .await
+    .expect("explicit Unknown arrives within the bounded observation window")
+}
+
 /// Transport status failures are reacquired and a duplicate Execute never redispatches work.
 #[tokio::test]
 async fn status_transport_failure_reacquires_completed_without_redispatch() {
@@ -713,4 +738,230 @@ async fn exhausted_status_reacquisition_is_bounded_and_fenced() {
     assert!(event.reason.contains("5 consecutive attempt"));
     assert_eq!(driver.status_calls.load(Ordering::SeqCst), 5);
     assert_eq!(driver.dispatch_calls.load(Ordering::SeqCst), 1);
+}
+
+/// Explicit ambiguity immediately persists the native reason and retains the original attempt locks.
+#[tokio::test]
+async fn explicit_unknown_preserves_detail_and_locks_without_redispatch() {
+    let state_dir = tempfile::tempdir().expect("state directory exists");
+    let driver = Arc::new(FlakyStatusDriver::new(
+        usize::MAX,
+        StatusFault::ReportedUnknown,
+        "COMPLETED",
+    ));
+    let engine = crate::LocalIntegrationEngine::new(
+        semantic_gated_catalog(
+            "http://127.0.0.1:50051".to_string(),
+            state_dir.path().to_path_buf(),
+        ),
+        vec![Arc::clone(&driver) as Arc<dyn LocalDriver>],
+    )
+    .expect("engine initializes");
+    let mut events = engine.subscribe();
+    let invocation = flaky_status_invocation();
+    engine
+        .execute(
+            "explicit-unknown".to_string(),
+            invocation.clone(),
+            vec!["base".to_string()],
+        )
+        .expect("original Execute starts once");
+    let event = wait_for_reported_unknown(&mut events, "explicit-unknown").await;
+    assert_eq!(event.execution_id, "explicit-unknown");
+    assert_eq!(
+        event.reason,
+        "abort replied; physical stop remains unverified"
+    );
+    let journal = engine.owned_journal();
+    let record = journal.get("explicit-unknown").unwrap().unwrap();
+    assert_eq!(
+        record.status(),
+        crate::JournalStatus::ReconciliationRequired
+    );
+    assert_eq!(record.reason(), event.reason);
+    assert_eq!(record.local_handle(), Some("local-flaky"));
+    assert!(!record.status().is_terminal());
+    assert!(matches!(
+        engine.execute(
+            "explicit-unknown".to_string(),
+            invocation.clone(),
+            vec!["base".to_string()]
+        ),
+        Ok(crate::ExecuteDisposition::Existing(_))
+    ));
+    assert!(matches!(
+        engine.execute(
+            "competing-unknown".to_string(),
+            invocation,
+            vec!["base".to_string()]
+        ),
+        Err(crate::EngineError::LocalLockConflict { .. })
+    ));
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while driver.status_calls.load(Ordering::SeqCst) < 3 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the same original handle remains observable");
+    let repeated = journal.get("explicit-unknown").unwrap().unwrap();
+    assert_eq!(
+        repeated.sequence(),
+        record.sequence(),
+        "identical Unknown reports are idempotent"
+    );
+    assert_eq!(driver.dispatch_calls.load(Ordering::SeqCst), 1);
+    assert!(
+        driver
+            .status_handles
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|body| { body == &serde_json::json!({"execution_id": "local-flaky"}) })
+    );
+}
+
+/// Read-only original-handle polling can later report a real terminal fact after explicit ambiguity.
+#[tokio::test]
+async fn explicit_unknown_reacquires_original_terminal_without_redispatch() {
+    let state_dir = tempfile::tempdir().expect("state directory exists");
+    let driver = Arc::new(FlakyStatusDriver::new(
+        1,
+        StatusFault::ReportedUnknown,
+        "FAILED",
+    ));
+    let engine = crate::LocalIntegrationEngine::new(
+        semantic_gated_catalog(
+            "http://127.0.0.1:50051".to_string(),
+            state_dir.path().to_path_buf(),
+        ),
+        vec![Arc::clone(&driver) as Arc<dyn LocalDriver>],
+    )
+    .expect("engine initializes");
+    let mut events = engine.subscribe();
+    engine
+        .execute(
+            "explicit-unknown-terminal".to_string(),
+            flaky_status_invocation(),
+            vec!["base".to_string()],
+        )
+        .expect("original Execute starts");
+    wait_for_reported_unknown(&mut events, "explicit-unknown-terminal").await;
+    wait_for_local_phase(&mut events, integration::grpc::v0_4::ExecutionPhase::Failed).await;
+    assert_eq!(driver.dispatch_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(driver.status_calls.load(Ordering::SeqCst), 3);
+    assert!(
+        driver
+            .status_handles
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|body| { body == &serde_json::json!({"execution_id": "local-flaky"}) })
+    );
+}
+
+/// A real local runtime restart preserves explicit Unknown and resumes status without new Execute.
+#[test]
+fn explicit_unknown_survives_restart_without_redispatch() {
+    let state_dir = tempfile::tempdir().expect("state directory exists");
+    let driver = Arc::new(FlakyStatusDriver::new(
+        usize::MAX,
+        StatusFault::ReportedUnknown,
+        "COMPLETED",
+    ));
+    {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let engine = crate::LocalIntegrationEngine::new(
+                semantic_gated_catalog(
+                    "http://127.0.0.1:50051".to_string(),
+                    state_dir.path().to_path_buf(),
+                ),
+                vec![Arc::clone(&driver) as Arc<dyn LocalDriver>],
+            )
+            .expect("first engine opens");
+            let mut events = engine.subscribe();
+            engine
+                .execute(
+                    "restart-explicit-unknown".to_string(),
+                    flaky_status_invocation(),
+                    vec!["base".to_string()],
+                )
+                .unwrap();
+            wait_for_reported_unknown(&mut events, "restart-explicit-unknown").await;
+        });
+    }
+    let status_calls_before_restart = driver.status_calls.load(Ordering::SeqCst);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let engine = crate::LocalIntegrationEngine::new(
+            semantic_gated_catalog(
+                "http://127.0.0.1:50051".to_string(),
+                state_dir.path().to_path_buf(),
+            ),
+            vec![Arc::clone(&driver) as Arc<dyn LocalDriver>],
+        )
+        .expect("second engine reopens the original SQL journal");
+        let record = engine
+            .owned_journal()
+            .get("restart-explicit-unknown")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            record.status(),
+            crate::JournalStatus::ReconciliationRequired
+        );
+        assert_eq!(record.local_handle(), Some("local-flaky"));
+        assert_eq!(
+            record.reason(),
+            "abort replied; physical stop remains unverified"
+        );
+        let snapshot = engine.snapshots().unwrap().pop().unwrap();
+        assert_eq!(
+            snapshot.phase,
+            integration::grpc::v0_4::ExecutionPhase::Unknown as i32
+        );
+        assert_eq!(snapshot.reason, record.reason());
+        engine
+            .recover()
+            .expect("only original-handle status polling resumes");
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while driver.status_calls.load(Ordering::SeqCst) == status_calls_before_restart {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("status is read after restart");
+        assert!(matches!(
+            engine.execute(
+                "restart-explicit-unknown".to_string(),
+                flaky_status_invocation(),
+                vec!["base".to_string()]
+            ),
+            Ok(crate::ExecuteDisposition::Existing(_))
+        ));
+        assert!(matches!(
+            engine.execute(
+                "restart-competing".to_string(),
+                flaky_status_invocation(),
+                vec!["base".to_string()]
+            ),
+            Err(crate::EngineError::LocalLockConflict { .. })
+        ));
+        assert_eq!(driver.dispatch_calls.load(Ordering::SeqCst), 1);
+        assert!(
+            driver
+                .status_handles
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|body| { body == &serde_json::json!({"execution_id": "local-flaky"}) })
+        );
+    });
 }
