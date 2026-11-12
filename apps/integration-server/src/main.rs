@@ -1769,6 +1769,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let artifact_tls_for_server = artifact_tls.clone();
     let timer_diagnostics = diagnostic_handle.clone();
     let receiver_diagnostics = diagnostic_handle.clone();
+    if event_log.retention_policy().is_ok() {
+        let retention_events = event_log.clone();
+        let retention_gate = event_write_gate.clone();
+        let retention_clock = process_clock.clone();
+        let retention_controller = controller.clone();
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(Duration::from_millis(state::RETENTION_INTERVAL_MS));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut last_blockers = None;
+            loop {
+                interval.tick().await;
+                let events = retention_events.clone();
+                let gate = retention_gate.clone();
+                let clock = retention_clock.clone();
+                let result = application::retention_worker::cycle(
+                    retention_controller.clone(),
+                    events,
+                    gate,
+                    clock,
+                )
+                .await;
+                let blockers = match result {
+                    Ok(status) => status["archive_only"]["blockers"]
+                        .as_array()
+                        .map(|values| {
+                            values
+                                .iter()
+                                .filter_map(serde_json::Value::as_str)
+                                .map(str::to_string)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default(),
+                    Err(error) => vec![error],
+                };
+                if last_blockers.as_ref() != Some(&blockers) {
+                    eprintln!(
+                        "Controller retention assessment: {}",
+                        serde_json::json!({"blockers":blockers})
+                    );
+                    last_blockers = Some(blockers);
+                }
+            }
+        });
+    }
     tokio::spawn(async move {
         if let Err(error) = serve_http(
             http_address,

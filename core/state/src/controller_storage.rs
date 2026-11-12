@@ -19,6 +19,8 @@ pub enum ControllerStorageFormat {
     V1,
     /// Standalone original Catalog recovery projection, atomically maintained with event appends.
     V2,
+    /// Verified lossless telemetry bodies with original per-observation envelopes.
+    V3,
 }
 
 /// Actual SQL connection drops before these original writer descriptors are unlocked.
@@ -176,6 +178,12 @@ pub(super) fn is_fenced(connection: &Connection) -> Result<bool, SqliteEventLogE
     Ok(version != 0
         || object(connection, "controller_storage_format")?.is_some()
         || object(connection, "controller_v1_events")?.is_some()
+        || object(connection, "controller_v3_events")?.is_some()
+        || object(connection, "telemetry_bodies")?.is_some()
+        || object(connection, "catalog_recovery_head")?.is_some()
+        || object(connection, "retention_policy")?.is_some()
+        || object(connection, "retention_reference_head")?.is_some()
+        || object(connection, "telemetry_storage_metrics")?.is_some()
         || object(connection, "events")?.is_some_and(|(kind, _)| kind != "table"))
 }
 
@@ -223,8 +231,14 @@ pub(super) fn upgrade(
           json_extract(payload_json, '$.ArtifactCatalogReferenceTransition.record.selector.revision_id'),sequence
         ) WHERE payload_schema='domain.EventPayload.json/v29';")?;
     validate(&transaction)?;
-    if format == ControllerStorageFormat::V2 {
+    if matches!(
+        format,
+        ControllerStorageFormat::V2 | ControllerStorageFormat::V3
+    ) {
         super::catalog_checkpoint::initialize(&transaction)?;
+    }
+    if format == ControllerStorageFormat::V3 {
+        super::telemetry_storage::initialize(&transaction)?;
     }
     transaction.commit()?;
     Ok(())

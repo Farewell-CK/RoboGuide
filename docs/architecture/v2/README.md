@@ -1,5 +1,9 @@
 # RoboGuide V2 现行架构
 
+[ADR-0244](../../decisions/0244-state-retention-and-deduplicated-storage.md)规划并实现存储 v3
+的无损遥测正文引用与受控历史保留：当前 State/TTL 语义不变，原事务覆盖正文、事件和恢复
+投影；首次部署只评估策略。备份、长跑、现场和复制交付分别验收，当前工作尚在实施。
+
 [ADR-0243](../../decisions/0243-catalog-recovery-checkpoint.md)定义显式 standalone 存储 v2：
 State 在原事件事务内维护带原始来源、覆盖序号及摘要的 Catalog 恢复投影，正常启动只读
 相关记录；旧历史完整保留，旧 writer 拒绝新代际。任务和恢复权威不迁移到投影；复制部署

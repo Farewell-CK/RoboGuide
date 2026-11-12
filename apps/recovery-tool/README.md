@@ -1,5 +1,21 @@
 # RoboGuide recovery tool
 
+[Profile v0.32](V3_STORAGE.md) adds explicit standalone Controller storage v2/v3 inspection,
+complete original Catalog recovery coverage and verified lossless telemetry-body reconstruction.
+Backups and cold restores retain every physical table, value reference, policy receipt and original
+command. Missing mandatory evidence, altered public views and unknown generations are refused;
+readers never rebuild evidence or change a deployment's generation. Restricted verifier authority
+requires this profile and the current v60 application wrapper. Replicated v3 support and field
+deployment remain separate acceptance gates.
+
+The same profile explicitly supports original legacy Artifact roots through
+`storage_schema: roboguide.artifact-storage/legacy`: original writer fencing and actual blob hashes
+are checked, original layout is restored, and no new retained owner or adoption is inferred. A
+generic `files` component does not substitute for Artifact validation or its independent writer.
+An original Memory-only Catalog without retained-reference/adoption events can be preserved with
+that explicit legacy binding and exact copied CAS bytes. Its historical owner remains unadopted;
+qualified owner claims, mixed missing-reference history and bare Map publications still refuse.
+
 [Profile v0.19](../../contracts/recovery/bundle-v0.19/README.md) adds complete declared parent8/Root4
 cold data recovery, original recovery/reader joins and explicit Root5 backing bindings. Original
 operation rows, logical owners and clocks remain unchanged. Existing v0.18 retains its parent3 and

@@ -38,7 +38,7 @@ from .profile import (
 MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 RESTORE_RECEIPT_SCHEMAS = {
     f"roboguide.recovery-profile/v0.{version}": f"roboguide.restore-receipt/v0.{version}"
-    for version in range(1, 32)
+    for version in range(1, 33)
 }
 CHUNK = 1024 * 1024
 SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -69,6 +69,7 @@ def _private_root_staging(component: dict[str, Any], schema: str, name: str) -> 
             "roboguide.recovery-profile/v0.29",
             "roboguide.recovery-profile/v0.30",
             "roboguide.recovery-profile/v0.31",
+            "roboguide.recovery-profile/v0.32",
         }
         and component["kind"] == "replica-content"
         and component["storage_schema"] == "roboguide.replica-content-layout/v0.8"
@@ -205,7 +206,12 @@ def _check_cas_path(
     if name in artifact_layout.metadata_files(component, profile_schema):
         return
     if component["kind"] == "artifact" and parts[0] in {"blobs", "objects-v1"}:
-        expected = "objects-v1" if artifact_layout.supports(profile_schema) else "blobs"
+        expected = (
+            "objects-v1"
+            if artifact_layout.supports(profile_schema)
+            and not artifact_layout.is_legacy(component, profile_schema)
+            else "blobs"
+        )
         if (
             len(parts) != 4
             or parts[0] != expected
@@ -232,6 +238,9 @@ def _identity(path: Path, budget: Budget) -> dict[str, Any]:
     with _regular(path):
         pass
     with closing(sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True)) as connection:
+        from .controller_values import install_functions
+
+        install_functions(connection)
         connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, MAX_MANIFEST_BYTES)
         if connection.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
             raise ValueError("recovery SQLite integrity check failed")
@@ -306,6 +315,9 @@ def _validate_memory_content_references(
         with closing(
             sqlite3.connect(database.as_uri() + "?mode=ro&immutable=1", uri=True)
         ) as connection:
+            from .controller_values import install_functions
+
+            install_functions(connection)
             connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, MAX_MANIFEST_BYTES)
             connection.set_progress_handler(progress, 1000)
             tables = {
@@ -522,7 +534,8 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
             replica_content_bundle.capture_sources(
                 components,
                 budget,
-                multiple_clusters=profile["schema"] == "roboguide.recovery-profile/v0.31",
+                multiple_clusters=profile["schema"]
+                in {"roboguide.recovery-profile/v0.31", "roboguide.recovery-profile/v0.32"},
                 allow_standalone=profile["schema"]
                 in {
                     "roboguide.recovery-profile/v0.24",
@@ -533,6 +546,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                     "roboguide.recovery-profile/v0.29",
                     "roboguide.recovery-profile/v0.30",
                     "roboguide.recovery-profile/v0.31",
+                    "roboguide.recovery-profile/v0.32",
                 },
             )
             if profile["schema"]
@@ -550,6 +564,7 @@ def backup(profile: dict[str, Any], destination: Path, command_id: str) -> dict[
                 "roboguide.recovery-profile/v0.29",
                 "roboguide.recovery-profile/v0.30",
                 "roboguide.recovery-profile/v0.31",
+                "roboguide.recovery-profile/v0.32",
             }
             else None
         )
@@ -755,6 +770,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                     "roboguide.recovery-profile/v0.29",
                     "roboguide.recovery-profile/v0.30",
                     "roboguide.recovery-profile/v0.31",
+                    "roboguide.recovery-profile/v0.32",
                 }
                 else set()
             )
@@ -857,7 +873,14 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                     sqlite3.connect((bundle / name).as_uri() + "?mode=ro&immutable=1", uri=True)
                 ) as connection:
                     validate_controller(
-                        connection, manifest["profile"]["schema"], component.get("storage_schema")
+                        connection,
+                        manifest["profile"]["schema"],
+                        component.get("storage_schema"),
+                        archive_roots={
+                            item["root"]: bundle / "stores" / item["component_id"]
+                            for item in components
+                            if item["kind"] == "archive"
+                        },
                     )
             if component["kind"] == "memory" and selected == "memory.sqlite3":
                 with closing(
@@ -958,6 +981,7 @@ def verify(bundle: Path, expected_digest: str, *, deadline_ns: int | None = None
                 "roboguide.recovery-profile/v0.29",
                 "roboguide.recovery-profile/v0.30",
                 "roboguide.recovery-profile/v0.31",
+                "roboguide.recovery-profile/v0.32",
             }
             else databases
         )
@@ -1166,6 +1190,7 @@ def restore(
             "roboguide.recovery-profile/v0.29",
             "roboguide.recovery-profile/v0.30",
             "roboguide.recovery-profile/v0.31",
+            "roboguide.recovery-profile/v0.32",
         }:
             locks = [*locks, ".memory-use.lock"]
         for name in locks:
@@ -1215,6 +1240,7 @@ def restore(
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
         "roboguide.recovery-profile/v0.31",
+        "roboguide.recovery-profile/v0.32",
     }:
         receipt["original_authority_bytes_preserved"] = False
         receipt["original_operational_rows_preserved"] = True

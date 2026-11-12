@@ -1,5 +1,9 @@
 # RoboGuide
 
+[数据治理实施记录](docs/development/rg-data-governance-implementation.md)跟踪独立整合分支的
+v3 无损正文去重、恢复工具、保留策略、归档与 MI 姿态验证；代码、隔离验收、现场启用和
+真机效果分别记录，当前尚未部署 ThinkPad。
+
 [Controller 启动优化](docs/development/controller-startup-streaming-2026-11-09.md)先将
 Catalog 恢复改为单次流式校验，只保留相关事件，并复用同轮定位证据。
 原日志及权限校验不变。显式 standalone [存储 v2](docs/decisions/0243-catalog-recovery-checkpoint.md)

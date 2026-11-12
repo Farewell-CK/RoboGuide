@@ -269,5 +269,7 @@ async fn event_page_preserves_bounded_cursor_contract() {
     );
     let tail = request_events(log, gate, "/v1/events?after=1002&limit=100", None).await;
     let document = response_body(&tail, "HTTP/1.1 200 OK");
-    assert_eq!(document, serde_json::json!({"events": []}));
+    assert_eq!(document["events"], serde_json::json!([]));
+    assert_eq!(document["next_after_sequence"], 1002);
+    assert_eq!(document["has_more"], false);
 }

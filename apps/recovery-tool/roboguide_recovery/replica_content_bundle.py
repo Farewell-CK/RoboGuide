@@ -178,7 +178,12 @@ def _parent(
                     53,
                     61
                     if schema
-                    in {content.FEDERATION_PROFILE, content.ARCHIVE_PROFILE, content.MULTI_PROFILE}
+                    in {
+                        content.FEDERATION_PROFILE,
+                        content.ARCHIVE_PROFILE,
+                        content.MULTI_PROFILE,
+                        content.CONTROLLER_PROFILE,
+                    }
                     else 60
                     if schema == content.COORDINATION_PROFILE
                     else 59
@@ -597,6 +602,7 @@ def validate_bundle(
         content.TOPOLOGY_PROFILE,
         content.COORDINATION_PROFILE,
         content.FEDERATION_PROFILE,
+        content.CONTROLLER_PROFILE,
     } and not any(item["kind"] in {"replica", "replica-content"} for item in components)
     content.validate_pairing(components, allow_standalone=standalone)
     source_map = _source_map(sources, components)
@@ -627,7 +633,10 @@ def validate_bundle(
             if identity["member"] in group:
                 raise ValueError("original Replica content repeats a committed member")
             group[identity["member"]] = identity["store_owner"]
-    if len(expected_members) > 1 and schema != content.MULTI_PROFILE:
+    if len(expected_members) > 1 and schema not in {
+        content.MULTI_PROFILE,
+        content.CONTROLLER_PROFILE,
+    }:
         raise ValueError("multiple original clusters require explicit recovery v0.31")
     owners, members, profiles = set(), set(), set()
     for component in components:
@@ -697,13 +706,13 @@ def validate_bundle(
         profiles.add(identity["profile_identity"])
         originals.append(original)
         states.append((identity["profile_identity"], rows, state))
-    if len(profiles) != 1 and schema != content.MULTI_PROFILE:
+    if len(profiles) != 1 and schema not in {content.MULTI_PROFILE, content.CONTROLLER_PROFILE}:
         raise ValueError("complete Replica content bundle mixes original clusters/profiles")
     for profile, rows, _ in states:
         _recoveries(
             rows, [item for item in originals if item["identity"]["profile_identity"] == profile]
         )
-    if schema == content.MULTI_PROFILE:
+    if schema in {content.MULTI_PROFILE, content.CONTROLLER_PROFILE}:
         from .federation_bundle import validate_domains
 
         validate_domains(states, budget)

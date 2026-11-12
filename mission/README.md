@@ -4,6 +4,74 @@
 并生成内部 Mission/Task/Context/Role identity；不负责 Node Assignment、Resource Commit、
 Execution Group 或本地设备控制。
 
+已增加可选的姿态目标观察器，运行在现有 `mission-service` 的后台线程中。
+它只读取 Controller State、原 Mission 接纳回执和当前执行记录，再向通用 verifier
+入口发布证据；不会调用机器人、Pilot、动作重试或任务取消接口。历史
+`execution-report` 任务不进入这个队列，原记录保持不变。
+
+开启前必须用单独的 mTLS 叶证书，在 Controller 的
+`roboguide.operator-authorization/v0.3` 中授予 `verifier` 角色和明确的租户；
+该身份不能提交 Mission、取消任务或更新注册表。Node 必须已经有明确的同租户身份。
+选择新的 `integrations/robonix-task/deploy/posture-capability-catalog.json` 作为 MI
+能力目录；它在保留 origin/delegate 操作的基础上显式加入目标参数与独立 verifier
+合约，现有目录不会静默改变。现有 Mission satisfaction policy 还须显式配置
+`policy_ref` 和 `max_evidence_age_ms=5000`，不能由模型自己选择数值。
+由管理员预先登记匹配的 `observation.posture.verify-reported@v1` verifier source，
+`producer_principals` 精确绑定该服务身份，并允许下述完整谓词。观察器不自授权限。
+可从 `integrations/robonix-task/deploy/posture-verifier-registry.template.json`
+填入本次唯一 command ID、明确租户和真实 verifier principal 后，由管理员走现有
+`POST /v1/verifier-sources` 发布；模板中的占位标识不是现场配置。
+服务配置在现有 `[service]` 中增加：
+
+```toml
+posture_verifier_enabled = true
+posture_verifier_source_id = "mi-reported-posture"
+posture_verifier_source_revision = 1
+posture_verifier_tenant_id = "local"
+verifier_client_cert = "/private/mi-verifier/client.crt"
+verifier_client_key = "/private/mi-verifier/client.key"
+verifier_client_ca = "/private/mi-verifier/ca.crt"
+```
+
+Controller 必须使用 HTTPS；这些路径不能复用现有 MI operator 叶证书。
+Worker 的 Controller 请求使用独立的 200 ms 网络超时；配置和队列保存证书摘要，
+不保存密钥内容。未启用时无需安装 Robonix 集成包；启用时需要安装该模块或在现有
+服务的 `PYTHONPATH` 加入 `integrations/robonix-task`。
+
+新 Task 必须在接纳前声明一个角色的 `execution_intent.parameters.expected_posture`，
+取值为 `standing` 或 `down`，并保留部署原有的 `profile` 参数。Task satisfaction
+须为 `verifier-evidence`，合约为 `observation.posture.verify-reported@v1`，
+`predicate` 与 `expected_effect` 均精确等于
+`fresh post-completion Robonix aggregate reports standing` 或对应的 `down`，
+最大证据年龄不超过 5000 ms。观察器只检查既有计划，拒绝不一致的声明，不在审批后
+改写计划。模型生成的普通执行回执任务不会自动升级为目标验收任务。
+
+队列在唯一一次 Mission POST 前持久化原计划摘要和实际请求正文摘要。
+观察器核对 Controller 原接纳正文、原 Group、计划修订号和同租户身份；仅在 Task
+处于 `AwaitingSatisfaction` 且完整、无歧义的当前角色 attempt 均已 Completed 后，
+记录基线并启动固定 **10 秒**窗口。当前版本仅接纳单角色目标；发现历史 attempt
+导致当前集合有歧义，或计划已修订时，保留 Unknown 并转人工。
+
+窗口内需要两条不同 sequence、不同原生接收身份、同来源且同 epoch 的新鲜报告。
+两条都达到目标时发布正证据；窗口结束且最后两条仍新鲜、均与目标矛盾时发布负证据。
+缺失、过期、来源变化或时钟域变化保留 Unknown。缓存重复查询不能计数或续期。
+网络读取、队列等待和发布预算会消耗原始有效期；SQL 等待过久时拒绝发布。
+丢失发布回复后保留原 evidence ID、完整请求和不确定状态，转人工只读对账，
+不会重发旧测量来刷新 Controller 的接收时间，也不会重试动作。
+
+观察工作、原基线、两条报告、原 attempt 集合、递增发布序号和原回执保存在同一个
+MI `state_db` 的版本化 `mission_posture_*` 表中，并校验输入与进度摘要。
+服务重启沿原 boot/time namespace 的单调时间继续；重启不能重置窗口。
+`GET /v1/mission-requests/{request_id}/posture-verification` 提供同请求所有者可读的
+观察记录。`complete` 表示证据已发布并记录回执，真实 Task 的结案仍由 Controller
+原状态机决定；Robonix 报告姿态满足也不等于独立物理效果或停止证明。
+
+软件进程验收入口为
+`integrations/robonix-task/tests/posture_verifier_process_gate.py`，使用私有 mTLS
+Controller/Node 和合成状态源，保留正、负验收及权限拒绝证据。负证据下 Task 为
+`SatisfactionRejected`，Mission 为 `Failed`。该检查不连接真机，
+也不代替 MI 模型规划或现场动作验收。
+
 ## 目录
 
 - `src/mission/`：Mission Request 状态机、resolved GroundedIntent handoff、SQLite store、

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, replace
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from mission.approval import ApprovalPolicy
 from mission.authorization import AuthorizationProfile
@@ -34,6 +35,7 @@ from mission.grounding_reader import EmptyMissionGroundingReader, MissionGroundi
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, MissionPlan
 from mission.planners import MissionPlanner
+from mission.posture_verifier import PostureGoalVerifier
 from mission.provenance import implementation_identity, trace_deliberation
 from mission.provenance import snapshot as provenance_snapshot
 from mission.provider_errors import MissionIdentityError
@@ -143,6 +145,7 @@ class MissionRequestEngine:
         max_deployment_recovery_attempts: int = 0,
         deployment_recovery_timeout_ms: int = 900_000,
         readiness_probe: Callable[[], bool] | None = None,
+        posture_verifier: PostureGoalVerifier | None = None,
     ) -> None:
         """Retain bounded dependencies and fail interrupted transitions closed on startup."""
         if max_repair_attempts < 0:
@@ -152,6 +155,7 @@ class MissionRequestEngine:
         if max_repair_attempts > 0 and (reviewer is None or repairer is None):
             raise MissionRequestError("automatic repair requires Reviewer and Repairer ports")
         self._store = store
+        self.posture_verifier = posture_verifier
         self._readiness_probe = readiness_probe
         self._interpreter = interpreter
         self._planner = planner
@@ -267,6 +271,18 @@ class MissionRequestEngine:
         """Resolve an original Request without deliberation, submission or tenant migration."""
         return self._store.request_for_mission(mission_id, tenant_id)
 
+    def posture_verification(self, request_id: str) -> JSONObject:
+        """Return original observer records after the HTTP boundary checks Request ownership."""
+        record = self.get(request_id)
+        worker = self.posture_verifier
+        return {
+            "schema_version": "roboguide.mi-posture-verification-status/v0.1",
+            "request_id": record.request_id,
+            "mission_id": record.mission_id,
+            "enabled": worker is not None,
+            "jobs": cast(Any, worker.store.jobs(mission_id=record.mission_id) if worker else []),
+        }
+
     def record_http_audit(
         self,
         *,
@@ -330,6 +346,13 @@ class MissionRequestEngine:
                 ready = False
             result["controller"] = "ready" if ready else "unavailable"
             result["ready"] = ready
+        if self.posture_verifier is not None:
+            try:
+                observer_ready = self.posture_verifier.ready()
+            except (OSError, ValueError, RuntimeError, sqlite3.Error):
+                observer_ready = False
+            result["posture_verifier"] = "ready" if observer_ready else "unavailable"
+            result["ready"] = result["ready"] is True and observer_ready
         return result
 
     def bind_request_tenant(self, request_id: str, tenant_id: str) -> None:
@@ -1159,6 +1182,10 @@ class MissionRequestEngine:
             ),
         )
         try:
+            if self.posture_verifier is not None:
+                from mission.security_context import authenticated_tenant
+
+                self.posture_verifier.prepare(plan, authenticated_tenant())
             observed_submit = getattr(self._controller, "submit_plan_observed", None)
 
             def before_send(evidence: ControllerSubmissionEvidence) -> None:
@@ -1174,6 +1201,8 @@ class MissionRequestEngine:
                 else self._controller.submit_plan(plan)
             )
             self._validate_submission_receipt(record, receipt)
+            if self.posture_verifier is not None:
+                self.posture_verifier.admission_result(plan, accepted=receipt.accepted)
         except Exception as error:
             observed = (
                 error.submission_evidence if isinstance(error, MissionControllerError) else None

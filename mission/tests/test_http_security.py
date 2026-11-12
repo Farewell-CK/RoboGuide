@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from mission.api import MissionRequestHttpServer, _build_mtls_context, _load_role_map
@@ -395,30 +395,36 @@ def test_rotation_preserves_command_identity_and_revocation_is_durable(tmp_path:
         headers={"Content-Type": "application/json", "Idempotency-Key": "one-command"},
         method="POST",
     )
+
+    def same_command(leaf: str) -> Any:
+        """Use fresh proxy-disabled transport without mutating the original logical command."""
+        repeated = urllib.request.Request(
+            request.full_url, data=request.data, headers=dict(request.headers), method="POST"
+        )
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            urllib.request.HTTPSHandler(context=_client(directory, leaf)),
+        )
+        return opener.open(repeated, timeout=2)
+
     try:
-        with urllib.request.urlopen(
-            request, context=_client(directory, "tenant-a"), timeout=2
-        ) as response:  # noqa: S310
+        with same_command("tenant-a") as response:
             original = json.loads(response.read())
-        with urllib.request.urlopen(
-            request, context=_client(directory, "viewer"), timeout=2
-        ) as response:  # noqa: S310
+        with same_command("viewer") as response:
             assert json.loads(response.read()) == original
         assert len(interpreter.calls) == 1
         grants[digests["tenant-a"]]["revoked"] = True
         profile["revision"] = 2
         profile_path.write_text(json.dumps(profile))
         with pytest.raises(urllib.error.HTTPError) as revoked:
-            urllib.request.urlopen(request, context=_client(directory, "tenant-a"), timeout=2)  # noqa: S310
+            same_command("tenant-a")
         assert revoked.value.code == 401
-        with urllib.request.urlopen(
-            request, context=_client(directory, "viewer"), timeout=2
-        ) as response:  # noqa: S310
+        with same_command("viewer") as response:
             assert json.loads(response.read()) == original
         profile["revision"] = 1
         profile_path.write_text(json.dumps(profile))
         with pytest.raises(urllib.error.HTTPError) as rollback:
-            urllib.request.urlopen(request, context=_client(directory, "viewer"), timeout=2)  # noqa: S310
+            same_command("viewer")
         assert rollback.value.code == 401
     finally:
         server.shutdown()

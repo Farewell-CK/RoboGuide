@@ -168,7 +168,11 @@ def operations(
     new = marker == (MARKER,) or (
         marker == ("roboguide.archive-operations/v0.3",)
         and profile_schema
-        in {"roboguide.recovery-profile/v0.30", "roboguide.recovery-profile/v0.31"}
+        in {
+            "roboguide.recovery-profile/v0.30",
+            "roboguide.recovery-profile/v0.31",
+            "roboguide.recovery-profile/v0.32",
+        }
     )
     if current and (
         not new
@@ -193,6 +197,7 @@ def operations(
             "roboguide.recovery-profile/v0.29",
             "roboguide.recovery-profile/v0.30",
             "roboguide.recovery-profile/v0.31",
+            "roboguide.recovery-profile/v0.32",
         }
         or "event_archive_aborts" not in tables
     ):
@@ -223,6 +228,7 @@ def operations(
             "roboguide.recovery-profile/v0.29",
             "roboguide.recovery-profile/v0.30",
             "roboguide.recovery-profile/v0.31",
+            "roboguide.recovery-profile/v0.32",
         }
         or not current
         or "event_archive_aborts" not in tables

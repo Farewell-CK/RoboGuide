@@ -18,6 +18,12 @@ mod identity_adoption_tests;
 #[path = "deployment_management_tests.rs"]
 mod deployment_management_tests;
 
+#[path = "verifier_authorization_tests.rs"]
+mod verifier_authorization_tests;
+
+#[path = "retention_maintenance_tests.rs"]
+mod retention_maintenance_tests;
+
 /// Metrics-only identity is explicitly global yet cannot read business projections or any mutation.
 #[tokio::test]
 async fn metrics_reader_cannot_read_business_or_acquire_mutation_authority() {

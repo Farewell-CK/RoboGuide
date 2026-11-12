@@ -23,7 +23,7 @@ pub struct OperatorAuthorization {
 pub struct OperatorCertificateGrant {
     /// Stable audit and idempotency principal, independent of rotation leaf.
     pub principal_id: String,
-    /// Controller permission tier.
+    /// Controller permission tier or independently restricted verifier publisher.
     pub role: String,
     /// Tenant delegation; global * requires recovery administration or the metrics-only role.
     pub tenant_ids: BTreeSet<String>,
@@ -43,7 +43,9 @@ impl OperatorAuthorization {
     pub fn validate(&self) -> Result<(), String> {
         if !matches!(
             self.schema_version.as_str(),
-            "roboguide.operator-authorization/v0.1" | "roboguide.operator-authorization/v0.2"
+            "roboguide.operator-authorization/v0.1"
+                | "roboguide.operator-authorization/v0.2"
+                | "roboguide.operator-authorization/v0.3"
         ) || self.registry_id.trim().is_empty()
             || self.registry_id.len() > 128
             || self.revision == 0
@@ -62,7 +64,7 @@ impl OperatorAuthorization {
                 || grant.principal_id.len() > 128
                 || !matches!(
                     grant.role.as_str(),
-                    "viewer" | "operator" | "recovery-admin" | "metrics-reader"
+                    "viewer" | "operator" | "recovery-admin" | "metrics-reader" | "verifier"
                 )
                 || grant.tenant_ids.is_empty()
                 || grant.tenant_ids.len() > 64
@@ -75,7 +77,9 @@ impl OperatorAuthorization {
                 || grant.role == "metrics-reader"
                     && grant.tenant_ids != BTreeSet::from(["*".into()])
                 || grant.role == "metrics-reader"
-                    && self.schema_version != "roboguide.operator-authorization/v0.2"
+                    && self.schema_version == "roboguide.operator-authorization/v0.1"
+                || grant.role == "verifier"
+                    && self.schema_version != "roboguide.operator-authorization/v0.3"
                 || grant.expires_at_ms != 0 && grant.expires_at_ms <= grant.not_before_ms
             {
                 return Err("operator certificate grant is invalid".into());
@@ -88,8 +92,8 @@ impl OperatorAuthorization {
     pub fn validates_successor(&self, next: &Self) -> Result<(), String> {
         next.validate()?;
         if self.registry_id != next.registry_id
-            || self.schema_version == "roboguide.operator-authorization/v0.2"
-                && next.schema_version != self.schema_version
+            || authorization_generation(&self.schema_version)
+                > authorization_generation(&next.schema_version)
             || self.revision > next.revision
             || self.revision == next.revision && self != next
         {
@@ -109,6 +113,16 @@ impl OperatorAuthorization {
     }
 }
 
+/// Orders the closed authorization generations without parsing or accepting unknown versions.
+fn authorization_generation(schema: &str) -> u8 {
+    match schema {
+        "roboguide.operator-authorization/v0.1" => 1,
+        "roboguide.operator-authorization/v0.2" => 2,
+        "roboguide.operator-authorization/v0.3" => 3,
+        _ => 0,
+    }
+}
+
 impl OperatorCertificateGrant {
     /// Checks fresh local time; transport separately checks the actual peer certificate expiry.
     pub fn active(&self, now_ms: u64) -> bool {
@@ -121,6 +135,42 @@ impl OperatorCertificateGrant {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Restricted publishers require their explicit codec and cannot regain a lower authority codec.
+    #[test]
+    fn verifier_grants_require_scoped_new_generation_without_downgrade() {
+        let mut profile = OperatorAuthorization {
+            schema_version: "roboguide.operator-authorization/v0.3".into(),
+            registry_id: "original".into(),
+            revision: 1,
+            grants: BTreeMap::from([(
+                format!("sha256:{}", "a".repeat(64)),
+                OperatorCertificateGrant {
+                    principal_id: "verifier-service".into(),
+                    role: "verifier".into(),
+                    tenant_ids: BTreeSet::from(["lab".into()]),
+                    not_before_ms: 0,
+                    expires_at_ms: 0,
+                    revoked: false,
+                },
+            )]),
+        };
+        assert!(profile.validate().is_ok());
+        for old in [
+            "roboguide.operator-authorization/v0.1",
+            "roboguide.operator-authorization/v0.2",
+        ] {
+            let mut next = profile.clone();
+            next.schema_version = old.into();
+            next.revision = 2;
+            assert!(next.validate().is_err());
+            next.grants.values_mut().next().unwrap().role = "operator".into();
+            assert!(next.validate().is_ok());
+            assert!(profile.validates_successor(&next).is_err());
+        }
+        profile.grants.values_mut().next().unwrap().tenant_ids = BTreeSet::from(["*".into()]);
+        assert!(profile.validate().is_err());
+    }
 
     /// Global metrics delegation is purpose-limited; ordinary viewers/operators retain tenant fences.
     #[test]

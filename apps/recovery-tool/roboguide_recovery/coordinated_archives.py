@@ -11,7 +11,9 @@ from typing import Any
 from .snapshot_references import OperationBudget, canonical, digest
 
 PROFILE = "roboguide.recovery-profile/v0.30"
-PROFILES = frozenset({PROFILE, "roboguide.recovery-profile/v0.31"})
+PROFILES = frozenset(
+    {PROFILE, "roboguide.recovery-profile/v0.31", "roboguide.recovery-profile/v0.32"}
+)
 STORAGE = "roboguide.archive-operations/v0.3"
 RECOVERY = "roboguide.application-recovery/v0.2"
 ENVELOPE = "roboguide.application-commit/v4"

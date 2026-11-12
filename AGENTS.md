@@ -1,3 +1,16 @@
+ADR-0244 introduces opt-in standalone Controller storage v3. Preserve exact original event bytes,
+per-observation source time/epoch/sequence/TTL, original external command receipts and protected
+decision evidence. Deduplicate immutable State values only; never reintroduce full duplicate State
+records in reference indexes. Native SQLite readers must install verified reconstruction functions.
+The v3 retention policy starts in evaluate mode (24h hot / 30d archive, 8192 rows / 4MiB per batch).
+Incomplete task/Unknown/decision/backup/replica reference coverage blocks deletion; policy acceptance
+alone grants no archive completion proof. Actual 24h soak and 30 restart checks precede field release;
+do not weaken the authorized <=5% RSS growth gate or the 10s reported-posture observation window.
+Recovery profile v0.32 must carry all v3 bodies/references/receipts, and unknown/partial generations
+fail closed. The restricted verifier requires mTLS, explicit tenant and operator-authorization v0.3;
+it cannot admit/cancel actions or manage registries. No field deployment or robot action is implied.
+See docs/development/rg-data-governance-implementation.md for separate implementation/acceptance gates.
+
 ADR-0243 adds explicit standalone Controller storage v2. Its one-time migration validates all
 original history atomically; each append maintains Catalog recovery coverage in the same SQL
 transaction. Normal v2 recovery validates protected source envelopes and coverage rather than
@@ -66,6 +79,9 @@ ADR-0240 adds opt-in --chassis-state in the existing combined Connector. It samp
 fixed Robonix chassis/state tool through Atlas/MCP, closes its own session/channel and adds
 cached chassis evidence to the existing robot-state export. Central posture inspection GETs
 only authenticated Controller State/inventory and refuses expired/unknown/foreign evidence.
+The combined Connector's robonix_task/observation_workers.py isolates chassis sampling from
+slow sensor probes in the same process: chassis waits 1s after each sample, sensors retain 3s.
+Join both serial source workers before closing their transports; never extend TTL to hide delays.
 Retain the source's shorter stale_ms through Controller retention; evidence output uses a
 new file and unavailable exits 2. Merge review regression reproduces both original failures.
 Do not replace Robonix posture logic with joint-angle inference or infer damping/remote state.

@@ -31,6 +31,9 @@ RG 的日常姿态检查使用 [reported posture 读取器](robonix_task/posture
 读取器保留来源/会话/序号及原始数据，过期、未知或失联时拒绝给出当前姿态。
 数据未提供单独姿态测量时间、阻尼模式或遥控器连接状态，不能据此推导这些信息。
 该诊断读取器不自动为所有 Controller 任务增加姿态准入规则，也不授予运动权限。
+统一 Connector 内的底盘采样使用独立线程，每次采样结束后等待 1 秒；原传感器观察
+仍在自己的线程中每次采样结束后等待 3 秒。慢 ROS/传感器探测不再阻塞底盘更新，
+不增加服务或修改数据 TTL。退出时先等待两个采样线程结束，再关闭各自的数据源。
 见 [ADR-0240](../../docs/decisions/0240-reported-chassis-posture-state.md)。
 读取器同时扣减 Controller 缓存期间的数据源 `stale_ms` 和 5 秒上限；缺少或过期时
 不输出姿态。`--output` 仅创建新证据文件；reported 退出码为 0，unavailable 为 2。
@@ -262,3 +265,16 @@ uv run --with grpcio==1.71.0 --with protobuf==5.29.4 \
 显式传入 `--controller`、`--node`、`--output` 新目录及可选 `--old-controller`。
 旧 Controller 必须在新结案 SQL 上以 unknown field settlement 拒绝启动且不改动原 SQL。
 该检查不连接真实设备。所有派发只到夹具的 loopback gRPC，不能作为硬件验收。
+
+新的 `tests/posture_verifier_process_gate.py` 使用实际 mTLS Controller/Node、独立
+`verifier` 身份和现有 MI 姿态观察器，检查两条新报告、固定 10 秒负证据窗口、
+实际 Task Completed/SatisfactionRejected 与 Mission Failed、权限拒绝、原回执和
+重启不重复派发。执行时需要
+`PYTHONPATH=mission/src:integrations/robonix-task`，并显式传入 `--controller`、
+`--node`、`--output` 新目录。它验证观察器接线，不替代真实 MI 模型或机器人验收。
+
+已有 task profile 允许额外携带 `expected_posture="standing"` 或 `"down"`，
+其作用是冻结 RG 的目标验收声明。`profile` 必须仍与部署完全一致，其余未知参数
+继续拒绝；本地完整 objective 和原 Task/session identity 保持原样传给 Robonix。
+此元数据不增加本机动作、重试或停止权限。完整配置与 Unknown 行为见
+[MI 姿态观察器说明](../../mission/README.md)。
