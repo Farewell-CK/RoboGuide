@@ -62,6 +62,7 @@ def test_compound_greeting_is_not_swallowed_as_local_greeting(tmp_path: Path) ->
     try:
         result = session.ask("你好，查节点")
         assert "模型解释" in result
+        assert isinstance(session.reader, ObservedController)
         assert "inventory" in session.reader.reads
     finally:
         session.store.close()
@@ -124,7 +125,7 @@ def test_provider_timeout_keeps_current_host_facts(tmp_path: Path) -> None:
     transport = TimeoutAfterRead()
     session = _session(tmp_path, transport)
     try:
-        result = session.ask("当前有几个节点？")
+        result = session.ask("帮我详细介绍这次返回的节点情况")
         assert "节点" in result
         assert "解释未完成" in result
         assert session.evidence[0]["complete"] is True
@@ -150,4 +151,86 @@ def test_large_complete_read_keeps_bounded_projection_and_source_completeness() 
     assert result.status == "complete"
     assert result.evidence[0]["complete"] is True
     assert result.evidence[0]["text_truncated"] is True
-    assert "结果超过模型证据上限" not in result.evidence[0]["text"]
+    assert "结果超过模型证据上限" not in str(result.evidence[0]["text"])
+
+
+def test_model_active_intent_uses_current_missions_once_and_needs_no_followup(
+    tmp_path: Path,
+) -> None:
+    """Paraphrased activity questions route to the mission projection rather than inventory."""
+    transport = ScriptedTransport(
+        [{"queries": [descriptor("active_missions")], "answer": "", "citations": []}]
+    )
+    controller = ObservedController()
+    session = _session(tmp_path, transport, controller)
+    try:
+        result = session.ask("帮我看看集群里还有哪些 Mission 没结束？")
+        assert controller.reads == ["missions"]
+        assert len(transport.payloads) == 1
+        assert "m1" in result and session.query_status == "complete"
+    finally:
+        session.store.close()
+
+
+def test_partial_component_availability_survives_large_evidence_projection() -> None:
+    """Bounding model context must retain the useful subread when another source is missing."""
+    transport = ScriptedTransport(
+        [
+            {"queries": [descriptor("explain", value="m")], "answer": "", "citations": []},
+            {"queries": [], "answer": "不可用", "citations": []},
+        ]
+    )
+    returned = ReadResult(
+        "任务证据" * 10_000,
+        False,
+        ({"source": "mission", "complete": True}, {"source": "bindings", "complete": False}),
+    )
+    result = EvidenceConversation(router(transport)).answer("解释 m", {}, [], lambda *_: returned)
+    assert result.status == "partial"
+    assert result.evidence[0]["complete"] is False
+    assert result.evidence[0]["has_complete_component"] is True
+
+
+def test_common_inventory_question_needs_only_one_current_read(tmp_path: Path) -> None:
+    """The daily node-count/capability question works even when the Provider is unavailable."""
+    controller = ObservedController()
+    session = _session(tmp_path, ScriptedTransport([]), controller)
+    try:
+        result = session.ask("当前接入了几个节点，各自有什么能力？")
+        assert controller.reads == ["inventory"]
+        assert session.router is None and session.query_status == "complete"
+        assert "2 个" in result and "依据：[E1]" in result
+    finally:
+        session.store.close()
+
+
+def test_model_mission_list_preserves_incomplete_source_status(tmp_path: Path) -> None:
+    """The model path must keep the same Unknown evidence as the direct Mission read."""
+
+    class MissingLifecycle(ObservedController):
+        def missions(self) -> JSONObject:
+            return {
+                "schema": "roboguide.state-query/v0.1",
+                "records": [
+                    {
+                        "object": {"object_type": "mission", "object_id": "missing"},
+                        "channel_id": "accepted-plan",
+                        "value": {"objective": "巡检"},
+                    }
+                ],
+            }
+
+    transport = ScriptedTransport(
+        [
+            {"queries": [descriptor("missions")], "answer": "", "citations": []},
+            {"queries": [], "answer": "任务正在运行 [E1]", "citations": ["E1"]},
+        ]
+    )
+    session = _session(tmp_path, transport, MissingLifecycle())
+    try:
+        answer = session.ask("列出任务情况")
+        assert session.evidence[0]["complete"] is False
+        assert session.query_status != "complete"
+        assert "模型解释" not in answer and "Unknown" in answer
+    finally:
+        session.store.close()

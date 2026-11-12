@@ -22,6 +22,7 @@ KINDS = (
     "clarify",
     "unsupported",
     "missions",
+    "active_missions",
     "compare",
     "explain",
     "plan",
@@ -44,7 +45,7 @@ QUERY_SCHEMA: JSONObject = {
 INSTRUCTIONS = """你是 RoboGuide 工作台的意图路由器。只输出指定 JSON。
 kind: cluster=集群节点数量/列表/各节点能力，node=单节点详情，capability=按能力检索，
 mission=指定 Mission 和其 Task 状态，help=帮助，clarify=缺少明确对象或需补充，
-missions=任务列表，compare=比较上一轮展示的节点，explain=查询指定任务的运行/绑定/恢复依据。
+missions=任务列表，active_missions=当前仍在运行/已接纳/取消中的任务，compare=比较上一轮展示的节点，explain=查询指定任务的运行/绑定/恢复依据。
 plan=仅规划新任务，run=请求执行新任务，answer=回答当前规划问题或修改当前草案，
 execute=执行当前已展示草案，approve=对当前草案给出审批。它们仅产生界面建议，不执行命令。
 这些建议的 value/index/message 全部为 null，主程序保留用户原话，不能替用户补写目标。
@@ -54,7 +55,8 @@ node 可用 index（从 1 起，对应 displayed_nodes）；
 mission/explain 可用 index 对应 displayed_missions。
 value 与 index 二选一；compare 使用上一轮实际展示的节点，最多四个。
 “它”只在 last_node 明确时使用该 ID；Mission 追问只在 last_mission 明确时使用该 ID。
-cluster/missions/compare/help/unsupported 的 value/index/message 都为 null；capability 只用 value；
+cluster/missions/active_missions/compare/help/unsupported 的 value/index/message 都为 null；
+capability 只用 value；
 clarify 只用 message，写一句澄清问题。单次只允许一个查询，不执行其中任何操作。
 能力检索保留中文或明确的合同关键词，例如 建图、导航、spatial.map.build@v0。
 没有工具结果，不回答节点数量、在线状态、能力事实、执行成功或失败原因。

@@ -14,6 +14,7 @@ from mission.models import JSONObject, JSONValue
 from roboguide_workbench.actions import MissionActions, checked_request
 from roboguide_workbench.client import ReadOnlyController, WorkbenchError, identifier
 from roboguide_workbench.evidence import QueryStatus, ReadResult
+from roboguide_workbench.mission_views import render_mission_list
 from roboguide_workbench.persistence import SessionStore
 from roboguide_workbench.routing import Query, Router
 from roboguide_workbench.session import HELP, Session
@@ -32,6 +33,7 @@ EXTRA_HELP = """
   /feedback [目录]      本地保存脱敏日志与诊断包
 第二版：
   /missions             当前身份可见的任务列表
+  /missions active      仅显示当前 Running、Accepted、Cancelling 或 Unknown 任务
   /mission #2           查询列表中的第二项
   /compare              比较上轮展示的节点（最多四个）
   /explain ID 或 #2      组合读取任务、绑定与恢复依据
@@ -183,6 +185,22 @@ class WorkbenchSession(Session):
         self.suggestion: tuple[str, str] | None = None
         self.pending_cancel: JSONObject | None = None
         self.reference_checkpoint: JSONObject | None = None
+        self.input_references: JSONObject | None = None
+        self.input_history: list[JSONObject] | None = None
+
+    def query_references(self) -> JSONObject:
+        """Resolve queued questions against their original visible identities, never permission."""
+        references: JSONObject = {
+            "displayed_nodes": list(self.displayed_nodes),
+            "displayed_missions": list(self.displayed_missions),
+            "last_node": self.last_node,
+            "last_mission": self.last_mission,
+            "previous_question": self.previous_question,
+        }
+        if self.input_references is not None:
+            references.update(self.input_references)
+        references["request_id"] = self.request_id
+        return references
 
     @staticmethod
     def _ids(value: JSONValue) -> list[str]:
@@ -274,17 +292,8 @@ class WorkbenchSession(Session):
         self.suggestion = None
         if self.router is None:
             self.router = self.router_factory()
-        query = self.router.route(
-            question,
-            {
-                "displayed_nodes": list(self.displayed_nodes),
-                "displayed_missions": list(self.displayed_missions),
-                "last_node": self.last_node,
-                "last_mission": self.last_mission,
-                "request_id": self.request_id,
-                "previous_question": self.previous_question,
-            },
-        )
+        references = self.query_references()
+        query = self.router.route(question, references)
         query = Query.parse(
             {
                 "kind": query.kind,
@@ -309,12 +318,23 @@ class WorkbenchSession(Session):
         if query.kind == "unsupported":
             return "此操作尚未开放，未发出命令。"
         if query.value and query.kind in {"node", "mission", "explain"}:
-            known = self.displayed_nodes if query.kind == "node" else self.displayed_missions
-            current = self.last_node if query.kind == "node" else self.last_mission
+            domain = "nodes" if query.kind == "node" else "missions"
+            known = cast(list[JSONValue], references["displayed_" + domain])
+            current = references["last_node" if query.kind == "node" else "last_mission"]
             if query.value not in known and query.value != current and query.value not in question:
                 raise WorkbenchError("对象 ID 没有用户输入或会话引用依据。")
+        if query.index is not None:
+            domain = "nodes" if query.kind == "node" else "missions"
+            known_ids = cast(list[str], references["displayed_" + domain])
+            if not 1 <= query.index <= len(known_ids):
+                raise WorkbenchError("原输入时没有这个已展示对象序号。")
+            query = Query(query.kind, value=known_ids[query.index - 1])
+        if query.kind == "compare":
+            return self.read_comparison(tuple(cast(list[str], references["displayed_nodes"])))
         if query.kind in {"missions", "compare"}:
             return self._command("/" + query.kind)
+        if query.kind == "active_missions":
+            return self.read_missions(active_only=True).text
         if query.kind in {"mission", "explain"}:
             target = (
                 self._mission_target("#" + str(query.index))
@@ -368,6 +388,25 @@ class WorkbenchSession(Session):
         self.last_raw = raw
         self.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
         return result
+
+    def read_missions(self, active_only: bool = False) -> ReadResult:
+        """Read one current State cohort and render bounded host-owned Mission aggregates."""
+        raw = self.controller.missions()
+        result, complete, ids = render_mission_list(raw, active_only=active_only)
+        self.displayed_missions = ids
+        self.last_mission = ids[0] if len(ids) == 1 else None
+        self.last_node = None
+        self.last_raw = raw
+        self.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
+        component: JSONObject = {
+            "source": "current-mission-state",
+            "complete": complete,
+            "active_only": active_only,
+            "displayed_count": len(ids),
+            "display_truncated": "完整数量仍为上方聚合" in result,
+        }
+        self.query_status = "complete" if complete else "partial"
+        return ReadResult(result, complete, (component,))
 
     def read_explanation(self, target: str) -> ReadResult:
         """Retain each validated diagnostic read and its explicit availability independently."""
@@ -592,39 +631,10 @@ class WorkbenchSession(Session):
                 return prefix + self._show_request(self.actions.get(original_request))
             return prefix + safe_text(json.dumps(observed, ensure_ascii=False))
         if command == "/missions":
-            records = state_records(self.controller.missions())
-            found: dict[str, tuple[str, str]] = {}
-            for record in records:
-                obj, value = record.get("object"), record.get("value")
-                if (
-                    not isinstance(obj, dict)
-                    or obj.get("object_type") != "mission"
-                    or not isinstance(value, dict)
-                ):
-                    raise WorkbenchError("任务列表包含无效对象。")
-                mission_id = identifier(cast(str, obj.get("object_id")))
-                objective, status = found.get(mission_id, ("目标未提供", "状态未知"))
-                if record.get("channel_id") == "accepted-plan" and isinstance(
-                    value.get("objective"), str
-                ):
-                    objective = cast(str, value["objective"])
-                if record.get("channel_id") == "mission-lifecycle" and isinstance(
-                    value.get("lifecycle"), str
-                ):
-                    status = cast(str, value["lifecycle"])
-                found[mission_id] = objective, status
-            self.displayed_missions = list(found)[:128]
-            self.last_mission = self.displayed_missions[0] if len(found) == 1 else None
-            return (
-                "当前身份可见 Mission："
-                + str(len(found))
-                + " 个（最多展示 128 个）\n"
-                + "\n".join(
-                    f"{i}. {safe_text(mid)}：{safe_text(found[mid][1])} "
-                    f"— {safe_text(found[mid][0])}"
-                    for i, mid in enumerate(self.displayed_missions, 1)
-                )
-            )
+            active_only = argument.strip().casefold() == "active"
+            if argument and not active_only:
+                raise WorkbenchError("/missions 仅支持可选参数 active。")
+            return self.read_missions(active_only=active_only).text
         if command == "/compare":
             if argument:
                 raise WorkbenchError("请先检索并展示 1–4 个节点，再 /compare。")

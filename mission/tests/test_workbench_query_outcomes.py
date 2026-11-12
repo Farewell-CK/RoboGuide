@@ -336,7 +336,7 @@ def test_installed_natural_language_cli_has_truthful_exit_status(
                     "--session-dir",
                     str(tmp_path / "sessions"),
                     "--ask",
-                    "集群有几个节点？",
+                    "请根据当前集群证据解释节点数量",
                 ],
                 cwd=tmp_path,
                 capture_output=True,

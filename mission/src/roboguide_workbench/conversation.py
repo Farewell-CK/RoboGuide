@@ -14,6 +14,7 @@ from roboguide_workbench.answers import (
     bounded_history,
     host_read_answer,
     is_active_missions_question,
+    is_inventory_question,
     local_response,
 )
 from roboguide_workbench.client import WorkbenchError
@@ -60,22 +61,17 @@ class ConversationSession(WorkbenchSession):
             self.query_status = "complete"
             return direct
         if is_active_missions_question(question):
-            return self._read_active_missions()
+            return self._read_host_query(Query("active_missions"))
+        if is_inventory_question(question):
+            return self._read_host_query(Query("cluster"))
         if self.answer_mode == "facts":
             return super()._turn(question)
         if self.router is None:
             self.router = self.router_factory()
         if not isinstance(self.router, ResponsesRouter):
             return super()._turn(question)
-        references: JSONObject = {
-            "controller": self.controller.endpoint,
-            "displayed_nodes": list(self.displayed_nodes),
-            "displayed_missions": list(self.displayed_missions),
-            "last_node": self.last_node,
-            "last_mission": self.last_mission,
-            "request_id": self.request_id,
-            "previous_question": self.previous_question,
-        }
+        references = self.query_references()
+        references["controller"] = self.controller.endpoint
         if self.shown_draft:
             references["draft"] = {
                 key: self.shown_draft.get(key)
@@ -90,20 +86,19 @@ class ConversationSession(WorkbenchSession):
         def resolve(query: Query) -> Query:
             """Freeze this batch's typed references before its first read can change a list."""
             if query.kind == "compare":
-                comparison_targets[query] = tuple(self.displayed_nodes)
+                comparison_targets[query] = tuple(cast(list[str], references["displayed_nodes"]))
             if query.index is not None:
-                displayed = (
-                    self.displayed_nodes if query.kind == "node" else self.displayed_missions
-                )
+                domain = "nodes" if query.kind == "node" else "missions"
+                displayed = cast(list[str], references["displayed_" + domain])
                 if not 1 <= query.index <= len(displayed):
                     raise WorkbenchError("本批查询没有这个已展示对象序号。")
                 return replace(query, value=displayed[query.index - 1], index=None)
             if query.value and query.kind in {"node", "mission", "explain"}:
-                known = (
-                    [*self.displayed_nodes, self.last_node]
-                    if query.kind == "node"
-                    else [*self.displayed_missions, self.last_mission]
-                )
+                domain = "nodes" if query.kind == "node" else "missions"
+                known = [
+                    *cast(list[str], references["displayed_" + domain]),
+                    references["last_node" if query.kind == "node" else "last_mission"],
+                ]
                 if query.value not in known and query.value not in question:
                     raise WorkbenchError("对象 ID 没有当前问题或查询结果依据。")
             return query
@@ -119,8 +114,8 @@ class ConversationSession(WorkbenchSession):
                 result: str | ReadResult
                 if query.kind == "compare":
                     result = self.read_comparison(comparison_targets[query])
-                elif query.kind == "missions":
-                    result = self._command("/" + query.kind)
+                elif query.kind in {"missions", "active_missions"}:
+                    result = self.read_missions(active_only=query.kind == "active_missions")
                 elif query.kind == "explain":
                     result = self.read_explanation(query.value or "")
                 elif query.kind == "mission":
@@ -138,7 +133,9 @@ class ConversationSession(WorkbenchSession):
         ).answer(
             question,
             references,
-            bounded_history(self.store.data.get("messages")),
+            self.input_history
+            if self.input_history is not None
+            else bounded_history(self.store.data.get("messages")),
             read,
             resolve=resolve,
         )
@@ -163,19 +160,25 @@ class ConversationSession(WorkbenchSession):
             return "此问题尚未执行操作；使用 /help 查看支持范围。"
         return result.text
 
-    def _read_active_missions(self) -> str:
-        """Read the current active Mission projection once, without a model follow-up call."""
-        self.progress("正在读取 active_missions")
-        query = Query.parse(
-            {"kind": "active_missions", "value": None, "index": None, "message": None}
-        )
+    def _read_host_query(self, query: Query) -> str:
+        """Perform one obvious current read under the configured turn budget."""
+        self.progress("正在读取 " + query.kind)
+        original_timeout = self.controller.timeout
+        self.controller.timeout = min(original_timeout, self.turn_seconds)
         try:
-            result = host_read_answer(query, self.read_missions(active_only=True))
+            returned = (
+                self.read_missions(active_only=True)
+                if query.kind == "active_missions"
+                else self._execute(query)
+            )
+            result = host_read_answer(query, returned)
         except (ValueError, OSError, RuntimeError) as error:
             self.query_status = "failed"
-            return "当前运行任务读取失败，状态未知；未根据历史记录推断。\n原因：" + safe_text(
+            return "当前状态读取失败，状态未知；未根据历史记录推断。\n原因：" + safe_text(
                 str(error)
             )
+        finally:
+            self.controller.timeout = original_timeout
         self.query_status = result.status
         self.evidence = result.evidence
         evidence_log = self.store.data.get("context")

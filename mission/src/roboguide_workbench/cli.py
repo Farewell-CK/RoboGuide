@@ -231,11 +231,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"会话：{session_id}；恢复：--resume {session_id}", file=sys.stderr)
             display_question(session, arguments.ask)
             return 0 if session.query_status == "complete" else 2
-        print("RoboGuide · 对话工作台 v0.4")
-        print(f"会话：{session_id}；恢复：--resume {session_id}")
-        print(f"Controller：{safe_text(reader.endpoint)}")
-        print(f"tenant：{safe_text(reader.tenant or '由服务端身份确定')}")
-        print("查询、规划、执行共用此会话；/help 查看命令，/quit 退出。")
+        terminal_mode = not arguments.plain and sys.stdin.isatty() and sys.stdout.isatty()
+        if not terminal_mode:
+            print("RoboGuide · 对话工作台")
+            print(f"会话：{session_id}；恢复：--resume {session_id}")
+            print(f"Controller：{safe_text(reader.endpoint)}")
+            print(f"tenant：{safe_text(reader.tenant or '由服务端身份确定')}")
+            print("查询、规划、执行共用此会话；/help 查看命令，/quit 退出。")
         if arguments.resume:
             print(
                 "已恢复历史：Request="
@@ -244,7 +246,7 @@ def main(argv: list[str] | None = None) -> int:
                 + str(session.last_mission)
             )
             print("状态将重新查询，执行前需重新展示当前计划。")
-        if not arguments.plain and sys.stdin.isatty():
+        if terminal_mode:
             from roboguide_workbench.terminal import interactive as asynchronous_terminal
 
             return asyncio.run(asynchronous_terminal(session))

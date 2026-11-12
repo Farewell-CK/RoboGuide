@@ -118,15 +118,15 @@ def local_response(question: str) -> str | None:
     prompt = _normalized_prompt(question)
     if prompt in {"你好", "您好", "hello", "hi", "hey", "早上好", "晚上好"}:
         return (
-            "你好，我是 RoboGuide 对话工作台。\n"
-            "我可以帮你查询当前 Controller 可见的节点、节点能力和 Mission 状态；"
-            "需要执行或取消时会先展示并等待明确命令。"
+            "你好，我是 RoboGuide。\n"
+            "可以问我集群接入了哪些节点、各自有什么能力，或者当前有哪些任务在运行。"
+            "也可以一起制定任务计划。"
         )
     if prompt in {"你是谁", "你是誰", "你是做什么的", "你是干什么的", "whoareyou", "whatarerobo"}:
         return (
-            "我是 RoboGuide 的对话工作台，不是机器人本体或安全控制器。\n"
-            "我负责把你的问题转换为受限的只读查询，并展示 Controller 返回的当前证据；"
-            "我不会凭空声明节点、模型或物理状态。"
+            "我是 RoboGuide 的对话工作台，帮你了解集群、查询节点与任务状态，"
+            "以及制定和执行任务计划。\n"
+            "集群状态以当前 Controller 返回的结果为依据；执行和取消任务需要你明确确认。"
         )
     if prompt in {
         "你能做什么",
@@ -169,6 +169,31 @@ def is_active_missions_question(question: str) -> bool:
         "anyactivetasks",
         "showactivemissions",
         "listactivemissions",
+    }
+
+
+def is_inventory_question(question: str) -> bool:
+    """Recognize whole-turn inventory FAQs that need one current host read."""
+    return _normalized_prompt(question) in {
+        "有几个节点接入了我们集群",
+        "各个节点都有什么功能",
+        "各节点有什么能力",
+        "每个节点有什么能力",
+        "集群有哪些节点",
+        "当前有哪些节点",
+        "现在有哪些节点",
+        "集群接入了哪些节点",
+        "当前有几个节点",
+        "当前有多少节点",
+        "当前接入了几个节点",
+        "当前接入了多少节点",
+        "当前接入了几个节点各自有什么能力",
+        "当前有几个节点各自有什么能力",
+        "集群里有几个节点",
+        "集群有几个节点",
+        "howmanynodesareconnected",
+        "listnodes",
+        "showclusternodes",
     }
 
 
@@ -222,10 +247,16 @@ def _evidence_item(query: Query, returned: str | ReadResult, number: int) -> JSO
         item["text_truncated"] = True
     if structured.components:
         item["components"] = cast(JSONValue, list(structured.components))
+        item["has_complete_component"] = any(
+            component.get("complete") is True for component in structured.components
+        )
         # Component diagnostics are useful but must not inflate the Provider context beyond the
         # same bound. The source text above remains the independently bounded human projection.
         if len(json.dumps(item, ensure_ascii=False).encode("utf-8")) > _EVIDENCE_TEXT_BYTES:
-            item.pop("components", None)
+            item["components"] = [
+                {"source": component.get("source"), "complete": component.get("complete") is True}
+                for component in structured.components[:16]
+            ]
             item["components_truncated"] = True
     return item
 
@@ -234,7 +265,10 @@ def host_read_answer(query: Query, returned: str | ReadResult) -> AnswerResult:
     """Render one direct host read with a citation and no second model call."""
     item = _evidence_item(query, returned, 1)
     status: QueryStatus = "complete" if item["complete"] is True else "partial"
-    return AnswerResult(facts([item]), [item], status=status)
+    provenance = f"\n\n依据：[E1] · {item['received_at']}"
+    if status == "partial":
+        provenance += " · 来源不完整"
+    return AnswerResult(str(item["text"]) + provenance, [item], status=status)
 
 
 class EvidenceConversation:
@@ -360,6 +394,15 @@ class EvidenceConversation:
                     try:
                         returned = read(query, remaining)
                         evidence.append(_evidence_item(query, returned, len(evidence) + 1))
+                        if (
+                            query.kind == "active_missions"
+                            and len(parsed) == 1
+                            and len(evidence) == 1
+                        ):
+                            # This closed view already answers the entire activity query.  Its
+                            # host counts must not require another Provider request or a chase
+                            # through unrelated historical Mission details.
+                            return host_read_answer(query, returned)
                     except (ValueError, OSError) as error:
                         evidence.append(
                             {
@@ -376,6 +419,7 @@ class EvidenceConversation:
                 break
         available = any(
             item["complete"] is True
+            or item.get("has_complete_component") is True
             or any(
                 isinstance(component, dict) and component.get("complete") is True
                 for component in cast(list[JSONValue], item.get("components", []))
