@@ -1,0 +1,64 @@
+# Explicit operator-owned ENTITY_ID must match the accepted physical registry for NODE_ID.
+# Keep Node health/resources/execution facts on the original Node channels.
+[[local_systems]]
+id = "physical-observer"
+runtime_name = "robonix-reported-physical-facts"
+runtime_version = "v0.1"
+[local_systems.health]
+state_pointer = "/state"
+detail_pointer = "/detail"
+online = ["ONLINE"]
+degraded = ["DEGRADED"]
+offline = ["OFFLINE"]
+[local_systems.health.step]
+id = "physical-process-health"
+connection = "physical-observer-http"
+[local_systems.health.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/observer/health"
+
+[[connections]]
+id = "physical-observer-http"
+driver = "http"
+local_system = "physical-observer"
+endpoint = "http://127.0.0.1:18112"
+timeout_ms = 2500
+
+[[state_exports]]
+id = "physical-entity-reference"
+owner = "physical-observer"
+object_class = "world"
+object_type = "physical-entity-reference"
+object_id = "ENTITY_ID"
+semantic = "reported"
+payload_schema = "roboguide.world.physical-entity-reference/v0.1"
+interval_ms = 2000
+valid_for_ms = 10000
+value_pointer = ""
+[state_exports.step]
+id = "physical-reference"
+connection = "physical-observer-http"
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/world/entity-reference"
+
+[[state_exports]]
+id = "physical-observation"
+owner = "physical-observer"
+object_class = "world"
+object_type = "robot-physical-observation"
+object_id = "ENTITY_ID"
+semantic = "reported"
+payload_schema = "roboguide.world.robot-physical-observation/v0.1"
+interval_ms = 1000
+valid_for_ms = 5000
+value_pointer = ""
+[state_exports.step]
+id = "physical-report"
+connection = "physical-observer-http"
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/world/physical-observation"

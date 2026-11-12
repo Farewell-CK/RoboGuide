@@ -17,13 +17,23 @@ from robonix_task.chassis_state import ChassisStateObserver
 from robonix_task.host import inspect_host
 from robonix_task.observation_workers import ObservationWorkers
 from robonix_task.origin import OriginStore
+from robonix_task.physical_observation import entity_reference, physical_observation
 from robonix_task.position import annotate_mapping_age
 from robonix_task.protocol import Liaison
+from robonix_task.scene_targets import SceneTargetObserver
 from status_bridge import Status
 from status_bridge import handler_type as observer_handler
 
 
-def combined_handler(captures, observer, origins=None, node_id=None, chassis=None):
+def combined_handler(
+    captures,
+    observer,
+    origins=None,
+    node_id=None,
+    chassis=None,
+    physical_entity=None,
+    scene_targets=None,
+):
     """Keep the existing route implementations and disambiguate readiness paths."""
     camera = camera_handler(captures)
     state = observer_handler(observer)
@@ -40,7 +50,27 @@ def combined_handler(captures, observer, origins=None, node_id=None, chassis=Non
 
         def do_GET(self):
             """Select the module by the fixed Node workflow route."""
-            if self.path == "/v1/host/status":
+            if self.path.startswith("/v1/world/scene-targets"):
+                if self.path != "/v1/world/scene-targets":
+                    self.reply(404, {"error": "unknown Scene World route"})
+                elif scene_targets is None:
+                    self.reply(404, {"error": "Scene target profile disabled"})
+                else:
+                    self.reply(200, scene_targets.read())
+            elif self.path == "/v1/world/entity-reference":
+                if physical_entity is None:
+                    self.reply(404, {"error": "physical World profile disabled"})
+                else:
+                    self.reply(200, entity_reference(physical_entity))
+            elif self.path == "/v1/world/physical-observation":
+                if physical_entity is None:
+                    self.reply(404, {"error": "physical World profile disabled"})
+                else:
+                    value = annotate_mapping_age(snapshot(), time.time_ns())
+                    self.reply(200, physical_observation(value, physical_entity))
+            elif self.path.startswith("/v1/world/"):
+                self.reply(404, {"error": "unknown World route"})
+            elif self.path == "/v1/host/status":
                 if node_id is None:
                     self.reply(404, {"error": "host inspection profile disabled"})
                 else:
@@ -145,7 +175,10 @@ def main():
     parser.add_argument("--origin-node-id")
     parser.add_argument("--node-id")
     parser.add_argument("--chassis-state", action="store_true")
+    parser.add_argument("--physical-entity")
     args = parser.parse_args()
+    if args.physical_entity is not None:
+        entity_reference(args.physical_entity)
     if (args.origin_root is None) != (args.origin_node_id is None):
         parser.error("origin-root and origin-node-id must be supplied together")
 
@@ -183,6 +216,11 @@ def main():
         server = Server(args.port, pilot)
         try:
             observer = Status(args.codegen)
+            scene_targets = (
+                SceneTargetObserver(args.physical_entity, args.node_id)
+                if args.physical_entity is not None and args.node_id is not None
+                else None
+            )
             chassis = ChassisStateObserver() if args.chassis_state else None
             if chassis is not None:
                 cleanup.callback(chassis.close)
@@ -196,11 +234,24 @@ def main():
             if origins is not None:
                 cleanup.callback(origins.close)
             server.RequestHandlerClass = combined_handler(
-                captures, observer, origins, args.node_id, chassis
+                captures,
+                observer,
+                origins,
+                args.node_id,
+                chassis,
+                args.physical_entity,
+                scene_targets,
             )
             server.timeout = 0.5
+
+            def sample_sensors():
+                """Sample sensors and optional Scene data without blocking chassis reads."""
+                observer.sample()
+                if scene_targets is not None:
+                    scene_targets.sample()
+
             workers = ObservationWorkers(
-                observer.sample, chassis.sample if chassis is not None else None, stopping
+                sample_sensors, chassis.sample if chassis is not None else None, stopping
             )
             cleanup.callback(workers.close)
             workers.start()

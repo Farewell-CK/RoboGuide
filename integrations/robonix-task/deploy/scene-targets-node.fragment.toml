@@ -1,0 +1,20 @@
+# Append after physical-world-node.fragment.toml; it owns physical-observer and its connection.
+# Replace ENTITY_ID with this Node's explicit accepted physical entity route.
+[[state_exports]]
+id = "scene-targets"
+owner = "physical-observer"
+object_class = "world"
+object_type = "scene-targets"
+object_id = "ENTITY_ID"
+semantic = "reported"
+payload_schema = "roboguide.world.scene-targets/v0.2"
+interval_ms = 2000
+valid_for_ms = 5000
+value_pointer = ""
+[state_exports.step]
+id = "scene-targets"
+connection = "physical-observer-http"
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/world/scene-targets"
