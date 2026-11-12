@@ -404,6 +404,14 @@ class MissionRequestStore:
                 "SELECT document_json FROM mission_requests WHERE request_id = ?",
                 (record.request_id,),
             ).fetchone()
+            if prior is not None:
+                original = _restore_record(json.loads(str(prior[0])))
+                if (original.submission_intent is None) != (record.submission_intent is None) or (
+                    original.submission_intent is not None
+                    and record.submission_intent is not None
+                    and original.submission_intent.mode != record.submission_intent.mode
+                ):
+                    raise MissionRequestError("original submission mode is immutable")
             if provenance is not None:
                 try:
                     validate_snapshot(provenance)
@@ -486,6 +494,7 @@ class MissionRequestStore:
                     "Blocked",
                     "NeedsClarification",
                     "AwaitingApproval",
+                    "AwaitingExecution",
                 }:
                     # Preserve the complete prior review/failure/POST boundary
                     # in the same transaction before an explicit command replaces it.

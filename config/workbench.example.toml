@@ -1,0 +1,20 @@
+# Copy to a private local configuration and supply actual deployment values.
+# Paths resolve relative to this file. CLI flags override this profile.
+[workbench]
+controller = "http://127.0.0.1:8080"
+mission_service = "http://127.0.0.1:8070"
+timeout = 5
+mission_timeout = 60
+config = "mission.toml"
+session_dir = "../var/workbench/sessions"
+answer_mode = "grounded"
+tool_limit = 4
+call_limit = 3
+turn_seconds = 60
+# tenant = "team-a"
+# ca = "tls/controller-ca.pem"
+# client_cert = "tls/operator.pem"
+# client_key = "tls/operator.key"
+# mission_ca = "tls/mission-ca.pem"
+# mission_client_cert = "tls/mission-submitter.pem"
+# mission_client_key = "tls/mission-submitter.key"

@@ -4,6 +4,21 @@
 为入口：main 保存已验证基线，dev 用于日常开发；实验始终冻结各自代码与配置。
 下文整改验收和历史开发分支按其原时点阅读，不代表另有一份待合并的最新实现。
 
+## 对话查询工作台
+
+第三版增加带引用的证据解释、连续对话、轻量异步终端和后台任务跟踪，详见
+[v0.3 使用与验收](docs/development/conversation-workbench-v0.3.md)。直接查询和显式执行入口保持可用。
+
+对话工作台 [v0.4](docs/development/conversation-workbench-v0.4.md) 增加首次/全局配置、
+状态栏、会话管理、执行前检查、明确取消和本地反馈包。安装后用 `roboguide init` 配置，
+以后在任意目录运行 `roboguide chat`；`/cancel` 先展示目标，再显式确认。
+
+`uv run roboguide chat` 启动终端对话，查询节点、能力和 Mission/Task 状态；第二版增加
+会话恢复、任务列表/跟踪和 `/plan`、`/run`、`/execute`。仅规划约束由 Mission Service
+持久保存，执行绑定已展示版本，风险审批保持独立。自然语言操作先展示明确选项。
+连接、mTLS、用法和验证范围见[第二版说明](docs/development/conversation-workbench-v0.2.md)；
+[第一版记录](docs/development/conversation-workbench-v0.1.md)保留原验收范围。
+
 ## 当前整改状态 · 2026-10-26
 
 通用非发布整改的功能实现与本地组合验收已完成，该阶段开发使用分支

@@ -75,6 +75,7 @@ from mission.submission_evidence import (
     ControllerSubmissionEvidence,
     canonical_plan_digest,
 )
+from mission.submission_intent import SubmissionIntent
 
 
 class IdGenerator(Protocol):
@@ -216,8 +217,9 @@ class MissionRequestEngine:
         finally:
             startup_lease.close()
 
-    def create(self, instruction: str) -> MissionRequestRecord:
+    def create(self, instruction: str, submission_mode: str | None = None) -> MissionRequestRecord:
         """Create internal identities and drive a new instruction until its first stable state."""
+        intent = SubmissionIntent(submission_mode) if submission_mode is not None else None
         instruction = instruction.strip()
         if not instruction:
             raise MissionRequestError("instruction must be nonblank text")
@@ -236,6 +238,7 @@ class MissionRequestEngine:
                     ),
                 ),
                 lifecycle=MissionRequestLifecycle.RECEIVED,
+                submission_intent=intent,
                 assessment=None,
                 plan=None,
                 grounding_context=None,
@@ -431,6 +434,11 @@ class MissionRequestEngine:
                 )
             updated = self._update(
                 record,
+                submission_intent=(
+                    SubmissionIntent(record.submission_intent.mode)
+                    if record.submission_intent
+                    else None
+                ),
                 dialogue=(
                     *record.dialogue,
                     self._clarification_answer(record, text, question_id),
@@ -448,6 +456,32 @@ class MissionRequestEngine:
                 recovery_evidence=None,
             )
             return self._process(updated)
+
+    def execute(
+        self, request_id: str, draft_revision: int, draft_digest: str
+    ) -> MissionRequestRecord:
+        """Authorize only the displayed current draft, retaining independent risk approval."""
+        with self._locked_request(request_id):
+            record = self.get(request_id)
+            if (
+                record.lifecycle is not MissionRequestLifecycle.AWAITING_EXECUTION
+                or record.submission_intent is None
+                or record.submission_intent.mode != "draft_only"
+                or record.plan is None
+                or type(draft_revision) is not int
+                or record.draft_revision != draft_revision
+                or record.draft_digest != draft_digest
+                or canonical_plan_digest(record.plan.to_json()) != draft_digest
+            ):
+                raise MissionRequestError(
+                    "execute requires the exact currently displayed waiting draft"
+                )
+            self._assert_deliberation_configuration(record, require_original=True)
+            record = self._update(
+                record,
+                submission_intent=SubmissionIntent("draft_only", draft_revision, draft_digest),
+            )
+            return self._advance_admitted_draft(record)
 
     def approve(
         self, request_id: str, draft_revision: int, draft_digest: str
@@ -632,6 +666,11 @@ class MissionRequestEngine:
             record = self._update(
                 record,
                 lifecycle=MissionRequestLifecycle.INTERPRETING,
+                submission_intent=(
+                    SubmissionIntent(record.submission_intent.mode)
+                    if record.submission_intent
+                    else None
+                ),
                 submission_evidence=None,
                 admission_evidence=None,
                 failure_evidence=None,
@@ -897,6 +936,11 @@ class MissionRequestEngine:
         return self._update(
             record,
             lifecycle=MissionRequestLifecycle.DRAFTED,
+            submission_intent=(
+                SubmissionIntent(record.submission_intent.mode)
+                if record.submission_intent
+                else None
+            ),
             assessment=assessment,
             plan=plan,
             draft_revision=revision,
@@ -1058,6 +1102,15 @@ class MissionRequestEngine:
         if assessment is None:
             raise MissionRequestError("approved request has no grounded intent assessment")
         decision = self._approval_policy.evaluate(plan, assessment.grounded_intent())
+        if record.submission_intent is not None and not record.submission_intent.permits(
+            record.draft_revision, record.draft_digest
+        ):
+            return self._update(
+                record,
+                lifecycle=MissionRequestLifecycle.AWAITING_EXECUTION,
+                approval_required=decision.required,
+                approval_reasons=decision.matched_rule_ids,
+            )
         if decision.required:
             return self._update(
                 record,
@@ -1070,6 +1123,12 @@ class MissionRequestEngine:
     def _submit(self, record: MissionRequestRecord) -> MissionRequestRecord:
         """Submit the current complete plan and reduce the receipt to a stable request state."""
         self._assert_deliberation_configuration(record, require_original=True)
+        if record.submission_intent is not None and not record.submission_intent.permits(
+            record.draft_revision, record.draft_digest
+        ):
+            raise MissionRequestError(
+                "submission requires original intent or an exact execute grant"
+            )
         plan = record.plan
         if plan is None:
             raise MissionRequestError("cannot submit a request without a MissionPlan")
@@ -1505,10 +1564,14 @@ class MissionRequestEngine:
         recovery_evidence: RequestRecoveryEvidence | None | _Unset = _UNSET,
         admission_evidence: ControllerAdmissionEvidence | None | _Unset = _UNSET,
         deployment_recovery: DeploymentRecoverySession | None | _Unset = _UNSET,
+        submission_intent: SubmissionIntent | None | _Unset = _UNSET,
     ) -> MissionRequestRecord:
         """Persist one immutable state replacement with a fresh update timestamp."""
         updated = replace(
             record,
+            submission_intent=record.submission_intent
+            if isinstance(submission_intent, _Unset)
+            else submission_intent,
             deployment_recovery=record.deployment_recovery
             if isinstance(deployment_recovery, _Unset)
             else deployment_recovery,
@@ -1614,6 +1677,10 @@ class MissionRequestEngine:
             return record.recovery_evidence.stage is FailureStage.CONTROLLER_SUBMISSION
         if record.submission_evidence is not None:
             return True
+        if record.submission_intent is not None and not record.submission_intent.permits(
+            record.draft_revision, record.draft_digest
+        ):
+            return False
         failure = record.failure_evidence
         if failure is not None and (
             failure.get("request_id") == record.request_id

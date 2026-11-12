@@ -152,6 +152,7 @@ and LocalSystem remain distinct identities even when they share a process or mac
 
 | Responsibility | Authority | Implementation |
 | --- | --- | --- |
+| Conversation Workbench | Scoped evidence explanations, durable sessions and background Mission watch; explicit user actions enter Mission Service through plan-only/submission intent and original approval gates, with installed setup, scoped session navigation, preflight, explicit cancel and local feedback, without Control authority (ADR-0232/0233/0234) | [workbench](../../../mission/src/roboguide_workbench/) |
 | Mission Intelligence | Original Request/Dialogue/Grounding, drafts, independent Review, bounded Repair, approval and submission reconciliation; model outputs are candidates | [mission](../../../mission/src/mission/) |
 | Orchestration | Complete-plan admission, DAG readiness, logical dispatch priority, Task satisfaction, Mission lifecycle, holds and plan history | [orchestration](../../../core/orchestration/src/) |
 | Control | Eligibility, resources/calendar, Group membership, Actor/Role binding, tenant quota, recovery and explicit takeover decisions | [control](../../../core/control/src/) |

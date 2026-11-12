@@ -2,9 +2,13 @@
 name = "mission-intelligence"
 version = "0.1.0"
 requires-python = ">=3.13,<3.14"
-dependencies = ["pyyaml>=6.0.2"]
+dependencies = [
+    "prompt-toolkit>=3.0.50,<4",
+    "pyyaml>=6.0.2",
+]
 
 [project.scripts]
+roboguide = "roboguide_workbench.cli:main"
 mission = "mission.cli:main"
 mission-service = "mission.api:main"
 mission-runtime-replanner = "mission.runtime_replanning_cli:main"
@@ -18,7 +22,7 @@ build-backend = "hatchling.build"
 package = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["mission/src/mission", "evaluation/src/roboguide_eval"]
+packages = ["mission/src/mission", "mission/src/roboguide_workbench", "evaluation/src/roboguide_eval"]
 
 [dependency-groups]
 dev = [

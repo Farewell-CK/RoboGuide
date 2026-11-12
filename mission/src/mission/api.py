@@ -433,6 +433,22 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
             )
             return
         if path == "/v1/mission-requests":
+            if set(body) == {"schema_version", "instruction", "submission_mode"}:
+                if (
+                    body["schema_version"] != "roboguide.mission-request-create/v0.2"
+                    or not isinstance(body["instruction"], str)
+                    or body["submission_mode"] not in ("draft_only", "submit_when_ready")
+                ):
+                    self._send(
+                        HTTPStatus.BAD_REQUEST, {"error": "invalid explicit submission intent"}
+                    )
+                    return
+                self._run(
+                    lambda: self.server.engine.create(body["instruction"], body["submission_mode"]),
+                    HTTPStatus.CREATED,
+                    body,
+                )
+                return
             if set(body) != {"instruction"} or not isinstance(body["instruction"], str):
                 self._send(
                     HTTPStatus.BAD_REQUEST,
@@ -483,6 +499,23 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
             )
         elif command == "approve":
             self._approve(request_id, body)
+        elif command == "execute":
+            if (
+                set(body) != {"draft_revision", "draft_digest"}
+                or type(body.get("draft_revision")) is not int
+                or not isinstance(body.get("draft_digest"), str)
+            ):
+                self._send(
+                    HTTPStatus.BAD_REQUEST, {"error": "execute requires exact revision/digest"}
+                )
+                return
+            self._run(
+                lambda: self.server.engine.execute(
+                    request_id, cast(int, body["draft_revision"]), cast(str, body["draft_digest"])
+                ),
+                HTTPStatus.OK,
+                body,
+            )
         elif command == "retry" and not body:
             self._run(lambda: self.server.engine.retry(request_id), HTTPStatus.OK, body)
         elif command == "cancel" and not body:
@@ -945,6 +978,8 @@ class MissionRequestHttpServer(ThreadingHTTPServer):
         if method == "POST" and path == "/v1/mission-requests":
             return "submitter"
         if method == "POST" and path.endswith("/messages"):
+            return "submitter"
+        if method == "POST" and path.endswith("/execute"):
             return "submitter"
         if method == "POST" and path.endswith("/approve"):
             return "approver"

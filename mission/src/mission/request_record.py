@@ -19,6 +19,7 @@ from mission.submission_evidence import (
     MissionRequestObservations,
     canonical_plan_digest,
 )
+from mission.submission_intent import INTENT_REQUEST_SCHEMA, SubmissionIntent
 
 MISSION_REQUEST_SCHEMA = "roboguide.mission-request/v0.4"
 _COMPATIBLE_MISSION_REQUEST_SCHEMAS = {
@@ -26,6 +27,7 @@ _COMPATIBLE_MISSION_REQUEST_SCHEMAS = {
     "roboguide.mission-request/v0.2",
     "roboguide.mission-request/v0.3",
     MISSION_REQUEST_SCHEMA,
+    INTENT_REQUEST_SCHEMA,
 }
 
 
@@ -43,6 +45,7 @@ class MissionRequestLifecycle(StrEnum):
     REVIEWING = "Reviewing"
     REPAIRING = "Repairing"
     AWAITING_APPROVAL = "AwaitingApproval"
+    AWAITING_EXECUTION = "AwaitingExecution"
     SUBMITTING = "Submitting"
     ACCEPTED = "Accepted"
     BLOCKED = "Blocked"
@@ -219,9 +222,33 @@ class MissionRequestRecord:
     recovery_evidence: RequestRecoveryEvidence | None = None
     admission_evidence: ControllerAdmissionEvidence | None = None
     deployment_recovery: DeploymentRecoverySession | None = None
+    submission_intent: SubmissionIntent | None = None
 
     def __post_init__(self) -> None:
         """Reject a snapshot detached from the request or its captured dialogue revision."""
+        intent = self.submission_intent
+        if (
+            intent is not None
+            and intent.revision is not None
+            and (
+                intent.revision != self.draft_revision
+                or intent.digest != self.draft_digest
+                or self.plan is None
+                or canonical_plan_digest(self.plan.to_json()) != intent.digest
+            )
+        ):
+            raise MissionRequestError("execution grant is detached from its original draft")
+        if (
+            intent is not None
+            and not intent.permits(self.draft_revision, self.draft_digest)
+            and (
+                self.submission_evidence is not None
+                or self.admission_evidence is not None
+                or self.lifecycle
+                in {MissionRequestLifecycle.SUBMITTING, MissionRequestLifecycle.ACCEPTED}
+            )
+        ):
+            raise MissionRequestError("submission lacks original intent or exact draft grant")
         recovery = self.recovery_evidence
         session = self.deployment_recovery
         if session is not None:
@@ -303,7 +330,14 @@ class MissionRequestRecord:
     def to_json(self) -> JSONObject:
         """Serialize the versioned status projection returned by the Mission Request API."""
         return {
-            "schema_version": MISSION_REQUEST_SCHEMA,
+            "schema_version": INTENT_REQUEST_SCHEMA
+            if self.submission_intent
+            else MISSION_REQUEST_SCHEMA,
+            **(
+                {"submission_intent": self.submission_intent.to_json()}
+                if self.submission_intent
+                else {}
+            ),
             "request_id": self.request_id,
             "mission_id": self.mission_id,
             "dialogue": [turn.to_json() for turn in self.dialogue],
@@ -347,6 +381,16 @@ class MissionRequestRecord:
             or schema_version not in _COMPATIBLE_MISSION_REQUEST_SCHEMAS
         ):
             raise MissionRequestError("unsupported Mission Request schema")
+        try:
+            submission_intent = (
+                SubmissionIntent.from_json(value.get("submission_intent"))
+                if schema_version == INTENT_REQUEST_SCHEMA
+                else None
+            )
+        except ValueError as error:
+            raise MissionRequestError(str(error)) from error
+        if schema_version != INTENT_REQUEST_SCHEMA and "submission_intent" in value:
+            raise MissionRequestError("legacy Request cannot carry submission intent")
         request_id = _required_text(value, "request_id")
         mission_id = _required_text(value, "mission_id")
         lifecycle_text = _required_text(value, "lifecycle")
@@ -361,18 +405,26 @@ class MissionRequestRecord:
         plan = (
             None if plan_value is None else MissionPlan.from_json(_json_object(plan_value, "plan"))
         )
-        if schema_version == MISSION_REQUEST_SCHEMA and "grounding_context" not in value:
+        if (
+            schema_version in {MISSION_REQUEST_SCHEMA, INTENT_REQUEST_SCHEMA}
+            and "grounding_context" not in value
+        ):
             raise MissionRequestError("Mission Request v0.4 must carry grounding_context")
         context_value = value.get("grounding_context")
         grounding_context = (
             GroundingContextSnapshot.from_json(context_value)
-            if schema_version == MISSION_REQUEST_SCHEMA and context_value is not None
+            if schema_version in {MISSION_REQUEST_SCHEMA, INTENT_REQUEST_SCHEMA}
+            and context_value is not None
             else None
         )
         draft_revision = _required_integer(value, "draft_revision")
         created_at_ms = _required_integer(value, "created_at_ms")
         updated_at_ms = _required_integer(value, "updated_at_ms")
-        if schema_version in {"roboguide.mission-request/v0.3", MISSION_REQUEST_SCHEMA}:
+        if schema_version in {
+            "roboguide.mission-request/v0.3",
+            MISSION_REQUEST_SCHEMA,
+            INTENT_REQUEST_SCHEMA,
+        }:
             dialogue_value = value.get("dialogue")
             if not isinstance(dialogue_value, list):
                 raise MissionRequestError("dialogue must be an array")
@@ -393,7 +445,8 @@ class MissionRequestRecord:
             raise MissionRequestError("approval_required must be a boolean")
         approval_reasons = (
             _text_array(value, "approval_reasons")
-            if schema_version in {"roboguide.mission-request/v0.3", MISSION_REQUEST_SCHEMA}
+            if schema_version
+            in {"roboguide.mission-request/v0.3", MISSION_REQUEST_SCHEMA, INTENT_REQUEST_SCHEMA}
             else ()
         )
         try:
@@ -404,12 +457,13 @@ class MissionRequestRecord:
             "roboguide.mission-request/v0.2",
             "roboguide.mission-request/v0.3",
             MISSION_REQUEST_SCHEMA,
+            INTENT_REQUEST_SCHEMA,
         }:
             repair_attempts = _required_integer(value, "repair_attempts")
             history_value = value.get("review_history")
             if not isinstance(history_value, list):
                 raise MissionRequestError("review_history must be an array")
-            if schema_version == MISSION_REQUEST_SCHEMA and any(
+            if schema_version in {MISSION_REQUEST_SCHEMA, INTENT_REQUEST_SCHEMA} and any(
                 not isinstance(attempt, dict) or "grounding_context_digest" not in attempt
                 for attempt in history_value
             ):
@@ -436,6 +490,7 @@ class MissionRequestRecord:
         return cls(
             request_id=request_id,
             mission_id=mission_id,
+            submission_intent=submission_intent,
             dialogue=dialogue,
             lifecycle=lifecycle,
             assessment=assessment,

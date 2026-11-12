@@ -5,6 +5,10 @@
 Integration Server。可修复 Review issue 进入最多两次自动 Repair；需要新用户事实的问题返回
 `NeedsClarification`。它不选择 Node、不创建 Group，也不维护权威执行生命周期。
 
+显式 [Request v0.5](../../contracts/mission/request-v0.5/README.md) 额外保留用户提交意图：
+`draft_only` 在 Review 后等待 `AwaitingExecution`，精确版本 `/execute` 后才可继续原审批/提交链。
+`submit_when_ready` 按原策略推进。原 v0.4 请求继续保持原行为；旧服务拒绝新版 create 字段和存量。
+
 恢复决定在独立 observations v0.3 中按类型、draft/context digest 持久化。提交超时、
 非法 receipt 或重启中断后，原 Request 的 `/retry` 只查询原 Mission 一次，保留原错误，
 不重新 POST 或调用模型。发送前保存实际 HTTP body 指纹；Controller 的 `/admission`
