@@ -96,11 +96,21 @@ def validate_legacy(root: Path) -> None:
             raise ValueError(
                 "legacy Artifact contains an unknown or retained-owner generation marker"
             )
-    real_directory(root / "blobs")
-    real_directory(root / "blobs/sha256")
+    _validate_legacy_blobs(root)
     real_directory(root / "staging")
     if not stat.S_ISREG((root / ".writer.lock").lstat().st_mode):
         raise ValueError("legacy Artifact requires its actual regular writer lease")
+
+
+def _validate_legacy_blobs(root: Path) -> None:
+    """Accept lazy empty legacy CAS without concealing unknown children or following links."""
+    blobs = real_directory(root / "blobs")
+    # The original backend creates sha256 only on its first upload. Absence means
+    # genuinely empty blobs, never permission to skip a foreign or damaged layout.
+    for entry in blobs.iterdir():
+        if entry.name != "sha256":
+            raise ValueError("legacy Artifact blobs contains an unknown child")
+        real_directory(entry)
 
 
 def supports(profile_schema: str) -> bool:
@@ -322,7 +332,7 @@ def validate_bundle(
         for entry in directory.iterdir():
             if entry.name not in {"blobs", "staging"}:
                 raise ValueError("legacy Artifact bundle contains hidden retained-owner authority")
-        real_directory(directory / "blobs/sha256")
+        _validate_legacy_blobs(directory)
         real_directory(directory / "staging")
         return
     for name in metadata_files(component, profile_schema):
