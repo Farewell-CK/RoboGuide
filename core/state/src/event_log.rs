@@ -69,20 +69,23 @@ pub use retention_references::RetentionDecisionReferences;
 mod retention_api;
 #[path = "retention_archive.rs"]
 mod retention_archive;
-pub use retention_archive::{ArchiveExpiryCoverage, ArchiveRelocationStatus, CommittedRetentionPolicyWitness, PreparedRetentionContentArchive, PublishedRetentionContentArchive};
-#[path = "telemetry_storage.rs"]
-mod telemetry_storage;
+pub use retention_archive::{
+    ArchiveExpiryCoverage, ArchiveRelocationStatus, CommittedRetentionPolicyWitness,
+    PreparedRetentionContentArchive, PublishedRetentionContentArchive,
+};
 #[path = "telemetry_metrics.rs"]
 mod telemetry_metrics;
-pub use telemetry_metrics::{
-    TELEMETRY_STORAGE_METRICS_SCHEMA, TelemetryStorageCounters, TelemetryStorageMetrics,
-};
+#[path = "telemetry_storage.rs"]
+mod telemetry_storage;
 pub use archive_operation::{ArchiveContent, ArchiveIntent, ArchiveRequest};
 pub use catalog_archive::CatalogRecoveryEvents;
 pub use retention::{
     MAX_RETENTION_INPUT_BYTES, RETENTION_INTERVAL_MS, RETENTION_POLICY_SCHEMA, RetentionBatch,
     RetentionMode, RetentionPin, RetentionPolicy, RetentionPolicyCommand, RetentionPolicyReceipt,
     RetentionPolicyState, RetentionProtection, RetentionStatus,
+};
+pub use telemetry_metrics::{
+    TELEMETRY_STORAGE_METRICS_SCHEMA, TelemetryStorageCounters, TelemetryStorageMetrics,
 };
 #[path = "timer_transaction.rs"]
 mod timer_transaction;
