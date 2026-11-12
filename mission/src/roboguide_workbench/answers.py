@@ -17,7 +17,18 @@ from roboguide_workbench.evidence import QueryStatus, ReadResult
 from roboguide_workbench.routing import QUERY_SCHEMA, Query, ResponsesRouter, extract_response
 from roboguide_workbench.views import safe_text
 
-READS = frozenset({"cluster", "node", "capability", "mission", "missions", "compare", "explain"})
+READS = frozenset(
+    {
+        "active_missions",
+        "cluster",
+        "node",
+        "capability",
+        "mission",
+        "missions",
+        "compare",
+        "explain",
+    }
+)
 ACTIONS = frozenset({"plan", "run", "answer", "execute", "approve"})
 ANSWER_SCHEMA: JSONObject = {
     "type": "object",
@@ -73,7 +84,8 @@ cast(JSONObject, cast(JSONObject, ANSWER_SCHEMA["properties"])["queries"])["item
 )
 INSTRUCTIONS = """你是 RoboGuide 的集群查询助手。输出指定 JSON。
 queries 是闭合查询描述（kind,value,index,message），只有实际需要读取时填写。
-只读 kind: cluster,node,capability,mission,missions,compare,explain。
+只读 kind: active_missions,cluster,node,capability,mission,missions,compare,explain。
+active_missions 只表示当前读取到的活动任务；不得从历史 completed/cancelled 记录推断活动状态。
 cluster 已包含全部节点的能力和合同；问“各节点有什么能力”只查 cluster。
 capability 仅用于筛选具体能力，例如 compute 或 建图，不用“节点能力”这样的泛称。
 node/mission/explain 的 value 是原始 ID，或 index 是 displayed 对象从1开始的序号；二选一。
@@ -85,8 +97,103 @@ capability 用 value 关键词。其它查询参数均 null。compare 比较当�
 help/unsupported/clarify 可单独返回。不得改写用户目标，不调用任意URL或shell。
 最终解释放 answer，引用 evidence 的 id 放 citations；用 [E1] 格式对应事实。
 queries 非空时 answer 必须为空。无证据不得给出事实回答，改用查询或澄清。
-history 中的旧解释不是真实证据；当前状态必须依据本轮 evidence。用简洁中文回答。
+history 中的旧解释不是真实证据；当前状态必须依据本轮 evidence。
+text_truncated=true 时只能依据显示出来的摘要回答。用简洁中文回答。
 """
+
+_EVIDENCE_TEXT_BYTES = 24_000
+
+
+def _normalized_prompt(question: str) -> str:
+    """Normalize only whitespace/case and common punctuation for anchored local intents."""
+    return re.sub(r"[\s\u3000，。！？!?、；;：:]", "", question.casefold())
+
+
+def local_response(question: str) -> str | None:
+    """Answer low-risk conversational turns before any router or Provider is built.
+
+    Matching is deliberately whole-turn and exact after light normalization. In particular,
+    ``你好，查节点`` remains a normal compound question and is never swallowed as a greeting.
+    """
+    prompt = _normalized_prompt(question)
+    if prompt in {"你好", "您好", "hello", "hi", "hey", "早上好", "晚上好"}:
+        return (
+            "你好，我是 RoboGuide 对话工作台。\n"
+            "我可以帮你查询当前 Controller 可见的节点、节点能力和 Mission 状态；"
+            "需要执行或取消时会先展示并等待明确命令。"
+        )
+    if prompt in {"你是谁", "你是誰", "你是做什么的", "你是干什么的", "whoareyou", "whatarerobo"}:
+        return (
+            "我是 RoboGuide 的对话工作台，不是机器人本体或安全控制器。\n"
+            "我负责把你的问题转换为受限的只读查询，并展示 Controller 返回的当前证据；"
+            "我不会凭空声明节点、模型或物理状态。"
+        )
+    if prompt in {
+        "你能做什么",
+        "你可以做什么",
+        "有什么功能",
+        "你会什么",
+        "你能干什么",
+        "你支持哪些功能",
+        "能做什么",
+        "帮助",
+        "help",
+        "commands",
+        "whatcanyoudo",
+        "whatcanroboguidedo",
+    }:
+        return (
+            "我可以：\n"
+            "- 查询当前可见节点及其能力\n"
+            "- 查询 Mission 和当前活动任务\n"
+            "- 根据本轮证据解释状态，并保留引用\n"
+            "- 展示计划、反馈包和会话帮助；涉及执行或取消时需要明确命令。\n"
+            "输入 /help 查看全部命令。"
+        )
+    return None
+
+
+def is_active_missions_question(question: str) -> bool:
+    """Recognize only unambiguous whole-turn active-task questions for one host read."""
+    return _normalized_prompt(question) in {
+        "当前有没有正在运行的任务",
+        "当前有正在运行的任务吗",
+        "现在有任务在跑吗",
+        "现在有没有任务在跑",
+        "正在执行哪些任务",
+        "当前运行的任务",
+        "列出当前运行任务",
+        "当前活动任务",
+        "whattasksarerunning",
+        "listrunningtasks",
+        "anyactivetasks",
+        "showactivemissions",
+        "listactivemissions",
+    }
+
+
+def _bounded_text(value: str, limit: int = _EVIDENCE_TEXT_BYTES) -> tuple[str, bool]:
+    """Keep a bounded human-readable projection while preserving both ends of host output."""
+    if len(value.encode("utf-8")) <= limit:
+        return value, False
+    marker = "\n…中间证据已省略；仅显示首尾摘要…\n"
+    available = max(limit - len(marker.encode("utf-8")), 2)
+    head_budget = available * 3 // 4
+    tail_budget = available - head_budget
+
+    def fit(text: str, budget: int, from_end: bool = False) -> str:
+        selected: list[str] = []
+        total = 0
+        values = reversed(text) if from_end else iter(text)
+        for char in values:
+            size = len(char.encode("utf-8"))
+            if total + size > budget:
+                break
+            selected.append(char)
+            total += size
+        return "".join(reversed(selected)) if from_end else "".join(selected)
+
+    return fit(value, head_budget) + marker + fit(value, tail_budget, True), True
 
 
 @dataclass(frozen=True)
@@ -97,6 +204,37 @@ class AnswerResult:
     evidence: list[JSONObject]
     proposal: Query | None = None
     status: QueryStatus = "complete"
+
+
+def _evidence_item(query: Query, returned: str | ReadResult, number: int) -> JSONObject:
+    """Build a bounded evidence record without turning a large display into unavailable data."""
+    structured = returned if isinstance(returned, ReadResult) else ReadResult(returned)
+    text, truncated = _bounded_text(structured.text)
+    item: JSONObject = {
+        "id": f"E{number}",
+        "query": json.dumps([query.kind, query.value, query.index]),
+        "received_at": datetime.now(UTC).isoformat(),
+        "complete": structured.complete,
+        "scope": "configured-controller/current-identity",
+        "text": text,
+    }
+    if truncated:
+        item["text_truncated"] = True
+    if structured.components:
+        item["components"] = cast(JSONValue, list(structured.components))
+        # Component diagnostics are useful but must not inflate the Provider context beyond the
+        # same bound. The source text above remains the independently bounded human projection.
+        if len(json.dumps(item, ensure_ascii=False).encode("utf-8")) > _EVIDENCE_TEXT_BYTES:
+            item.pop("components", None)
+            item["components_truncated"] = True
+    return item
+
+
+def host_read_answer(query: Query, returned: str | ReadResult) -> AnswerResult:
+    """Render one direct host read with a citation and no second model call."""
+    item = _evidence_item(query, returned, 1)
+    status: QueryStatus = "complete" if item["complete"] is True else "partial"
+    return AnswerResult(facts([item]), [item], status=status)
 
 
 class EvidenceConversation:
@@ -219,32 +357,20 @@ class EvidenceConversation:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise WorkbenchError("本轮时间预算已耗尽。")
-                    item: JSONObject = {
-                        "id": f"E{len(evidence) + 1}",
-                        "query": key,
-                        "received_at": datetime.now(UTC).isoformat(),
-                        "complete": True,
-                        "scope": "configured-controller/current-identity",
-                    }
                     try:
                         returned = read(query, remaining)
-                        structured = (
-                            returned if isinstance(returned, ReadResult) else ReadResult(returned)
-                        )
-                        value = structured.text
-                        item["complete"] = structured.complete
-                        if structured.components:
-                            item["components"] = cast(JSONValue, list(structured.components))
-                        if len(value.encode()) > 24000:
-                            item.pop("components", None)
-                            item.update(
-                                {"complete": False, "text": "结果超过模型证据上限，请缩小查询。"}
-                            )
-                        else:
-                            item["text"] = value
+                        evidence.append(_evidence_item(query, returned, len(evidence) + 1))
                     except (ValueError, OSError) as error:
-                        item.update({"complete": False, "text": safe_text(str(error))})
-                    evidence.append(item)
+                        evidence.append(
+                            {
+                                "id": f"E{len(evidence) + 1}",
+                                "query": key,
+                                "received_at": datetime.now(UTC).isoformat(),
+                                "complete": False,
+                                "scope": "configured-controller/current-identity",
+                                "text": safe_text(str(error)),
+                            }
+                        )
             except (ValueError, OSError, RuntimeError) as error:
                 failure = safe_text(str(error))
                 break

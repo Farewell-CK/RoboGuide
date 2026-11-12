@@ -9,7 +9,13 @@ from typing import cast
 
 from mission.models import JSONObject, JSONValue
 
-from roboguide_workbench.answers import EvidenceConversation, bounded_history
+from roboguide_workbench.answers import (
+    EvidenceConversation,
+    bounded_history,
+    host_read_answer,
+    is_active_missions_question,
+    local_response,
+)
 from roboguide_workbench.client import WorkbenchError
 from roboguide_workbench.evidence import ReadResult
 from roboguide_workbench.routing import Query, ResponsesRouter
@@ -41,11 +47,22 @@ class ConversationSession(WorkbenchSession):
             return safe_text(
                 json.dumps(self.shown_draft.get("plan"), ensure_ascii=False, indent=2)
             ).replace("\\u000a", "\n")
-        if question.startswith("/") or self.answer_mode == "facts":
+        if question.startswith("/"):
             if question == "/reset":
                 self.evidence = []
             return super()._turn(question)
         self.suggestion = None
+        # Keep basic conversation independent of Provider credentials and Controller reachability.
+        # The full-turn matcher intentionally leaves compound requests (for example,
+        # ``你好，查节点``) to the evidence router.
+        direct = local_response(question)
+        if direct is not None:
+            self.query_status = "complete"
+            return direct
+        if is_active_missions_question(question):
+            return self._read_active_missions()
+        if self.answer_mode == "facts":
+            return super()._turn(question)
         if self.router is None:
             self.router = self.router_factory()
         if not isinstance(self.router, ResponsesRouter):
@@ -144,6 +161,26 @@ class ConversationSession(WorkbenchSession):
             if proposal.kind == "clarify":
                 return "需要补充：" + safe_text(proposal.message or "")
             return "此问题尚未执行操作；使用 /help 查看支持范围。"
+        return result.text
+
+    def _read_active_missions(self) -> str:
+        """Read the current active Mission projection once, without a model follow-up call."""
+        self.progress("正在读取 active_missions")
+        query = Query.parse(
+            {"kind": "active_missions", "value": None, "index": None, "message": None}
+        )
+        try:
+            result = host_read_answer(query, self.read_missions(active_only=True))
+        except (ValueError, OSError, RuntimeError) as error:
+            self.query_status = "failed"
+            return "当前运行任务读取失败，状态未知；未根据历史记录推断。\n原因：" + safe_text(
+                str(error)
+            )
+        self.query_status = result.status
+        self.evidence = result.evidence
+        evidence_log = self.store.data.get("context")
+        if isinstance(evidence_log, dict):
+            evidence_log["last_evidence"] = cast(JSONValue, result.evidence)
         return result.text
 
     def checkpoint(self) -> None:
