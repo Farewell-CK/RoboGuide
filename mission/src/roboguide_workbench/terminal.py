@@ -340,7 +340,7 @@ async def interactive(session: WorkbenchSession) -> int:
             flush=True,
         )
         print(
-            "  查询集群、了解节点能力，或一起制定任务计划。\n",
+            "  直接输入，开始对话。\n",
             file=output,
             flush=True,
         )

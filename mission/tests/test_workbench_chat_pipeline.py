@@ -24,12 +24,14 @@ def _session(
     """Compose a private session whose Provider transport is fully deterministic."""
     store = SessionStore(tmp_path / "sessions", "chat", {}, False)
     reader = controller or ObservedController()
-    return ConversationSession(
+    session = ConversationSession(
         reader,
         lambda: router(transport),  # type: ignore[arg-type]
         store,
         MissionActions(reader, store),
     )
+    session.answer_mode = "legacy"
+    return session
 
 
 def test_greeting_and_identity_do_not_build_router_or_read_controller(tmp_path: Path) -> None:
@@ -42,6 +44,7 @@ def test_greeting_and_identity_do_not_build_router_or_read_controller(tmp_path: 
         store,
         MissionActions(controller, store),
     )
+    session.answer_mode = "legacy"
     try:
         assert "RoboGuide" in session.ask("你好")
         assert "对话工作台" in session.ask("你是谁？")

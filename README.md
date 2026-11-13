@@ -83,6 +83,13 @@ MI 新增显式宿主目标草案格式：见 [ADR-0255](docs/decisions/0255-hos
 连接、mTLS、用法和验证范围见[第二版说明](docs/development/conversation-workbench-v0.2.md)；
 [第一版记录](docs/development/conversation-workbench-v0.1.md)保留原验收范围。
 
+当前默认对话入口使用[Agent Loop](docs/development/conversation-workbench-agent-loop-design-2026-11-13.md)：
+`你好`、`谢谢`等普通聊天由模型直接自然回复；只有需要当前节点、能力或 Mission 事实时，
+模型才调用宿主校验过的只读工具。自然语言操作只生成待确认建议，仍须 `/choose`、`/request`
+和 `/execute` 走原有审批边界。需要旧版结构化查询兼容行为时可显式使用
+`roboguide chat --answer-mode legacy`；`--output-format stream-json --ask "问题"` 提供单次
+调用的机器可读事件。
+
 真机接入的专题设计见 [ADR-0231 两类接入与本机任务委派](docs/decisions/0231-local-eaios-and-device-integration.md)。
 该提案以验证 RG 的任务、调度、执行与恢复为目标，区分已有具身操作系统的参与者和
 设备参与者。[Robonix 本机任务模块](integrations/robonix-task/README.md)与显式部署目录

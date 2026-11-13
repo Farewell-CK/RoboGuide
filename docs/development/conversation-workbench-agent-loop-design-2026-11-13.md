@@ -1,6 +1,6 @@
 # RoboGuide Chat Agent Loop 设计 · 2026-11-13
 
-状态：调研设计稿，尚未实现或合入 `main`。
+状态：已实现于隔离分支，尚未合入或推送 `main`；本文同时保留设计、边界和验收记录。
 
 ## 结论
 
@@ -175,3 +175,17 @@ turn.failed
 ## 不变的边界
 
 这次设计只改变对话 orchestration 和用户体验，不改变 Controller、Mission、Node、存储、mTLS、物理 authority、原始 outcome、Unknown 语义或审批权限。AgentLoop 负责让模型自然判断是否需要工具；宿主仍然负责事实、权限、写入和最终记录。
+
+## 实现验收 · 2026-11-13
+
+实现位于隔离分支 `feat/chat-agent-loop-20261113`，当前未合入 `main`。新增
+`AgentConversation`、`ReadToolAdapter` 和安装入口验收脚本；默认 `roboguide chat` 使用
+`agent`，`legacy` 作为显式兼容模式，`grounded` 保持可解析并进入 Agent Loop。
+
+离线安装 wheel 的实际 PTY 验收保存在
+`/tmp/rg-agent-acceptance-final-current-20261113/summary.json`：普通聊天 4 轮均为
+0 次 Controller GET，节点/任务查询各只产生 1 次只读 GET，Provider 工具回合均返回自然文本，
+不可用状态保持 Unknown，操作建议确认前为 0 次写入；队列、`/feedback` 本地 ZIP 和 `/resume`
+均通过。该 Controller 是 loopback 合成夹具，不代表真实设备、物理停止、跨主机连续性或长期
+SLO。受影响 workbench 测试为 481 项通过，Ruff、strict mypy、函数文档检查和 wheel 内容核对
+通过。

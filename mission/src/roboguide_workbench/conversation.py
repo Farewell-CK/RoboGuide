@@ -1,4 +1,4 @@
-"""Third-generation conversation composition over the unchanged explicit command owner."""
+"""Natural Responses conversations over host-owned reads and explicit Mission commands."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from typing import cast
 
 from mission.models import JSONObject, JSONValue
 
+from roboguide_workbench.agent_loop import AgentConversation
+from roboguide_workbench.agent_tools import ReadToolAdapter
 from roboguide_workbench.answers import (
     EvidenceConversation,
     bounded_history,
@@ -27,7 +29,8 @@ from roboguide_workbench.workspace import WorkbenchSession
 class ConversationSession(WorkbenchSession):
     """Keep grounded explanations separate from authoritative Mission commands and approvals."""
 
-    answer_mode = "grounded"
+    answer_mode = "agent"
+    evidence: list[JSONObject]
     tool_limit = 4
     call_limit = 3
     turn_seconds = 60.0
@@ -53,6 +56,85 @@ class ConversationSession(WorkbenchSession):
                 self.evidence = []
             return super()._turn(question)
         self.suggestion = None
+        if self.answer_mode in {"agent", "grounded"}:
+            return self._agent_turn(question)
+        return self._legacy_turn(question)
+
+    def _agent_turn(self, question: str) -> str:
+        """Let the model reply or choose read tools; no natural text grants write permission."""
+        self.evidence = []
+        if self.router is None:
+            self.router = self.router_factory()
+        if not isinstance(self.router, ResponsesRouter):
+            # Explicit injected legacy routers retain their protocol; actual Responses
+            # providers never silently downgrade when a native request fails.
+            return super()._turn(question)
+        references = self.query_references()
+        references["controller"] = self.controller.endpoint
+        if self.shown_draft:
+            references["draft"] = {
+                key: self.shown_draft.get(key)
+                for key in ("draft_revision", "draft_digest", "lifecycle", "assessment")
+            }
+        history = (
+            self.input_history
+            if self.input_history is not None
+            else bounded_history(self.store.data.get("messages"))
+        )
+        adapter = ReadToolAdapter(self, question, references)
+        self.progress("正在思考")
+        result = AgentConversation(
+            self.router, tools=self.tool_limit, calls=self.call_limit, seconds=self.turn_seconds
+        ).answer(
+            question,
+            adapter.references,
+            history,
+            adapter.read,
+            tool_definitions=adapter.definitions(),
+            progress=self.progress,
+        )
+        self.query_status, self.evidence = result.status, result.evidence
+        self._retain_agent_turn(question, result.items)
+        if result.proposal is not None:
+            self.suggestion = (result.proposal.kind, question)
+            options = (
+                "/choose plan 仅规划；/choose run 开始执行流程"
+                if result.proposal.kind in {"plan", "run"}
+                else "/choose " + result.proposal.kind
+            )
+            return "我会先保留你的原始要求，等待你确认下一步。\n" + options
+        text = result.text
+        if result.evidence:
+            summary = adapter.reference_summary(result.evidence)
+            if summary:
+                text += "\n\n" + summary
+            adapter.publish(result.evidence)
+        return text
+
+    def _retain_agent_turn(self, question: str, items: list[JSONObject]) -> None:
+        """Keep bounded public tool transcripts as historical audit data without permissions."""
+        context = self.store.data.get("context")
+        if not isinstance(context, dict):
+            return
+        previous = context.get("agent_turns")
+        turns = list(previous) if isinstance(previous, list) else []
+        public = [item for item in items if item.get("type") != "reasoning"]
+        current: JSONObject = {"question": question, "items": cast(JSONValue, public)}
+        if len(json.dumps(current, ensure_ascii=False).encode()) > 48_000:
+            current = {
+                "question": question,
+                "items": [],
+                "omitted": "transcript exceeded audit limit",
+            }
+        turns.append(current)
+        while turns and (
+            len(turns) > 10 or len(json.dumps(turns, ensure_ascii=False).encode()) > 128_000
+        ):
+            turns.pop(0)
+        context["agent_turns"] = cast(JSONValue, turns)
+
+    def _legacy_turn(self, question: str) -> str:
+        """Retain the old query protocol only for an explicitly selected compatibility mode."""
         # Keep basic conversation independent of Provider credentials and Controller reachability.
         # The full-turn matcher intentionally leaves compound requests (for example,
         # ``你好，查节点``) to the evidence router.
@@ -190,9 +272,12 @@ class ConversationSession(WorkbenchSession):
         """Persist structured evidence with references through the sole foreground writer."""
         old_context = self.store.data.get("context")
         old_request = old_context.get("request_context") if isinstance(old_context, dict) else None
+        agent_turns = old_context.get("agent_turns") if isinstance(old_context, dict) else None
         super().checkpoint()
         context = self.store.data["context"]
         if isinstance(context, dict):
+            if agent_turns is not None:
+                context["agent_turns"] = agent_turns
             if hasattr(self, "evidence"):
                 context["last_evidence"] = cast(JSONValue, self.evidence)
             if self.request_id:

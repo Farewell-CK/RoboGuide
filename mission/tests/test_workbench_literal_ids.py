@@ -99,7 +99,7 @@ def query_session(
             {"queries": [query], "answer": "", "citations": []},
             {"queries": [], "answer": "任务状态见原始依据。[E1]", "citations": ["E1"]},
         ]
-        if answer_mode == "grounded"
+        if answer_mode == "legacy"
         else [query]
     )
     transport = ScriptedTransport(replies)
@@ -111,7 +111,7 @@ def query_session(
     return session
 
 
-@pytest.mark.parametrize("answer_mode", ["grounded", "facts"])
+@pytest.mark.parametrize("answer_mode", ["legacy", "facts"])
 @pytest.mark.parametrize("kind", ["mission", "explain"])
 @pytest.mark.parametrize("selector", ["value", "index"])
 @pytest.mark.parametrize("target", ["#1", " padded "])
@@ -131,7 +131,7 @@ def test_structured_mission_queries_keep_the_exact_discovered_id(
             assert reads.count(expected) == 1
             assert session.last_mission == target and session.query_status == "complete"
             assert f"Mission {target}：Running" in result
-            if answer_mode == "grounded":
+            if answer_mode == "legacy":
                 evidence = session.evidence[0]
                 assert json.loads(cast(str, evidence["query"])) == [kind, target, None]
                 assert evidence["complete"] is True
@@ -146,7 +146,7 @@ def test_structured_mission_queries_keep_the_exact_discovered_id(
 def test_direct_mission_ordinals_resolve_once_into_literal_ids(tmp_path: Path) -> None:
     """The direct CLI retains #N selection even when its selected ID itself starts with #."""
     with mission_reader(("other", "#1")) as (reader, reads):
-        session = query_session(tmp_path, reader, descriptor("mission", value="#1"), "grounded")
+        session = query_session(tmp_path, reader, descriptor("mission", value="#1"), "legacy")
         try:
             session.ask("/missions")
             assert "Mission other：Running" in session.ask("/mission #1")
@@ -156,7 +156,7 @@ def test_direct_mission_ordinals_resolve_once_into_literal_ids(tmp_path: Path) -
             session.store.close()
 
 
-@pytest.mark.parametrize("answer_mode", ["grounded", "facts"])
+@pytest.mark.parametrize("answer_mode", ["legacy", "facts"])
 def test_typed_mission_reads_do_not_relax_model_identity_scope(
     tmp_path: Path, answer_mode: str
 ) -> None:
@@ -167,7 +167,7 @@ def test_typed_mission_reads_do_not_relax_model_identity_scope(
         )
         try:
             session.ask("/missions")
-            if answer_mode == "grounded":
+            if answer_mode == "legacy":
                 assert "没有当前问题或查询结果依据" in session.ask("查看第二个任务的状态")
             else:
                 with pytest.raises(WorkbenchError, match="没有用户输入或会话引用依据"):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 import uuid
 from pathlib import Path
@@ -60,11 +61,20 @@ def parser() -> argparse.ArgumentParser:
         if name in {"chat", "doctor", "init"}:
             command.add_argument("--config", type=Path, default=Path("config/mission.toml"))
             command.add_argument("--plain", action="store_true")
-            command.add_argument("--answer-mode", choices=["grounded", "facts"], default="grounded")
+            command.add_argument(
+                "--answer-mode", choices=["agent", "grounded", "legacy", "facts"], default="agent"
+            )
             command.add_argument("--tool-limit", type=int, default=4)
             command.add_argument("--call-limit", type=int, default=3)
             command.add_argument("--turn-seconds", type=float, default=60)
             command.add_argument("--ask", help="执行一个问题后退出；支持 /nodes 等命令")
+            if name == "chat":
+                command.add_argument(
+                    "--output-format",
+                    choices=["text", "stream-json"],
+                    default="text",
+                    help="单次请求的文本或 JSON 事件输出；stream-json 需要 --ask",
+                )
             if name == "init":
                 command.add_argument("--base-url", help="Responses 兼容模型服务地址")
                 command.add_argument("--model", help="对话模型名称")
@@ -190,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             if arguments.command == "chat":
                 session.answer_mode = arguments.answer_mode
-                if session.answer_mode not in {"grounded", "facts"}:
+                if session.answer_mode not in {"agent", "grounded", "legacy", "facts"}:
                     raise WorkbenchError("未知 answer_mode。")
                 session.tool_limit = arguments.tool_limit
                 session.call_limit = arguments.call_limit
@@ -227,9 +237,17 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         assert isinstance(session, ConversationSession)
+        if arguments.output_format == "stream-json" and arguments.ask is None:
+            raise WorkbenchError("stream-json 需要配合 --ask 使用。")
         if arguments.ask is not None:
             print(f"会话：{session_id}；恢复：--resume {session_id}", file=sys.stderr)
-            display_question(session, arguments.ask)
+            if arguments.output_format == "stream-json":
+                session.progress = lambda message: print(
+                    json.dumps({"type": "turn.phase", "message": message}, ensure_ascii=False),
+                    flush=True,
+                )
+                print(json.dumps({"type": "turn.started", "session_id": session_id}), flush=True)
+            display_question(session, arguments.ask, output_format=arguments.output_format)
             return 0 if session.query_status == "complete" else 2
         terminal_mode = not arguments.plain and sys.stdin.isatty() and sys.stdout.isatty()
         if not terminal_mode:
@@ -338,7 +356,9 @@ def interactive(session: Session) -> int:
         discard_confirmation(session)
 
 
-def display_question(session: Session, question: str, prefix: str = "") -> None:
+def display_question(
+    session: Session, question: str, prefix: str = "", *, output_format: str = "text"
+) -> None:
     """Acknowledge a plain or one-shot result only after a complete write and actual flush."""
     if isinstance(session, WorkbenchSession):
         from roboguide_workbench.sessions import navigate
@@ -357,8 +377,24 @@ def display_question(session: Session, question: str, prefix: str = "") -> None:
     try:
         result = session.ask(question)
         turn.stage()
-        print(prefix + result, flush=True)
+        if output_format == "stream-json":
+            print(
+                json.dumps({"type": "assistant.completed", "text": result}, ensure_ascii=False),
+                flush=True,
+            )
+        else:
+            print(prefix + result, flush=True)
         turn.acknowledge()
+        if output_format == "stream-json":
+            print(
+                json.dumps(
+                    {
+                        "type": "turn.completed",
+                        "status": getattr(session, "query_status", "complete"),
+                    }
+                ),
+                flush=True,
+            )
     finally:
         turn.reject()
 

@@ -123,7 +123,7 @@ def write_configuration(
         "mission_service": mission_service,
         "config": "model.toml",
         "session_dir": str(global_state_directory() / "sessions"),
-        "answer_mode": "grounded",
+        "answer_mode": "agent",
         "tool_limit": 4,
         "call_limit": 3,
         "turn_seconds": 60,

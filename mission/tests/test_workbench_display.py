@@ -61,6 +61,8 @@ def workbench(
             store,
             MissionActions(ReadOnlyController(endpoint), store),
         )
+        if transport is not None:
+            session.answer_mode = "legacy"
         try:
             yield session, controller
         finally:

@@ -122,7 +122,7 @@ def test_context_dependent_input_is_not_reinterpreted_after_a_queued_refresh(tex
     assert terminal._is_queueable(text) is False
 
 
-@pytest.mark.parametrize("mode", ["grounded", "facts"])
+@pytest.mark.parametrize("mode", ["legacy", "facts"])
 def test_queued_implicit_reference_keeps_the_original_visible_node(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
@@ -132,7 +132,7 @@ def test_queued_implicit_reference_keeps_the_original_visible_node(
             {"queries": [descriptor("node", value="a")], "answer": "", "citations": []},
             {"queries": [], "answer": "原节点 a 的能力见 [E1]", "citations": ["E1"]},
         ]
-        if mode == "grounded"
+        if mode == "legacy"
         else [descriptor("node", value="a")]
     )
     session = private_session(tmp_path, ReorderingController())
@@ -170,7 +170,7 @@ def test_queued_implicit_reference_keeps_the_original_visible_node(
         assert session.input_history is None
         supplied = json.loads(str(transport.payloads[0]["input"]))
         assert supplied["references"]["last_node"] == "a"
-        if mode == "grounded":
+        if mode == "legacy":
             assert all(row["text"] != "/node b" for row in supplied["history"])
         return "/quit"
 
