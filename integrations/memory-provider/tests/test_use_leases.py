@@ -1330,6 +1330,17 @@ def test_private_unix_endpoint_consumes_actual_file_and_queries_original_receipt
 ) -> None:
     """Check actual local sockets without inventing Controller or Node facts."""
     store, leases, request, invocation = prepared
+    preparation = json.loads(request["preparation_json"])
+    del preparation["invocation"]["execution_id"]
+    raw = canonical(preparation)
+    digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+    request["preparation_json"] = raw.decode()
+    request["control"]["preparation_digest"] = digest
+    invocation["memory_preparation"]["preparation_digest"] = digest
+    dispatch = {
+        "attempt_id": invocation["execution_id"],
+        "invocation": {key: value for key, value in invocation.items() if key != "execution_id"},
+    }
     jobs = ProcessFileJobs(store, leases)
     try:
         with tempfile.TemporaryDirectory(prefix="rg-memory-use-") as directory:
@@ -1341,6 +1352,16 @@ def test_private_unix_endpoint_consumes_actual_file_and_queries_original_receipt
                 admitted = unix_request(path, "/v1/memory-use/control", request, "POST")
                 observed = unix_request(path, "/v1/memory-use/query", request, "GET")
                 assert observed == {"receipt": admitted, "effective": True}
+                before_observation = list(leases._db.iterdump())
+                current = unix_request(path, "/v1/memory-use/current", dispatch, "GET")
+                assert current["lease_id"] == request["control"]["lease_id"]
+                assert current["execution_id"] == dispatch["attempt_id"]
+                assert current["generation"] == 1 and 0 < current["remaining_ms"] <= 30_000
+                changed = copy.deepcopy(dispatch)
+                changed["invocation"]["resource_ids"] = ["different-resource"]
+                with pytest.raises(ValueError, match="canonical dispatch"):
+                    leases.observe_current(changed)
+                assert list(leases._db.iterdump()) == before_observation
                 actual = unix_request(path, "/v1/file-jobs/compute", invocation, "POST")
                 assert actual["execution_id"] == invocation["execution_id"]
                 assert actual["state"] in {"RUNNING", "COMPLETED"}
@@ -1369,6 +1390,8 @@ def test_private_unix_endpoint_consumes_actual_file_and_queries_original_receipt
                 assert (
                     unix_request(path, "/v1/memory-use/query", request, "GET")["effective"] is False
                 )
+                with pytest.raises(ValueError, match="revoked"):
+                    leases.observe_current(dispatch)
                 assert unix_request(path, "/v1/file-jobs/compute", invocation, "POST") == actual
             finally:
                 server.shutdown()

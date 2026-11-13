@@ -13,12 +13,13 @@ import subprocess
 import sys
 import time
 import zipfile
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from . import occupancy, timing
+from . import timing
 from .contracts import Job, canonical, digest, integer
-from .geometry import code_digest, compute
+from .geometry import code_digest, compute, dependency_versions
 from .occupancy_contracts import OccupancyJob
 from .storage import immutable, read_json, read_source, save_json, snapshots, sync_directory
 
@@ -162,8 +163,28 @@ def observe(directory: Path) -> dict[str, Any]:
     }
 
 
-def run(request: dict[str, Any], source_root: Path, store: Path) -> dict[str, Any]:
-    """Admit once, freeze sources and retain the bounded worker outcome."""
+def run(
+    request: dict[str, Any],
+    source_root: Path,
+    store: Path,
+    *,
+    check_execution: Callable[[], object] | None = None,
+    worker_python: str | os.PathLike[str] | None = None,
+    worker_dependencies: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Admit once, freeze sources and retain the bounded worker outcome.
+
+    ``worker_python`` selects the independent native runtime.  The admission
+    process may run under another Python version, so the worker executable is
+    explicit whenever the package is not installed in the caller's runtime.
+    ``worker_dependencies`` binds that worker to exact native package versions.
+    """
+    worker_executable = sys.executable if worker_python is None else os.fspath(worker_python)
+    if not isinstance(worker_executable, str) or not worker_executable:
+        raise ValueError("native worker Python must be one explicit executable path")
+    declared_dependencies = (
+        None if worker_dependencies is None else dependency_versions(worker_dependencies)
+    )
     job = parse_job(request)
     store.mkdir(mode=0o700, parents=True, exist_ok=True)
     if store.is_symlink():
@@ -171,6 +192,8 @@ def run(request: dict[str, Any], source_root: Path, store: Path) -> dict[str, An
     lock = os.open(store / ".writer.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if check_execution is not None:
+            check_execution()
         directory = store / job.job_id
         directory.mkdir(mode=0o700, exist_ok=True)
         if directory.is_symlink():
@@ -196,11 +219,14 @@ def run(request: dict[str, Any], source_root: Path, store: Path) -> dict[str, An
         process: subprocess.Popen[bytes] | None = None
         interrupted = False
         try:
-            inputs = (
-                snapshots(job, source_root, directory)
-                if isinstance(job, Job)
-                else occupancy.snapshots(job, source_root, directory)
-            )
+            if isinstance(job, Job):
+                inputs = snapshots(job, source_root, directory)
+            else:
+                # Occupancy parsing/snapshot code is import-light; SciPy is
+                # loaded only by occupancy.compute in the native worker.
+                from . import occupancy
+
+                inputs = occupancy.snapshots(job, source_root, directory)
             if job.parent is not None:
                 parent = read_source(source_root, job.parent["path"], job.policy.max_output_bytes)
                 if digest(parent) != job.parent["content_digest"]:
@@ -214,6 +240,11 @@ def run(request: dict[str, Any], source_root: Path, store: Path) -> dict[str, An
                 directory / "started.json", {"request_digest": identity, "started_at_ms": now_ms()}
             )
             environment = os.environ.copy()
+            if worker_python is not None:
+                # The ROS caller may put its system packages ahead of the worker venv.
+                environment["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
+                environment["PYTHONNOUSERSITE"] = "1"
+                environment.pop("PYTHONHOME", None)
             environment.update(
                 {
                     "CUDA_VISIBLE_DEVICES": "",
@@ -226,25 +257,46 @@ def run(request: dict[str, Any], source_root: Path, store: Path) -> dict[str, An
                 (directory / "worker.stdout").open("xb") as output,
                 (directory / "worker.stderr").open("xb") as error,
             ):
+                if check_execution is not None:
+                    check_execution()
+                command = [
+                    worker_executable,
+                    "-m",
+                    "roboguide_spatial_provider",
+                    "--worker",
+                    str(directory),
+                ]
+                if declared_dependencies is not None:
+                    command.extend(
+                        ["--worker-dependencies", canonical(declared_dependencies).decode()]
+                    )
                 process = subprocess.Popen(
-                    [
-                        sys.executable,
-                        "-m",
-                        "roboguide_spatial_provider",
-                        "--worker",
-                        str(directory),
-                    ],
+                    command,
                     env=environment,
                     stdout=output,
                     stderr=error,
                     start_new_session=True,
                 )
-                try:
-                    process.wait(timeout=remaining)
-                except subprocess.TimeoutExpired as timeout_error:
-                    raise TimeoutError(
-                        "native spatial worker exhausted its original wall budget"
-                    ) from timeout_error
+                while True:
+                    remaining = timing.remaining(intent, now_ms(), job.policy.timeout_s)
+                    if remaining <= 0:
+                        raise TimeoutError(
+                            "native spatial worker exhausted its original wall budget"
+                        )
+                    try:
+                        process.wait(
+                            timeout=remaining if check_execution is None else min(remaining, 0.1)
+                        )
+                    except subprocess.TimeoutExpired as timeout_error:
+                        if check_execution is None:
+                            raise TimeoutError(
+                                "native spatial worker exhausted its original wall budget"
+                            ) from timeout_error
+                        check_execution()
+                    else:
+                        if check_execution is not None:
+                            check_execution()
+                        break
             result = observe(directory)
             if process.returncode != 0 and result["status"] != "completed":
                 result["reason"] = (
@@ -309,7 +361,10 @@ def run(request: dict[str, Any], source_root: Path, store: Path) -> dict[str, An
         os.close(lock)
 
 
-def worker(directory: Path) -> int:
+def worker(
+    directory: Path,
+    dependencies: Mapping[str, str] | None = None,
+) -> int:
     """Set hard process bounds before native imports and actual computation."""
     request = read_json(directory / "request.json")
     job = parse_job(request)
@@ -339,9 +394,13 @@ def worker(directory: Path) -> int:
     resource.setrlimit(resource.RLIMIT_FSIZE, (job.policy.max_output_bytes,) * 2)
     try:
         if isinstance(job, Job):
-            compute(directory)
+            compute(directory, dependencies=dependencies)
         else:
-            occupancy.compute(directory)
+            # SciPy and the other native dependencies are imported only after
+            # the child has installed its hard process limits.
+            from . import occupancy
+
+            occupancy.compute(directory, dependencies=dependencies)
         sync_directory(directory)
         return 0
     except Exception as error:
@@ -352,6 +411,19 @@ def worker(directory: Path) -> int:
         return 2
 
 
+def parse_worker_dependencies(value: str | None) -> dict[str, str] | None:
+    """Parse one explicit closed dependency declaration for CLI/worker propagation."""
+    if value is None:
+        return None
+    try:
+        declared = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise ValueError("worker dependency declaration is not JSON") from error
+    if not isinstance(declared, dict):
+        raise ValueError("worker dependency declaration is not an object")
+    return dependency_versions(declared)
+
+
 def main() -> None:
     """Run or observe file jobs without Node registration or localization authority."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -360,15 +432,26 @@ def main() -> None:
     parser.add_argument("--store", type=Path)
     parser.add_argument("--observe", type=Path)
     parser.add_argument("--worker", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--worker-dependencies", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    dependencies = parse_worker_dependencies(args.worker_dependencies)
     if args.worker is not None:
-        raise SystemExit(worker(args.worker))
+        raise SystemExit(worker(args.worker, dependencies))
     if args.observe is not None:
         print(canonical(observe(args.observe)).decode())
         return
     if args.request is None or args.source_root is None or args.store is None:
         parser.error("run requires --request, --source-root and --store")
-    print(canonical(run(read_json(args.request), args.source_root, args.store)).decode())
+    print(
+        canonical(
+            run(
+                read_json(args.request),
+                args.source_root,
+                args.store,
+                worker_dependencies=dependencies,
+            )
+        ).decode()
+    )
 
 
 if __name__ == "__main__":

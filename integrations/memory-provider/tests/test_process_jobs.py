@@ -1,27 +1,32 @@
-"""Actual child hashing, original wait proof, once-only replay and historical authority fences."""
+"""Actual child hashing/copy, wait proof, once-only replay and historical authority fences."""
 
 from __future__ import annotations
 
 import concurrent.futures
+import copy
 import hashlib
 import json
 import os
 import select
 import signal
 import sqlite3
+import stat
 import subprocess
 import sys
+import tempfile
 import time
-from collections.abc import Callable
+import uuid
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from roboguide_memory_provider.jobs import FileJobs
 from roboguide_memory_provider.process_jobs import ProcessFileJobs
-from roboguide_memory_provider.store import canonical
-from roboguide_memory_provider.use_leases import kernel_clock
+from roboguide_memory_provider.store import MemoryStore, canonical, original_content_digest
+from roboguide_memory_provider.use_leases import UseLeases, kernel_clock
 from test_jobs import declared_file
+from test_use_leases import prepared as use_lease_prepared
 
 
 def attempt(invocation: dict[str, Any]) -> dict[str, Any]:
@@ -51,6 +56,216 @@ def observations(jobs: ProcessFileJobs) -> list[dict[str, Any]]:
     assert isinstance(rows, list)
     assert all(isinstance(row, dict) for row in rows)
     return [dict(row) for row in rows]
+
+
+def worker_replies(reader: Any) -> Iterator[dict[str, Any]]:
+    """Yield bounded control replies without losing a coalesced pipe read."""
+    pending = b""
+    while True:
+        while b"\n" not in pending:
+            assert select.select([reader], [], [], 3)[0]
+            chunk = os.read(reader.fileno(), 16385)
+            assert chunk
+            pending += chunk
+        line, pending = pending.split(b"\n", 1)
+        assert len(line) <= 16383
+        message = json.loads(line)
+        assert isinstance(message, dict)
+        yield message
+
+
+def fresh_worker_permit() -> bytes:
+    """Freeze one same-kernel read interval for an actual direct worker test."""
+    boot, namespace, lower, _ = kernel_clock()
+    return (
+        canonical(
+            {
+                "boot_id": boot,
+                "time_namespace": namespace,
+                "received_lower_ms": lower,
+                "deadline_lower_ms": lower + 100,
+            }
+        )
+        + b"\n"
+    )
+
+
+def start_direct_worker(*descriptors: int) -> subprocess.Popen[bytes]:
+    """Start the real file worker with only the explicitly inherited descriptors."""
+    return subprocess.Popen(
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parents[1] / "roboguide_memory_provider/file_worker.py"),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        pass_fds=descriptors,
+        close_fds=True,
+        env={
+            "PATH": os.defpath,
+            "LANG": "C.UTF-8",
+            "ROBOGUIDE_FILE_WORKER_CPU_SECONDS": "30",
+            "ROBOGUIDE_FILE_WORKER_AS_BYTES": str(256 * 1024 * 1024),
+        },
+    )
+
+
+@pytest.fixture(name="prepared_use")
+def prepared_use_fixture(
+    tmp_path: Path,
+) -> Iterator[tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]]]:
+    """Reuse the actual import/use fixture before replacing its source with typed M."""
+    fixture = cast(
+        Callable[[Path], Iterator[tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]]]],
+        cast(Any, use_lease_prepared).__wrapped__,
+    )
+    yield from fixture(tmp_path)
+
+
+def typed_navigation(
+    prepared: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any], bytes, Path, str]:
+    """Build one exact navigation attempt with a typed occupancy M and live-use request."""
+    store, _, base_request, base_invocation = prepared
+    control = copy.deepcopy(base_request["control"])
+    payload = b"typed navigation M\n" * 1024
+    digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+    source = store.root.parent / f"typed-m-{uuid.uuid4().hex}.bin"
+    source.write_bytes(payload)
+    group, task, role = (
+        base_invocation["group_id"],
+        base_invocation["task_id"],
+        base_invocation["role_id"],
+    )
+    execution = (
+        "attempt-"
+        + "-".join(f"{len(value.encode('utf-8'))}:{value}" for value in (group, task, role))
+        + "-1"
+    )
+    map_id = "typed-m-" + uuid.uuid4().hex
+    task_ref = {"mission_id": base_invocation["mission_id"], "task_id": task}
+    typed = {
+        "schema": "roboguide.map-manifest/v0.2",
+        "map_id": map_id,
+        "revision_id": "root",
+        "producer_node_id": "unit-producer",
+        "producer_local_system_id": store.provider_id,
+        "producer_provider_id": store.provider_id,
+        "source_mission_id": base_invocation["mission_id"],
+        "source_execution_id": "unit-production-attempt",
+        "source_task_ref": task_ref,
+        "media_type": "application/vnd.roboguide.spatial-map",
+        "payload_schema": "roboguide.spatial-occupancy-map/v0.1",
+        "content_digest": digest,
+        "byte_size": len(payload),
+        "created_at_ms": 1,
+        "root_frame": "map",
+        "coordinate_convention": "ROS",
+        "spatial_anchor": {"kind": "fixed", "id": "unit-anchor"},
+    }
+    manifest = {
+        "schema": "roboguide.memory-manifest/v0.1",
+        "selector": {"memory_id": map_id, "revision_id": "root"},
+        "kind": "spatial",
+        "provider_id": store.provider_id,
+        "owner": {
+            "owner": "node",
+            "node_id": "unit-producer",
+            "local_system_id": store.provider_id,
+        },
+        "scope": {"kind": "global"},
+        "visibility": "exchangeable",
+        "payload_schema": typed["payload_schema"],
+        "media_type": typed["media_type"],
+        "artifact": {"content_digest": digest, "byte_size": len(payload)},
+        "source_mission_id": typed["source_mission_id"],
+        "source_execution_id": typed["source_execution_id"],
+        "source_task_ref": task_ref,
+        "created_at": 1,
+    }
+    import_id = uuid.uuid4().hex
+    original_invocation = {
+        "mission_id": base_invocation["mission_id"],
+        "group_id": group,
+        "task_id": task,
+        "role_id": role,
+        "execution_id": execution,
+        "import_id": import_id,
+        "command_id": "memory-import-" + import_id,
+        "consumer_provider_id": store.provider_id,
+        "manifest_json": canonical(manifest).decode(),
+        "memory_preparation_id": control["preparation_id"],
+        "session_id": control["source_session_id"],
+        "typed_map_manifest_json": canonical(typed).decode(),
+    }
+    original = {
+        "import_id": import_id,
+        "command_id": original_invocation["command_id"],
+        "provider_id": store.provider_id,
+        "provider_instance_id": store.instance_id,
+        "identity_digest": hashlib.sha256(canonical(original_invocation)).hexdigest(),
+        "provider_contract_digest": base_request["imports"][0]["provider_contract_digest"],
+        "original_invocation": original_invocation,
+        "admitted_at_ms": 1,
+        "original_content_digest": original_content_digest(original_invocation),
+    }
+    store.import_artifact(original, manifest, str(source))
+    inputs = [
+        {
+            "manifest": manifest,
+            "typed_map": typed,
+            "consumer": {"provider_id": store.provider_id},
+            "import_id": import_id,
+        }
+    ]
+    canonical_invocation = {
+        "mission_id": base_invocation["mission_id"],
+        "group_id": group,
+        "task_id": task,
+        "role_id": role,
+        "execution_id": execution,
+        "operation": "mobility.navigate@v1",
+        "parameters": {"destination": {"x_m": 1.0, "y_m": 2.0}},
+    }
+    preparation = {
+        "schema": "roboguide.memory-preparation/v0.2",
+        "preparation_id": control["preparation_id"],
+        "tenant_id": control["tenant_id"],
+        "group_id": group,
+        "execution_id": execution,
+        "node_id": control["node_id"],
+        "source_session_id": control["source_session_id"],
+        "registry_id": control["registry_id"],
+        "mission_id": base_invocation["mission_id"],
+        "task_id": task,
+        "role_id": role,
+        "inputs": inputs,
+        "invocation": canonical_invocation,
+    }
+    encoded = canonical(preparation)
+    preparation_digest = "sha256:" + hashlib.sha256(encoded).hexdigest()
+    control["execution_id"] = execution
+    control["preparation_digest"] = preparation_digest
+    request = {
+        "schema": base_request["schema"],
+        "control": control,
+        "preparation_json": encoded.decode(),
+        "imports": [original],
+        "receiver_budget": copy.deepcopy(base_request["receiver_budget"]),
+    }
+    invocation = {
+        **canonical_invocation,
+        "execution_generation": 1,
+        "memory_preparation": {
+            "preparation_id": control["preparation_id"],
+            "preparation_digest": preparation_digest,
+            "use_lease_id": control["lease_id"],
+            "tenant_id": control["tenant_id"],
+            "inputs": inputs,
+        },
+    }
+    return invocation, request, payload, source, execution
 
 
 def test_actual_file_child_exit_and_independent_hash_survive_restart(tmp_path: Path) -> None:
@@ -342,6 +557,280 @@ def test_original_process_budget_includes_real_admission_sql_wait(tmp_path: Path
     finally:
         jobs.close()
         store.close()
+
+
+def test_private_copy_returns_exact_anonymous_typed_m_descriptor(
+    prepared_use: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """One navigation attempt copies typed M under its original process authority."""
+    store, leases, _, _ = prepared_use
+    invocation, request, payload, source, execution = typed_navigation(prepared_use)
+    assert leases.apply(request)["status"] == "granted"
+    jobs = ProcessFileJobs(store, leases, max_job_seconds=30)
+    descriptor = -1
+    try:
+        descriptor, receipt = jobs.private_copy(invocation)
+        metadata = os.fstat(descriptor)
+        assert stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 0
+        assert metadata.st_size == len(payload)
+        assert os.read(descriptor, len(payload) + 1) == payload
+        assert receipt == {
+            "schema": "roboguide.file-private-copy-result/v0.1",
+            "execution_id": execution,
+            "backend_instance_id": store.instance_id,
+            "content_digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
+            "byte_size": len(payload),
+        }
+        assert not {"path", "bytes", "descriptor", "source"} & set(receipt)
+        outcome = jobs.status(execution)
+        assert outcome["state"] == "COMPLETED" and outcome["result"] == receipt
+        observation = observations(jobs)[0]
+        assert observation["terminal_state"] == "COMPLETED"
+        assert observation["process_exit"]["exit_code"] == 0
+        assert observation["process_exit"]["pid"] != os.getpid()
+        assert jobs.quota_evidence(execution)["kernel_proof"] is not None
+        source.unlink()
+        with pytest.raises(ValueError, match="cannot be replayed"):
+            jobs.private_copy(invocation)
+        assert jobs.status(execution) == outcome
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        jobs.close()
+
+
+def test_private_copy_refuses_non_navigation_or_untyped_m_before_admission(
+    prepared_use: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """The explicit entry point cannot become a generic hash or untyped file export."""
+    store, leases, _, _ = prepared_use
+    invocation, _, _, _, _ = typed_navigation(prepared_use)
+    jobs = ProcessFileJobs(store, leases)
+    try:
+        with pytest.raises(ValueError, match="mobility.navigate@v1"):
+            jobs.private_copy({**invocation, "operation": "compute.hash-files@v1"})
+        wrong_generation = copy.deepcopy(invocation)
+        wrong_generation["execution_generation"] = 2
+        with pytest.raises(ValueError, match="canonical attempt"):
+            jobs.private_copy(wrong_generation)
+        untyped = copy.deepcopy(invocation)
+        untyped["memory_preparation"]["inputs"][0]["typed_map"] = None
+        with pytest.raises(ValueError, match="typed spatial M"):
+            jobs.private_copy(untyped)
+        assert jobs._db.execute("SELECT COUNT(*) FROM process_jobs").fetchone() == (0,)
+        assert jobs._db.execute("SELECT COUNT(*) FROM original_processes").fetchone() == (0,)
+    finally:
+        jobs.close()
+
+
+def test_interrupted_private_copy_admission_remains_unknown_and_nonreplayable(
+    prepared_use: tuple[MemoryStore, UseLeases, dict[str, Any], dict[str, Any]],
+) -> None:
+    """A copied descriptor cannot be recreated from durable completion or Unknown intent."""
+    store, leases, _, _ = prepared_use
+    invocation, request, _, _, execution = typed_navigation(prepared_use)
+    assert leases.apply(request)["status"] == "granted"
+    jobs = ProcessFileJobs(store, leases)
+    try:
+        assert jobs._admit(invocation) is not None
+        jobs._active.clear()  # Simulate loss after durable admission and before a child starts.
+        jobs.close()
+        jobs = ProcessFileJobs(store, leases)
+        assert jobs.status(execution)["state"] == "UNKNOWN"
+        with pytest.raises(ValueError, match="cannot be replayed"):
+            jobs.private_copy(invocation)
+        assert jobs.status(execution)["state"] == "UNKNOWN"
+        assert jobs._processes == {}
+    finally:
+        jobs.close()
+
+
+def test_private_copy_worker_copies_exact_bytes_under_per_chunk_permits(
+    tmp_path: Path,
+) -> None:
+    """Copy only an authorized source into an unlinked temporary descriptor."""
+    payload = bytes(range(256)) * 4096 + b"authorized-tail"
+    source = tmp_path / "authorized-map.bin"
+    source.write_bytes(payload)
+    digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+    source_descriptor = os.open(source, os.O_RDONLY)
+    destination = tempfile.TemporaryFile()
+    process = start_direct_worker(source_descriptor, destination.fileno())
+    assert process.stdin is not None and process.stdout is not None
+    replies = worker_replies(process.stdout)
+    try:
+        start = {
+            "schema": "roboguide.file-private-copy-start/v0.1",
+            "source": {
+                "fd": source_descriptor,
+                "digest": digest,
+                "size": len(payload),
+            },
+            "destination_fd": destination.fileno(),
+            "max_bytes": len(payload),
+        }
+        process.stdin.write(canonical(start) + b"\n")
+        process.stdin.flush()
+        assert next(replies) == {
+            "kind": "os-quota",
+            "schema": "roboguide.file-worker-os-quota/v0.1",
+            "pid": process.pid,
+            "cpu_seconds": [30, 30],
+            "address_space_bytes": [256 * 1024 * 1024, 256 * 1024 * 1024],
+        }
+        assert next(replies) == {
+            "kind": "ready",
+            "schema": "roboguide.file-private-copy-start/v0.1",
+            "digest": digest,
+            "size": len(payload),
+        }
+        assert os.lseek(source_descriptor, 0, os.SEEK_CUR) == 0
+        assert destination.tell() == 0
+
+        for _ in range(2):
+            assert next(replies) == {"kind": "permit"}
+            process.stdin.write(fresh_worker_permit())
+            process.stdin.flush()
+        assert next(replies) == {
+            "kind": "result",
+            "digest": digest,
+            "size": len(payload),
+        }
+        assert process.wait(timeout=3) == 0
+        destination.seek(0)
+        assert destination.read() == payload
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+        process.stdin.close()
+        process.stdout.close()
+        destination.close()
+        os.close(source_descriptor)
+
+
+def test_private_copy_worker_rejects_digest_mismatch_without_result(tmp_path: Path) -> None:
+    """A private copy reports success only when copied bytes equal the authorized digest."""
+    payload = b"authorized-map-bytes"
+    source = tmp_path / "authorized-map.bin"
+    source.write_bytes(payload)
+    source_descriptor = os.open(source, os.O_RDONLY)
+    destination = tempfile.TemporaryFile()
+    process = start_direct_worker(source_descriptor, destination.fileno())
+    assert process.stdin is not None and process.stdout is not None
+    replies = worker_replies(process.stdout)
+    try:
+        wrong_digest = "sha256:" + "0" * 64
+        start = {
+            "schema": "roboguide.file-private-copy-start/v0.1",
+            "source": {"fd": source_descriptor, "digest": wrong_digest, "size": len(payload)},
+            "destination_fd": destination.fileno(),
+            "max_bytes": len(payload),
+        }
+        process.stdin.write(canonical(start) + b"\n")
+        process.stdin.flush()
+        assert next(replies)["kind"] == "os-quota"
+        assert next(replies) == {
+            "kind": "ready",
+            "schema": "roboguide.file-private-copy-start/v0.1",
+            "digest": wrong_digest,
+            "size": len(payload),
+        }
+        assert next(replies) == {"kind": "permit"}
+        process.stdin.write(fresh_worker_permit())
+        process.stdin.flush()
+        assert next(replies) == {
+            "kind": "error",
+            "reason": "private copy bytes differ from their authorized identity",
+        }
+        assert process.wait(timeout=3) == 1
+        destination.seek(0)
+        assert destination.read() == payload
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+        process.stdin.close()
+        process.stdout.close()
+        destination.close()
+        os.close(source_descriptor)
+
+
+def test_private_copy_worker_refuses_over_budget_source_before_ready(tmp_path: Path) -> None:
+    """The parent-supplied byte maximum refuses an oversized source before any permit."""
+    source = tmp_path / "authorized-map.bin"
+    source.write_bytes(b"map")
+    source_descriptor = os.open(source, os.O_RDONLY)
+    destination = tempfile.TemporaryFile()
+    process = start_direct_worker(source_descriptor, destination.fileno())
+    assert process.stdin is not None and process.stdout is not None
+    replies = worker_replies(process.stdout)
+    try:
+        start = {
+            "schema": "roboguide.file-private-copy-start/v0.1",
+            "source": {
+                "fd": source_descriptor,
+                "digest": "sha256:" + hashlib.sha256(b"map").hexdigest(),
+                "size": 3,
+            },
+            "destination_fd": destination.fileno(),
+            "max_bytes": 2,
+        }
+        process.stdin.write(canonical(start) + b"\n")
+        process.stdin.flush()
+        assert next(replies) == {
+            "kind": "error",
+            "reason": "private copy bounds or source evidence are invalid",
+        }
+        assert process.wait(timeout=3) == 1
+        assert os.lseek(source_descriptor, 0, os.SEEK_CUR) == 0
+        assert destination.tell() == 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+        process.stdin.close()
+        process.stdout.close()
+        destination.close()
+        os.close(source_descriptor)
+
+
+def test_private_copy_worker_refuses_linked_destination_before_ready(tmp_path: Path) -> None:
+    """Only a parent-owned unlinked temporary descriptor can receive copied bytes."""
+    payload = b"map"
+    source = tmp_path / "authorized-map.bin"
+    source.write_bytes(payload)
+    source_descriptor = os.open(source, os.O_RDONLY)
+    with tempfile.NamedTemporaryFile() as destination:
+        process = start_direct_worker(source_descriptor, destination.fileno())
+        assert process.stdin is not None and process.stdout is not None
+        replies = worker_replies(process.stdout)
+        try:
+            start = {
+                "schema": "roboguide.file-private-copy-start/v0.1",
+                "source": {
+                    "fd": source_descriptor,
+                    "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
+                    "size": len(payload),
+                },
+                "destination_fd": destination.fileno(),
+                "max_bytes": len(payload),
+            }
+            process.stdin.write(canonical(start) + b"\n")
+            process.stdin.flush()
+            assert next(replies) == {
+                "kind": "error",
+                "reason": "private copy destination is not an empty unlinked temporary output",
+            }
+            assert process.wait(timeout=3) == 1
+            assert destination.tell() == 0
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=3)
+            process.stdin.close()
+            process.stdout.close()
+            os.close(source_descriptor)
 
 
 def test_suspended_child_cannot_read_with_a_queued_expired_permit(tmp_path: Path) -> None:

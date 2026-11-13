@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 import selectors
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import uuid
 from collections.abc import Callable
@@ -14,11 +16,15 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from .jobs import FileJobs
+from .scoped_maps import validate_typed_input
 from .store import MemoryStore, canonical, content_digest
 from .use_leases import UseLeases, kernel_clock
 
 SCHEMA = "roboguide.file-process-jobs/v0.2"
 DEFAULT_ADDRESS_SPACE_BYTES = 256 * 1024 * 1024
+PRIVATE_COPY_SCHEMA = "roboguide.file-private-copy-start/v0.1"
+PRIVATE_COPY_RESULT_SCHEMA = "roboguide.file-private-copy-result/v0.1"
+NAVIGATION_OPERATION = "mobility.navigate@v1"
 
 
 class ProcessFileJobs(FileJobs):
@@ -115,11 +121,15 @@ class ProcessFileJobs(FileJobs):
         """Keep unreaped original processes explicitly uncertain after a parent restart."""
         with self._mutex:
             result = super().health()
-            unresolved = self._db.execute(
-                "SELECT count(*) FROM original_processes WHERE exit_json IS NULL"
-            ).fetchone()[0]
+            unverified = self._db.execute(
+                "SELECT execution_id FROM original_processes WHERE exit_json IS NULL"
+            ).fetchall()
+            unresolved = len(unverified)
             result["safe"] = result["safe"] is True and unresolved == 0
             result["unverified_original_processes"] = unresolved
+            result["unowned_original_processes"] = sum(
+                execution_id not in self._active for (execution_id,) in unverified
+            )
             result["assurance"] = "software-process"
             if unresolved >= 4:
                 result["readiness"] = "UNAVAILABLE"
@@ -233,6 +243,202 @@ class ProcessFileJobs(FileJobs):
                     (proof, execution, process.pid),
                 )
 
+    def _private_copy_invocation(self, invocation: dict[str, Any]) -> None:
+        """Require the exact T08 navigation attempt and its single typed source."""
+        if not isinstance(invocation, dict) or invocation.get("operation") != NAVIGATION_OPERATION:
+            raise ValueError("private copy requires mobility.navigate@v1")
+        generation = self._original_generation(invocation)
+        if generation is None or invocation.get("execution_generation") != generation:
+            raise ValueError("private copy requires the exact canonical attempt")
+        if self.leases is None:
+            raise ValueError("private copy requires current Memory use")
+        memory = invocation.get("memory_preparation")
+        if not isinstance(memory, dict) or set(memory) != {
+            "preparation_id",
+            "preparation_digest",
+            "use_lease_id",
+            "tenant_id",
+            "inputs",
+        }:
+            raise ValueError("private copy requires its complete prepared context")
+        inputs = memory["inputs"]
+        if not isinstance(inputs, list) or len(inputs) != 1:
+            raise ValueError("private copy requires exactly one typed M input")
+        item = inputs[0]
+        if not isinstance(item, dict) or not {
+            "manifest",
+            "typed_map",
+            "consumer",
+            "import_id",
+        } <= set(item):
+            raise ValueError("private copy typed M input is incomplete")
+        manifest, typed = item["manifest"], item["typed_map"]
+        if (
+            not isinstance(manifest, dict)
+            or not isinstance(typed, dict)
+            or manifest.get("kind") != "spatial"
+        ):
+            raise ValueError("private copy requires an exact typed spatial M")
+        validate_typed_input(
+            typed,
+            manifest,
+            invocation.get("group_id"),
+            self.store.scoped_typed_maps_enabled,
+        )
+        artifact = manifest.get("artifact")
+        digest = artifact.get("content_digest") if isinstance(artifact, dict) else None
+        size = artifact.get("byte_size") if isinstance(artifact, dict) else None
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 71
+            or not digest.startswith("sha256:")
+            or any(character not in "0123456789abcdef" for character in digest[7:])
+            or type(size) is not int
+            or not 0 < size <= self.store.max_bytes
+            or typed.get("content_digest") != digest
+            or typed.get("byte_size") != size
+        ):
+            raise ValueError("private copy typed M bytes are outside their exact bound")
+
+    def private_copy(self, invocation: dict[str, Any]) -> tuple[int, dict[str, object]]:
+        """Copy typed M to one owned anonymous descriptor without exposing its bytes."""
+        self._private_copy_invocation(invocation)
+        admission = self._admit(invocation)
+        execution = invocation["execution_id"]
+        if admission is None:
+            raise ValueError("original private-copy descriptor cannot be replayed")
+        event, use_lease, _, _ = admission
+        leases = self.leases
+        if leases is None:
+            raise ValueError("private copy requires current Memory use")
+        opened: list[BinaryIO] = []
+        destination: BinaryIO | None = None
+        descriptor: int | None = None
+        receipt: dict[str, object] | None = None
+        state, reason = "FAILED", ""
+
+        def current_permission() -> None:
+            """Fence admission, source opening, worker permits and outcome commit."""
+            if use_lease is not None:
+                try:
+                    leases.guard(use_lease, execution)
+                except ValueError as error:
+                    raise InterruptedError(str(error)) from error
+
+        try:
+            current_permission()
+            inputs = self._inputs(invocation)
+            if len(inputs) != 1:
+                raise ValueError("private copy resolved more than its exact typed M")
+            manifest, path = inputs[0]
+            current_permission()
+            source_descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            source = os.fdopen(source_descriptor, "rb")
+            opened.append(source)
+            metadata = os.fstat(source_descriptor)
+            artifact = manifest["artifact"]
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != artifact["byte_size"]:
+                raise ValueError("private copy input is not the exact regular M")
+            destination = tempfile.TemporaryFile()
+            command = {
+                "schema": PRIVATE_COPY_SCHEMA,
+                "source": {
+                    "fd": source_descriptor,
+                    "digest": artifact["content_digest"],
+                    "size": artifact["byte_size"],
+                },
+                "destination_fd": destination.fileno(),
+                "max_bytes": artifact["byte_size"],
+            }
+            expected_ready = {
+                "kind": "ready",
+                "schema": PRIVATE_COPY_SCHEMA,
+                "digest": artifact["content_digest"],
+                "size": artifact["byte_size"],
+            }
+
+            def accepted_result(message: dict[str, Any]) -> bool:
+                """Accept only the worker's exact typed-M copy receipt."""
+                return message == {
+                    "kind": "result",
+                    "digest": artifact["content_digest"],
+                    "size": artifact["byte_size"],
+                }
+
+            self._run_worker(
+                invocation,
+                opened,
+                current_permission,
+                event,
+                command,
+                expected_ready,
+                accepted_result,
+                (destination.fileno(),),
+            )
+            completed = os.fstat(destination.fileno())
+            if (
+                not stat.S_ISREG(completed.st_mode)
+                or completed.st_nlink != 0
+                or completed.st_size != artifact["byte_size"]
+            ):
+                raise ValueError("private copy did not produce its exact anonymous output")
+            descriptor = os.dup(destination.fileno())
+            os.set_inheritable(descriptor, False)
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            receipt = {
+                "schema": PRIVATE_COPY_RESULT_SCHEMA,
+                "execution_id": execution,
+                "backend_instance_id": self.store.instance_id,
+                "content_digest": artifact["content_digest"],
+                "byte_size": artifact["byte_size"],
+            }
+            state = "COMPLETED"
+        except InterruptedError as error:
+            state, reason = "CANCELLED", str(error)
+        except (ValueError, KeyError, TypeError, OSError) as error:
+            state, reason = "FAILED", str(error)[:1024]
+        finally:
+            for stream in opened:
+                stream.close()
+            try:
+                with self._mutex:
+                    if state == "COMPLETED":
+                        try:
+                            current_permission()
+                        except InterruptedError as error:
+                            state, reason, receipt = "CANCELLED", str(error), None
+                    if event.is_set() and state == "COMPLETED":
+                        state, reason, receipt = (
+                            "CANCELLED",
+                            "cancellation preceded private descriptor commit",
+                            None,
+                        )
+                    self._db.execute(
+                        f"UPDATE {self._table} SET state=?,result_json=?,reason=? "
+                        "WHERE execution_id=?",
+                        (
+                            state,
+                            canonical(receipt) if receipt is not None else None,
+                            reason,
+                            execution,
+                        ),
+                    )
+                    self._db.commit()
+                    self._retire(execution)
+            except BaseException:
+                if descriptor is not None:
+                    os.close(descriptor)
+                raise
+            finally:
+                if destination is not None:
+                    destination.close()
+                if state != "COMPLETED" and descriptor is not None:
+                    os.close(descriptor)
+                    descriptor = None
+        if descriptor is None or receipt is None:
+            raise ValueError(f"private copy {state.lower()}: {reason}")
+        return descriptor, receipt
+
     def _hash_inputs(
         self,
         invocation: dict[str, Any],
@@ -244,6 +450,47 @@ class ProcessFileJobs(FileJobs):
         budget_ms: int,
     ) -> list[str]:
         """Grant bounded reads to an owned child only under the original kernel/use budget."""
+        command = {
+            "schema": "roboguide.file-process-start/v0.1",
+            "rounds": invocation.get("parameters", {}).get("rounds", 1),
+            "inputs": [
+                {
+                    "fd": stream.fileno(),
+                    "digest": manifest["artifact"]["content_digest"],
+                    "size": manifest["artifact"]["byte_size"],
+                }
+                for (manifest, _), stream in zip(inputs, opened, strict=True)
+            ],
+        }
+        expected_digests = [manifest["artifact"]["content_digest"] for manifest, _ in inputs]
+
+        def accepted_result(message: dict[str, Any]) -> bool:
+            """Accept only the existing closed hash-result response."""
+            return message == {"kind": "result", "digests": expected_digests}
+
+        result = self._run_worker(
+            invocation,
+            opened,
+            current_permission,
+            event,
+            command,
+            None,
+            accepted_result,
+        )
+        return list(result["digests"])
+
+    def _run_worker(
+        self,
+        invocation: dict[str, Any],
+        opened: list[BinaryIO],
+        current_permission: Callable[[], None],
+        event: threading.Event,
+        command: dict[str, Any],
+        expected_ready: dict[str, Any] | None,
+        accept_result: Callable[[dict[str, Any]], bool],
+        extra_fds: tuple[int, ...] = (),
+    ) -> dict[str, Any]:
+        """Own one exact child from quota proof through permits and actual OS wait."""
         execution = invocation["execution_id"]
         with self._mutex:
             row = self._db.execute(
@@ -300,7 +547,7 @@ class ProcessFileJobs(FileJobs):
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            pass_fds=tuple(stream.fileno() for stream in opened),
+            pass_fds=tuple(stream.fileno() for stream in opened) + extra_fds,
             close_fds=True,
             env={
                 "PATH": os.defpath,
@@ -311,9 +558,10 @@ class ProcessFileJobs(FileJobs):
         )
         self._processes[execution] = process
         assert process.stdin is not None and process.stdout is not None
-        digests = None
+        result: dict[str, Any] | None = None
         failure = None
         quota_observed = False
+        ready_observed = expected_ready is None
         try:
             with self._mutex, self._db:
                 changed = self._db.execute(
@@ -323,18 +571,6 @@ class ProcessFileJobs(FileJobs):
                 if changed != 1:
                     raise ValueError("original file process was already started")
             guard()
-            command = {
-                "schema": "roboguide.file-process-start/v0.1",
-                "rounds": invocation.get("parameters", {}).get("rounds", 1),
-                "inputs": [
-                    {
-                        "fd": stream.fileno(),
-                        "digest": manifest["artifact"]["content_digest"],
-                        "size": manifest["artifact"]["byte_size"],
-                    }
-                    for (manifest, _), stream in zip(inputs, opened, strict=True)
-                ],
-            }
             process.stdin.write(canonical(command) + b"\n")
             process.stdin.flush()
             pending = b""
@@ -375,19 +611,30 @@ class ProcessFileJobs(FileJobs):
                                 raise ValueError("actual original worker kernel quota differs")
                             self._record_quota_proof(execution, process, message)
                             quota_observed = True
-                        elif message == {"kind": "permit"} and digests is None and quota_observed:
+                        elif (
+                            expected_ready is not None
+                            and message == expected_ready
+                            and quota_observed
+                            and not ready_observed
+                            and result is None
+                        ):
+                            ready_observed = True
+                        elif (
+                            message == {"kind": "permit"}
+                            and result is None
+                            and quota_observed
+                            and ready_observed
+                        ):
                             process.stdin.write(canonical(guard()) + b"\n")
                             process.stdin.flush()
                         elif (
                             isinstance(message, dict)
-                            and set(message) == {"kind", "digests"}
-                            and message["kind"] == "result"
-                            and message["digests"]
-                            == [manifest["artifact"]["content_digest"] for manifest, _ in inputs]
-                            and digests is None
+                            and result is None
                             and quota_observed
+                            and ready_observed
+                            and accept_result(message)
                         ):
-                            digests = list(message["digests"])
+                            result = message
                         elif (
                             isinstance(message, dict)
                             and set(message) == {"kind", "reason"}
@@ -402,10 +649,10 @@ class ProcessFileJobs(FileJobs):
                                 "original file worker refused or changed its computation"
                             )
             code = process.wait(timeout=1)
-            if code != 0 or digests is None or pending:
+            if code != 0 or result is None or pending:
                 raise ValueError(f"original file worker failed: {failure or code}")
             guard()
-            return digests
+            return result
         finally:
             if process.poll() is None:
                 process.terminate()

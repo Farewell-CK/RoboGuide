@@ -541,6 +541,45 @@ class UseLeases:
             ):
                 raise UsePermissionEnded("current Memory-use permission ended")
 
+    def observe_current(self, request: dict[str, Any]) -> dict[str, object]:
+        """Observe the current grant for the exact canonical local dispatch and attempt."""
+        if set(request) != {"attempt_id", "invocation"}:
+            raise ValueError("current Memory-use observation requires a closed dispatch")
+        invocation = request["invocation"]
+        if not isinstance(invocation, dict) or "execution_id" in invocation:
+            raise ValueError("canonical invocation cannot supply its own attempt identity")
+        memory = invocation.get("memory_preparation")
+        if not isinstance(memory, dict) or set(memory) != {
+            "preparation_id",
+            "preparation_digest",
+            "use_lease_id",
+            "tenant_id",
+            "inputs",
+        }:
+            raise ValueError("current Memory-use observation requires the exact prepared context")
+        execution = text(request["attempt_id"], 1024)
+        with self._mutex:
+            lease_id = self.require({**invocation, "execution_id": execution})
+            generation, budget, encoded = self._db.execute(
+                "SELECT generation,budget_json,preparation_json FROM leases WHERE lease_id=?",
+                (lease_id,),
+            ).fetchone()
+            original = json.loads(encoded)["invocation"]
+            supplied = {
+                key: value for key, value in invocation.items() if key != "memory_preparation"
+            }
+            if canonical(supplied) != canonical(original):
+                raise ValueError("current Memory-use observation changed the canonical dispatch")
+            remaining_ms = remaining(json.loads(budget))
+            if remaining_ms == 0:
+                raise UsePermissionEnded("current Memory-use permission ended")
+            return {
+                "execution_id": execution,
+                "lease_id": lease_id,
+                "generation": generation,
+                "remaining_ms": remaining_ms,
+            }
+
     def compute_budget(self, lease_id: str, execution_id: str) -> dict[str, Any]:
         """Freeze the current original deadline for one bounded child read without renewing it."""
         with self._mutex:
