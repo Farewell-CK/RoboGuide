@@ -73,6 +73,41 @@ def test_shadow_reads_do_not_change_original_visible_or_durable_state(tmp_path: 
         assert session.store.path.read_bytes() == saved  # DisplayTurn owns the durable ACK.
 
 
+@pytest.mark.parametrize(
+    "name,arguments",
+    [
+        ("read_cluster", {}),
+        ("read_node", {"node_id": "a"}),
+        ("search_capabilities", {"keyword": "compute"}),
+        ("compare_nodes", {"node_ids": ["a", "b"]}),
+        ("read_active_missions", {}),
+        ("list_missions", {}),
+        ("read_mission", {"mission_id": "m1"}),
+        ("read_explanation", {"mission_id": "m1"}),
+    ],
+)
+def test_frozen_input_cannot_replace_an_unread_visible_list(
+    tmp_path: Path, name: str, arguments: JSONObject
+) -> None:
+    """Publishing one object domain preserves newer visible lists in every unread domain."""
+    with _workbench(tmp_path) as (session, _reader):
+        session.displayed_nodes = ["old-node"]
+        session.displayed_missions = ["old-mission"]
+        original = session.query_references()
+        session.displayed_nodes = ["new-node"]
+        session.displayed_missions = ["new-mission"]
+        adapter = ReadToolAdapter(session, "查询 a b m1", original)
+        result = adapter.read(name, arguments, 3)
+        adapter.publish(_evidence(result))
+        if name in {"read_cluster", "read_node", "search_capabilities", "compare_nodes"}:
+            assert session.displayed_missions == ["new-mission"]
+        else:
+            assert session.displayed_nodes == ["new-node"]
+            if name in {"read_mission", "read_explanation"}:
+                assert session.displayed_missions == ["new-mission"]
+        assert session.store.data["commands"] == []
+
+
 def test_tool_result_ids_remain_available_after_a_later_read_refocuses_the_list(
     tmp_path: Path,
 ) -> None:

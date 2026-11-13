@@ -11,7 +11,11 @@ from pathlib import Path
 
 import pytest
 from roboguide_workbench import terminal
+from roboguide_workbench.cli import display_question
+from roboguide_workbench.provider_config import model_settings
+from roboguide_workbench.routing import ResponsesRouter
 from test_workbench import ScriptedTransport, descriptor, router
+from test_workbench_agent_loop import Responses, _call, _message, _response
 from test_workbench_display import ScriptedPrompt, command, drain_foreground, workbench
 from test_workbench_display_v4 import ReorderingController, private_session
 
@@ -120,6 +124,70 @@ def test_busy_action_command_is_preserved_and_never_implicitly_queued(
 def test_context_dependent_input_is_not_reinterpreted_after_a_queued_refresh(text: str) -> None:
     """A preceding refresh cannot silently redirect an ordinal or implicit target."""
     assert terminal._is_queueable(text) is False
+
+
+@pytest.mark.parametrize("domain", ["nodes", "missions"])
+def test_queued_agent_read_preserves_the_other_domains_new_visible_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, domain: str
+) -> None:
+    """A queued read cannot restore its stale input list over another domain's displayed refresh."""
+    reader = ReorderingController()
+    session = private_session(tmp_path, reader)
+    output = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", output)
+    display_question(session, "/" + domain)
+    tool = "read_active_missions" if domain == "nodes" else "read_cluster"
+    question = "查当前任务" if domain == "nodes" else "查接入节点"
+    transport = Responses([_response(_call(tool)), _response(_message("已读取当前状态。"))])
+    settings = model_settings(
+        {"base_url": "http://127.0.0.1:9/v1", "name": "fixture", "requires_auth": False}
+    )
+    session.router_factory = lambda: ResponsesRouter(settings, {}, transport)
+    original = session.ask
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+    def ask(text: str) -> str:
+        """Pause a real refresh while the user queues a read in the other object domain."""
+        result = original(text)
+        if text == "/" + domain:
+            entered.set()
+            assert release.wait(5)
+        elif text == question:
+            finished.set()
+        return result
+
+    monkeypatch.setattr(session, "ask", ask)
+    expected = ["b", "a"] if domain == "nodes" else ["m2", "m1"]
+
+    async def queue_read() -> str:
+        """Freeze the old visible reference cohort before the held refresh is displayed."""
+        assert await asyncio.to_thread(entered.wait, 5)
+        return question
+
+    async def select_first() -> str:
+        """Select the refreshed first object after both original and queued turns are displayed."""
+        release.set()
+        assert await asyncio.to_thread(finished.wait, 5)
+        await drain_foreground()
+        assert getattr(session, "displayed_" + domain) == expected
+        saved = json.loads(session.store.path.read_text())
+        assert saved["context"][domain] == expected
+        return "/node #1" if domain == "nodes" else "/mission #1"
+
+    async def finish() -> str:
+        """Confirm the next literal read uses the latest displayed ordinal without commands."""
+        await drain_foreground()
+        assert getattr(session, "last_node" if domain == "nodes" else "last_mission") == expected[0]
+        assert session.store.data["commands"] == []
+        return "/quit"
+
+    prompt = ScriptedPrompt([command("/" + domain), queue_read, select_first, finish])
+    prompt.install(monkeypatch)
+    try:
+        assert asyncio.run(terminal.interactive(session)) == 0
+    finally:
+        release.set()
+        session.store.close()
 
 
 @pytest.mark.parametrize("mode", ["legacy", "facts"])

@@ -295,6 +295,21 @@ def _fallback(evidence: list[JSONObject], reason: str, items: list[JSONObject]) 
     """Preserve useful acquired facts while refusing to invent an unavailable current result."""
     facts = "\n\n".join(str(item["text"]) for item in evidence)
     text = (facts + "\n\n" if facts else "") + "回复暂未完成：" + safe_text(reason)
+    missing: list[str] = []
+    for item in evidence:
+        components = item.get("components")
+        if not isinstance(components, list):
+            continue
+        for component in components:
+            if not isinstance(component, dict) or component.get("complete") is True:
+                continue
+            source = component.get("source")
+            if isinstance(source, str) and source != "read-tool-adapter":
+                missing.append(safe_text(source))
+    if missing:
+        text += (
+            "\n不可用或不完整来源：" + "、".join(dict.fromkeys(missing)) + "；相关结论保持未知。"
+        )
     return AgentAnswer(
         text, evidence, status="partial" if _available(evidence) else "failed", items=items
     )
@@ -376,19 +391,15 @@ class AgentConversation:
                 if not calls:
                     if evidence and not _available(evidence):
                         return _fallback(evidence, "当前状态无法确认，请稍后重试。", public_items)
-                    status: QueryStatus = (
-                        "partial"
-                        if any(item["complete"] is not True for item in evidence)
-                        else "complete"
-                    )
-                    if evidence:
-                        text += "\n\n依据：本轮 Controller 读取" + (
-                            "（部分来源不可用）。" if status == "partial" else "。"
+                    if any(item["complete"] is not True for item in evidence):
+                        return _fallback(
+                            evidence, "部分来源不可用，未确认的状态保持未知。", public_items
                         )
+                    if evidence:
+                        text += "\n\n依据：本轮 Controller 读取。"
                     return AgentAnswer(
                         safe_text(text).replace("\\u000a", "\n"),
                         evidence,
-                        status=status,
                         items=public_items,
                     )
                 proposals = [call for call in calls if call.name == "propose_action"]

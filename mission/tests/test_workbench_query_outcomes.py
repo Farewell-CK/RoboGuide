@@ -331,7 +331,8 @@ def test_installed_natural_language_cli_has_truthful_exit_status(
                 [
                     str(Path(sys.executable).parent / "roboguide"),
                     "chat",
-                    "--answer-mode", "legacy",
+                    "--answer-mode",
+                    "legacy",
                     "--controller",
                     endpoint,
                     "--config",

@@ -7,6 +7,7 @@ import asyncio
 import json
 import sys
 import uuid
+from contextlib import suppress
 from pathlib import Path
 
 from mission.config import current_environment
@@ -22,6 +23,11 @@ from roboguide_workbench.routing import ResponsesRouter
 from roboguide_workbench.session import Session
 from roboguide_workbench.views import safe_text
 from roboguide_workbench.workspace import WorkbenchSession
+
+
+def _json_event(kind: str, **fields: str) -> None:
+    """Write and flush one complete machine-readable event, propagating output failures."""
+    print(json.dumps({"type": kind, **fields}, ensure_ascii=False), flush=True)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -242,12 +248,22 @@ def main(argv: list[str] | None = None) -> int:
         if arguments.ask is not None:
             print(f"会话：{session_id}；恢复：--resume {session_id}", file=sys.stderr)
             if arguments.output_format == "stream-json":
-                session.progress = lambda message: print(
-                    json.dumps({"type": "turn.phase", "message": message}, ensure_ascii=False),
-                    flush=True,
-                )
-                print(json.dumps({"type": "turn.started", "session_id": session_id}), flush=True)
-            display_question(session, arguments.ask, output_format=arguments.output_format)
+                session.progress = lambda message: _json_event("turn.phase", message=message)
+                _json_event("turn.started", session_id=session_id)
+            try:
+                display_question(session, arguments.ask, output_format=arguments.output_format)
+            except (ValueError, OSError, KeyboardInterrupt) as error:
+                if arguments.output_format == "stream-json":
+                    with suppress(ValueError, OSError):
+                        _json_event(
+                            "turn.failed",
+                            status="failed",
+                            session_id=session.store.path.stem,
+                            message="本轮已中断；已发送操作不会因此撤销。"
+                            if isinstance(error, KeyboardInterrupt)
+                            else safe_text(str(error)),
+                        )
+                raise
             return 0 if session.query_status == "complete" else 2
         terminal_mode = not arguments.plain and sys.stdin.isatty() and sys.stdout.isatty()
         if not terminal_mode:
@@ -365,8 +381,15 @@ def display_question(
 
         switched = navigate(session, question)
         if switched is not None:
+            session.query_status = "complete"
             try:
-                print(prefix + switched, flush=True)
+                if output_format == "stream-json":
+                    _json_event("assistant.completed", text=switched)
+                    _json_event(
+                        "turn.completed", status="complete", session_id=session.store.path.stem
+                    )
+                else:
+                    print(prefix + switched, flush=True)
             except (ValueError, OSError) as error:
                 discard_confirmation(session)
                 raise DisplayPersistenceError(
@@ -378,23 +401,12 @@ def display_question(
         result = session.ask(question)
         turn.stage()
         if output_format == "stream-json":
-            print(
-                json.dumps({"type": "assistant.completed", "text": result}, ensure_ascii=False),
-                flush=True,
-            )
+            _json_event("assistant.completed", text=result)
         else:
             print(prefix + result, flush=True)
         turn.acknowledge()
         if output_format == "stream-json":
-            print(
-                json.dumps(
-                    {
-                        "type": "turn.completed",
-                        "status": getattr(session, "query_status", "complete"),
-                    }
-                ),
-                flush=True,
-            )
+            _json_event("turn.completed", status=getattr(session, "query_status", "complete"))
     finally:
         turn.reject()
 

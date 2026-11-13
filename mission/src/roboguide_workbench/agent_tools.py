@@ -381,8 +381,10 @@ class ReadToolAdapter:
         projection = self._selected(evidence)
         if projection is None:
             return
-        self.session.displayed_nodes = list(projection.node_ids)
-        self.session.displayed_missions = list(projection.mission_ids)
+        if projection.nodes_read:
+            self.session.displayed_nodes = list(projection.node_ids)
+        if projection.missions_read:
+            self.session.displayed_missions = list(projection.mission_ids)
         self.session.last_node = projection.last_node
         self.session.last_mission = projection.last_mission
         self.session.last_raw = copy.deepcopy(projection.raw)

@@ -262,6 +262,40 @@ def test_failed_tool_does_not_allow_a_model_success_claim() -> None:
     assert "没有节点" not in result.text and "状态无法确认" in result.text
 
 
+@pytest.mark.parametrize("composite", [False, True])
+def test_partial_evidence_cannot_support_an_unavailable_success_claim(composite: bool) -> None:
+    """Independent and composite read failures retain host facts without generated assurances."""
+    calls = (
+        [_call("read_explanation", {"mission_id": "m1"})]
+        if composite
+        else [_call("read_cluster"), _call("read_mission", {"mission_id": "m1"}, "c2")]
+    )
+    transport = Responses(
+        [_response(*calls), _response(_message("m1 没有任何恢复阻塞，可以继续执行。"))]
+    )
+
+    def read(name: str, _arguments: JSONObject, _remaining: float) -> ReadResult:
+        """Return useful current facts beside an independently unavailable source."""
+        if name == "read_cluster":
+            return ReadResult("已注册两个节点")
+        if name == "read_mission":
+            raise ValueError("HTTP 403")
+        return ReadResult(
+            "Mission m1：Running\n原恢复评估不可用：HTTP 403",
+            False,
+            (
+                {"source": "mission", "complete": True},
+                {"source": "原恢复评估", "complete": False},
+            ),
+        )
+
+    result = _agent(transport).answer("检查 m1 的恢复状态", {}, [], read, tool_definitions=TOOLS)
+    assert result.status == "partial" and "HTTP 403" in result.text
+    assert ("Running" if composite else "已注册两个节点") in result.text
+    assert "没有任何恢复阻塞" not in result.text and "可以继续执行" not in result.text
+    assert "未知" in result.text
+
+
 def test_partial_tool_and_long_components_preserve_usable_evidence_identity() -> None:
     """A partial diagnostic keeps host publication metadata and its available subread."""
     transport = Responses(
@@ -277,7 +311,11 @@ def test_partial_tool_and_long_components_preserve_usable_evidence_identity() ->
         return ReadResult(
             "任务运行中" * 9000,
             False,
-            ({"source": "mission", "complete": True, "details": "x" * 10_000}, metadata),
+            (
+                {"source": "mission", "complete": True, "details": "x" * 10_000},
+                {"source": "原恢复评估", "complete": False, "text": "HTTP 403"},
+                metadata,
+            ),
         )
 
     result = _agent(transport).answer("解释 a", {}, [], read, tool_definitions=TOOLS)
@@ -286,6 +324,7 @@ def test_partial_tool_and_long_components_preserve_usable_evidence_identity() ->
     components = cast(list[JSONObject], result.evidence[0]["components"])
     assert metadata in components
     assert len(str(result.evidence[0]["text"]).encode()) <= 24_000
+    assert "原恢复评估" in result.text and "未知" in result.text
 
 
 def test_proposal_returns_only_a_host_selection_without_entering_a_read() -> None:
