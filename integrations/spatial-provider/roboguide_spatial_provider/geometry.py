@@ -10,8 +10,10 @@ import json
 import math
 import re
 import sys
+import sysconfig
 import time
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -19,22 +21,81 @@ from . import timing
 from .contracts import Job, canonical, digest
 from .storage import immutable, point_count, read_json, read_source, save_json
 
+NATIVE_DEPENDENCIES = ("open3d", "numpy", "scipy")
+PINNED_NATIVE_DEPENDENCIES = {"open3d": "0.19.0", "numpy": "2.4.6", "scipy": "1.17.1"}
+_DEPENDENCY_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+_-]*")
 
-def sdk() -> tuple[Any, Any, dict[str, str], dict[str, str]]:
+
+def dependency_versions(declared: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Return one closed exact native dependency declaration."""
+    source = PINNED_NATIVE_DEPENDENCIES if declared is None else declared
+    if not isinstance(source, Mapping) or set(source) != set(NATIVE_DEPENDENCIES):
+        raise ValueError("native dependency declaration must contain open3d, numpy and scipy")
+    result: dict[str, str] = {}
+    for name in NATIVE_DEPENDENCIES:
+        version = source[name]
+        if (
+            not isinstance(version, str)
+            or version != version.strip()
+            or _DEPENDENCY_VERSION.fullmatch(version) is None
+        ):
+            raise ValueError(f"native dependency {name} has no exact version")
+        result[name] = version
+    return result
+
+
+def declared_dependency_versions(requirements: Path) -> dict[str, str]:
+    """Read exact native pins from one requirements file without importing them."""
+    path = Path(requirements)
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("native dependency declaration is not a regular file")
+    pins: dict[str, str] = {}
+    for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.partition("#")[0].strip()
+        if not line:
+            continue
+        name, separator, version = line.partition("==")
+        name, version = name.strip(), version.strip()
+        if not separator or not name or not version or "==" in version:
+            raise ValueError(f"native dependency line {line_number} is not an exact pin")
+        if name in pins:
+            raise ValueError(f"native dependency {name} is declared more than once")
+        pins[name] = version
+    return dependency_versions({name: pins.get(name, "") for name in NATIVE_DEPENDENCIES})
+
+
+def sdk(
+    *,
+    load_open3d: bool = True,
+    dependencies: Mapping[str, str] | None = None,
+) -> tuple[Any, Any, dict[str, str], dict[str, str]]:
     """Load only the pinned independent runtime; no tensor/GPU or simulator interface is used."""
     if sys.version_info[:2] != (3, 11):
         raise ValueError("spatial provider requires its independent Python 3.11 runtime")
-    versions = {name: importlib.metadata.version(name) for name in ("open3d", "numpy", "scipy")}
-    if versions != {"open3d": "0.19.0", "numpy": "2.4.6", "scipy": "1.17.1"}:
-        raise ValueError("spatial dependency identity differs from the declared runtime")
+    expected = dependency_versions(dependencies)
+    versions = {name: importlib.metadata.version(name) for name in NATIVE_DEPENDENCIES}
+    if versions != expected:
+        raise ValueError(
+            "spatial dependency identity differs from the declared runtime: "
+            f"expected={expected} actual={versions}"
+        )
     np = importlib.import_module("numpy")
-    native = importlib.import_module("open3d")
-    native.utility.set_verbosity_level(native.utility.VerbosityLevel.Error)
+    open3d_binary = "open3d.cpu.pybind"
+    native = None
+    # Derive the installed binary identity without loading the pybind extension twice.
+    suffix = sysconfig.get_config_var("EXT_SUFFIX")
+    distribution = importlib.metadata.distribution("open3d")
+    open3d_path = Path(distribution.locate_file(f"open3d/cpu/pybind{suffix}"))
+    if load_open3d:
+        native = importlib.import_module("open3d")
+        native.utility.set_verbosity_level(native.utility.VerbosityLevel.Error)
+    paths = {open3d_binary: open3d_path}
+    for name in ("numpy._core._multiarray_umath", "scipy.linalg._fblas"):
+        paths[name] = Path(importlib.import_module(name).__file__)
     binaries = {}
-    for name in ("open3d.cpu.pybind", "numpy._core._multiarray_umath", "scipy.linalg._fblas"):
-        module = importlib.import_module(name)
+    for name, path in paths.items():
         binary = hashlib.sha256()
-        with Path(module.__file__).open("rb") as stream:
+        with path.open("rb") as stream:
             while part := stream.read(1024 * 1024):
                 binary.update(part)
         binaries[name] = "sha256:" + binary.hexdigest()
@@ -405,12 +466,16 @@ def fuse(
     return result, int(len(points))
 
 
-def compute(directory: Path) -> dict[str, Any]:
+def compute(
+    directory: Path,
+    *,
+    dependencies: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     """Compute one immutable file revision without localization or Task authority."""
     request = read_json(directory / "request.json")
     job = Job.parse(request)
     frozen = read_json(directory / "sources.json")["inputs"]
-    np, native, versions, binaries = sdk()
+    np, native, versions, binaries = sdk(dependencies=dependencies)
     for item in frozen:
         content = read_source(directory, item["snapshot"], job.policy.max_input_bytes)
         if digest(content) != item["content_digest"] or len(content) != item["byte_size"]:

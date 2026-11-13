@@ -9,6 +9,7 @@ import math
 import os
 import time
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -394,12 +395,40 @@ def parent(
     content = read_source(directory, "parent.bundle", job.policy.max_output_bytes)
     if digest(content) != job.parent["content_digest"]:
         raise ValueError("occupancy parent bundle bytes differ")
+    _, result = bundle_cells(
+        content,
+        frame_id=job.frame_id,
+        revision_id=job.parent["revision_id"],
+        resolution=job.policy.resolution_meters,
+        max_tiles=job.policy.max_tiles,
+        max_cells=remaining,
+    )
+    points = np.asarray(
+        [
+            [(x + 0.5) * job.policy.resolution_meters, (y + 0.5) * job.policy.resolution_meters]
+            for (x, y), mask in sorted(result.items())
+            if mask == 2
+        ]
+    )
+    return result, points
+
+
+def bundle_cells(
+    content: bytes,
+    *,
+    frame_id: str,
+    revision_id: str,
+    resolution: float,
+    max_tiles: int,
+    max_cells: int,
+) -> tuple[dict[str, Any], dict[tuple[int, int], int]]:
+    """Read an already digest-checked occupancy bundle under explicit identity and work bounds."""
     result: dict[tuple[int, int], int] = {}
     with zipfile.ZipFile(io.BytesIO(content)) as archive:
         names = archive.namelist()
         if (
             len(names) != len(set(names))
-            or len(names) > job.policy.max_tiles + 1
+            or len(names) > max_tiles + 1
             or any(item.compress_type != zipfile.ZIP_STORED for item in archive.infolist())
         ):
             raise ValueError("occupancy parent tile index is ambiguous or compressed")
@@ -408,14 +437,14 @@ def parent(
         manifest = json.loads(archive.read("manifest.json"))
         if (
             manifest.get("schema_version") != "roboguide.spatial-occupancy-map/v0.1"
-            or manifest.get("frame_id") != job.frame_id
-            or manifest.get("revision_id") != job.parent["revision_id"]
-            or manifest.get("resolution_meters") != job.policy.resolution_meters
+            or manifest.get("frame_id") != frame_id
+            or manifest.get("revision_id") != revision_id
+            or manifest.get("resolution_meters") != resolution
             or manifest.get("units") != "m"
         ):
             raise ValueError("occupancy parent frame/revision/unit/resolution differs")
         tiles = manifest.get("tiles")
-        if not isinstance(tiles, list) or not 1 <= len(tiles) <= job.policy.max_tiles:
+        if not isinstance(tiles, list) or not 1 <= len(tiles) <= max_tiles:
             raise ValueError("occupancy parent requires a bounded complete tile list")
         expected = {"manifest.json"}
         for tile in tiles:
@@ -434,9 +463,9 @@ def parent(
                 or not isinstance(value.get("cells"), list)
                 or not isinstance(tile.get("cell_count"), int)
                 or isinstance(tile.get("cell_count"), bool)
-                or not 1 <= tile["cell_count"] <= remaining
+                or not 1 <= tile["cell_count"] <= max_cells
                 or len(value["cells"]) != tile.get("cell_count")
-                or len(value["cells"]) + len(result) > remaining
+                or len(value["cells"]) + len(result) > max_cells
             ):
                 raise ValueError("occupancy parent cell count exceeds its aggregate bound")
             tile_key = value["tile_key"]
@@ -470,22 +499,19 @@ def parent(
             or manifest["observed_cell_count"] != len(result)
         ):
             raise ValueError("occupancy parent complete index/count differs")
-    points = np.asarray(
-        [
-            [(x + 0.5) * job.policy.resolution_meters, (y + 0.5) * job.policy.resolution_meters]
-            for (x, y), mask in sorted(result.items())
-            if mask == 2
-        ]
-    )
-    return result, points
+    return manifest, result
 
 
-def compute(directory: Path) -> dict[str, Any]:
+def compute(
+    directory: Path,
+    *,
+    dependencies: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     """Produce a measured planar map bundle with unknown space and immutable parent lineage."""
     request = read_json(directory / "request.json")
     job = OccupancyJob.parse(request)
     frozen = read_json(directory / "sources.json")["inputs"]
-    np, _, versions, binaries = sdk()
+    np, _, versions, binaries = sdk(load_open3d=False, dependencies=dependencies)
     values = []
     total = 0
     for source in frozen:
