@@ -9,14 +9,15 @@ import math
 import os
 import time
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from . import timing
 from .contracts import canonical, digest, fields
 from .geometry import code_digest, sdk
-from .occupancy_contracts import OccupancyJob, OccupancyPolicy, grid
+from .occupancy_contracts import OPENCV_AKAZE, OccupancyJob, OccupancyPolicy, grid
+from .occupancy_features import feature_registration
 from .storage import immutable, read_json, read_source, save_json
 
 
@@ -223,7 +224,10 @@ def register(np: Any, first: Any, second: Any, policy: OccupancyPolicy) -> dict[
 
 
 def poses(
-    np: Any, points: list[Any], policy: OccupancyPolicy
+    np: Any,
+    points: list[Any],
+    policy: OccupancyPolicy,
+    register_pair: Callable[[int, int], dict[str, Any] | None],
 ) -> tuple[list[Any], list[dict[str, Any]]]:
     """Optimize measured planar edges around the fixed anchor and reject inconsistent loops."""
     if len(points) > 1:
@@ -232,7 +236,7 @@ def poses(
     edges = []
     for first in range(len(points)):
         for second in range(first + 1, len(points)):
-            measured = register(np, points[first], points[second], policy)
+            measured = register_pair(first, second)
             if measured is not None:
                 edges.append({"source": first, "target": second, **measured})
     current = {0: np.eye(3)}
@@ -527,7 +531,38 @@ def compute(
     points = [value["points"] for value in values]
     if inherited is not None:
         points.insert(0, inherited[1])
-    transforms, measurements = poses(np, points, job.policy)
+    algorithm = "bounded-se2-correlative-icp-posegraph-conservative-tiles/v0.1"
+    if job.policy.strategy == OPENCV_AKAZE:
+        estimate, versions["opencv-python-headless"], binaries["cv2"] = feature_registration(
+            np, values, job.policy
+        )
+
+        def register_pair(first: int, second: int) -> dict[str, Any] | None:
+            candidate = estimate(first, second)
+            if candidate is None:
+                return None
+            spatial = importlib.import_module("scipy.spatial")
+            source, target = points[first], points[second]
+            overlap, rmse = metric(
+                np,
+                spatial.cKDTree(target),
+                spatial.cKDTree(source),
+                source,
+                target,
+                candidate,
+                job.policy.max_pair_distance_m,
+            )
+            if overlap < job.policy.min_overlap or rmse > job.policy.max_rmse_m:
+                return None
+            return {"transform": candidate, "overlap": overlap, "rmse_m": rmse}
+
+        algorithm = "opencv-akaze-se2-posegraph-conservative-tiles/v0.1"
+    else:
+
+        def register_pair(first: int, second: int) -> dict[str, Any] | None:
+            return register(np, points[first], points[second], job.policy)
+
+    transforms, measurements = poses(np, points, job.policy, register_pair)
     merged = merge(
         np,
         values,
@@ -587,7 +622,7 @@ def compute(
         "covariance": None,
         "current_node_localization": None,
         "algorithm": {
-            "name": "bounded-se2-correlative-icp-posegraph-conservative-tiles/v0.1",
+            "name": algorithm,
             "policy": request["policy"],
             "versions": versions,
             "native_binary_digests": binaries,

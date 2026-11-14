@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from .contracts import Input, exact, fields, integer, number
+
+CORRELATIVE_ICP = "correlative-icp"
+OPENCV_AKAZE = "opencv-akaze"
 
 
 @dataclass(frozen=True)
@@ -47,11 +50,22 @@ class OccupancyPolicy:
     timeout_s: int
     memory_mb: int
     threads: int
+    strategy: str = CORRELATIVE_ICP
+
+    def request_policy(self) -> dict[str, Any]:
+        """Keep the original wire identity for the default strategy."""
+        policy = asdict(self)
+        if self.strategy == CORRELATIVE_ICP:
+            del policy["strategy"]
+        return policy
 
     @classmethod
     def parse(cls, value: Any) -> OccupancyPolicy:
         """Bound actual search/allocation work before loading a grid or importing native code."""
-        raw = fields(value, set(cls.__dataclass_fields__))
+        raw = fields(value, set(cls.__dataclass_fields__) - {"strategy"}, {"strategy"})
+        strategy = exact(raw.get("strategy", CORRELATIVE_ICP), "strategy")
+        if strategy not in (CORRELATIVE_ICP, OPENCV_AKAZE):
+            raise ValueError(f"unsupported occupancy fusion strategy: {strategy}")
         floating = {
             key: number(raw[key], key, low, high)
             for key, low, high in (
@@ -103,13 +117,13 @@ class OccupancyPolicy:
         )
         if (
             floating["yaw_min"] > floating["yaw_max"]
-            or yaw_count * xy_count**2 > bounded["max_hypotheses"]
+            or (strategy == CORRELATIVE_ICP and yaw_count * xy_count**2 > bounded["max_hypotheses"])
             or bounded["free_max"] >= bounded["occupied_min"]
             or bounded["max_total_cells"] < bounded["max_cells"]
             or bounded["max_registration_points"] > bounded["max_occupied_points"]
         ):
             raise ValueError("occupancy search/threshold/aggregate budgets are inconsistent")
-        return cls(**{**floating, **bounded})  # type: ignore[arg-type]
+        return cls(**{**floating, **bounded}, strategy=strategy)  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True)
@@ -168,7 +182,10 @@ class OccupancyJob:
                 raise ValueError("parent bundle requires an immutable SHA-256")
         if frame != (parent["frame_id"] if parent else inputs[0].frame_id):
             raise ValueError("output frame must retain its declared planar anchor")
-        return cls(identity, frame, tuple(inputs), OccupancyPolicy.parse(raw["policy"]), parent)
+        policy = OccupancyPolicy.parse(raw["policy"])
+        if parent is not None and policy.strategy == OPENCV_AKAZE:
+            raise ValueError("opencv-akaze requires source grids without an incremental parent")
+        return cls(identity, frame, tuple(inputs), policy, parent)
 
 
 def grid(value: Any, maximum: int) -> dict[str, Any]:

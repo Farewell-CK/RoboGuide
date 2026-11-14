@@ -18,7 +18,7 @@ import json
 import os
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -225,7 +225,7 @@ def build_shared_map_job(
         "schema_version": "roboguide.spatial-occupancy-job/v0.1",
         "job_id": exact(job_id, "job_id", 64),
         "frame_id": n.frame_id,
-        "policy": asdict(parsed_policy),
+        "policy": parsed_policy.request_policy(),
         "inputs": [
             {
                 "source_id": "n",
