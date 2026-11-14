@@ -89,6 +89,8 @@ MI 新增显式宿主目标草案格式：见 [ADR-0255](docs/decisions/0255-hos
 和 `/execute` 走原有审批边界。需要旧版结构化查询兼容行为时可显式使用
 `roboguide chat --answer-mode legacy`；`--output-format stream-json --ask "问题"` 提供单次
 调用的机器可读事件。
+多轮任务会在确认前展示原任务和澄清原文；仅完整显示的助手回复进入后续模型历史，
+静音或输出失败的内容保留在本地审计记录中。
 
 真机接入的专题设计见 [ADR-0231 两类接入与本机任务委派](docs/decisions/0231-local-eaios-and-device-integration.md)。
 该提案以验证 RG 的任务、调度、执行与恢复为目标，区分已有具身操作系统的参与者和

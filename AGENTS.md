@@ -1173,6 +1173,13 @@ Both terminal modes acknowledge complete flushed output before adopting local se
 checkpointed visible references; hidden results cannot change ordinal targets. Typed Mission
 queries retain literal IDs after resolution. Strict response framing and bounded address fallback
 preserve unavailable outcomes. Generated v0.3 migration-copy names remain explicitly resumable.
+Original dialogue is audited before output; each local reply begins without a display ACK.
+Only the exact foreground DisplayTurn may persist its displayed marker after complete flush.
+Muted, failed, interrupted and legacy unmarked replies remain audit data and cannot enter ordinary
+Assistant history, including queued and resumed turns. Native proposals select a host-owned original
+user-turn source and freeze the complete dialogue suffix, preserving limits and clarifications.
+Show that exact text before /choose; clipped or missing originals refuse rather than borrow a summary.
+These local context annotations grant no Mission, Controller or physical authority.
 
 ADR-0252 adds explicit opt-in Mission Request v0.5 submission intent. Plan-only requests remain
 AwaitingExecution across edits/restarts; execute grants only the displayed exact revision/digest

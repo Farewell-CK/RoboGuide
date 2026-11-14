@@ -32,6 +32,9 @@ def _response(*items: JSONObject, status: str = "completed") -> JSONObject:
 
 def _call(name: str, arguments: JSONObject | None = None, call_id: str = "call-1") -> JSONObject:
     """Encode a completed function request whose arguments remain independently validated."""
+    arguments = dict(arguments or {})
+    if name == "propose_action":
+        arguments.setdefault("start_turn", "current")
     return {
         "type": "function_call",
         "status": "completed",
@@ -68,7 +71,10 @@ TOOLS = [
     ),
     _definition(
         "propose_action",
-        {"action": {"type": "string", "enum": ["plan", "run", "answer", "execute", "approve"]}},
+        {
+            "action": {"type": "string", "enum": ["plan", "run", "answer", "execute", "approve"]},
+            "start_turn": {"type": "string", "minLength": 1, "maxLength": 16},
+        },
     ),
 ]
 
@@ -333,6 +339,24 @@ def test_proposal_returns_only_a_host_selection_without_entering_a_read() -> Non
     result = _agent(transport).answer("帮我执行巡检", {}, [], _no_read, tool_definitions=TOOLS)
     assert result.proposal is not None and result.proposal.kind == "run"
     assert result.evidence == [] and result.text == ""
+
+
+@pytest.mark.parametrize("mode", ["missing", "oversize", "approval-history"])
+def test_proposal_requires_a_complete_bounded_original_source(mode: str) -> None:
+    """Missing source bindings, clipped task transfer and historical approvals refuse locally."""
+    call = _call("propose_action", {"action": "plan", "start_turn": "u1"})
+    history: list[JSONObject] = [{"role": "user", "text": "dog2 巡检仓库"}]
+    question = "东区"
+    if mode == "missing":
+        call["arguments"] = json.dumps({"action": "plan"})
+    elif mode == "oversize":
+        history = [{"role": "user", "text": "限" * 1300} for _ in range(6)]
+        question = "新" * 4096
+    else:
+        call["arguments"] = json.dumps({"action": "approve", "start_turn": "u1"})
+    transport = Responses([_response(call)])
+    result = _agent(transport).answer(question, {}, history, _no_read, tool_definitions=TOOLS)
+    assert result.status == "failed" and result.proposal is None and result.evidence == []
 
 
 @pytest.mark.parametrize("after_read", [False, True])

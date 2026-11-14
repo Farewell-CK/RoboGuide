@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -187,6 +188,7 @@ class WorkbenchSession(Session):
         self.reference_checkpoint: JSONObject | None = None
         self.input_references: JSONObject | None = None
         self.input_history: list[JSONObject] | None = None
+        self.display_turn_id: str | None = None
 
     def query_references(self) -> JSONObject:
         """Resolve queued questions against their original visible identities, never permission."""
@@ -256,14 +258,26 @@ class WorkbenchSession(Session):
         return result
 
     def _remember(self, question: str, result: str) -> None:
-        """Keep bounded recent dialogue and every original mutation receipt independently."""
+        """Audit original dialogue before output; only DisplayTurn may acknowledge its reply."""
         messages = self.store.data.get("messages")
         if not isinstance(messages, list):
             raise WorkbenchError("会话消息记录损坏。")
+        turn_id = self.display_turn_id or uuid.uuid4().hex
         messages.extend(
             [
-                {"role": "user", "text": question, "at": datetime.now(UTC).isoformat()},
-                {"role": "assistant", "text": result[:64000], "at": datetime.now(UTC).isoformat()},
+                {
+                    "role": "user",
+                    "text": question,
+                    "at": datetime.now(UTC).isoformat(),
+                    "turn_id": turn_id,
+                },
+                {
+                    "role": "assistant",
+                    "text": result[:64000],
+                    "at": datetime.now(UTC).isoformat(),
+                    "turn_id": turn_id,
+                    "displayed": False,
+                },
             ]
         )
         self.store.data["messages"] = messages[-40:]

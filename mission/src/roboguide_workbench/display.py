@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 
 from mission.models import JSONObject
@@ -43,6 +44,10 @@ class DisplayTurn:
         self.cancellation: JSONObject | None = None
         self.finished = False
         if isinstance(session, WorkbenchSession):
+            if session.display_turn_id is not None:
+                raise WorkbenchError("已有前台显示尚未收尾。")
+            self.turn_id = uuid.uuid4().hex
+            session.display_turn_id = self.turn_id
             session.reference_checkpoint = {
                 "nodes": list(self.nodes),
                 "missions": list(self.missions),
@@ -60,10 +65,30 @@ class DisplayTurn:
     def acknowledge(self) -> None:
         """Publish the references actually displayed, then enable their exact confirmations."""
         if isinstance(self.session, WorkbenchSession):
+            messages = self.session.store.data.get("messages")
+            replies = (
+                [
+                    row
+                    for row in messages
+                    if isinstance(row, dict)
+                    and row.get("role") == "assistant"
+                    and row.get("turn_id") == self.turn_id
+                ]
+                if isinstance(messages, list)
+                else []
+            )
+            for row in replies:
+                row["displayed"] = True
             self.session.reference_checkpoint = None
-            self.session.checkpoint()
+            try:
+                self.session.checkpoint()
+            except BaseException:
+                for row in replies:
+                    row["displayed"] = False
+                raise
             self.session.shown_draft, self.session.suggestion = self.draft, self.suggestion
             self.session.pending_cancel = self.cancellation
+            self.session.display_turn_id = None
         self.finished = True
 
     def reject(self) -> None:
@@ -84,4 +109,6 @@ class DisplayTurn:
                 raise DisplayPersistenceError(
                     "可见对象引用未能保存，请恢复存储后重新进入会话。"
                 ) from error
+            finally:
+                session.display_turn_id = None
         self.finished = True

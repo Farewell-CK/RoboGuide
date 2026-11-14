@@ -445,7 +445,7 @@ def facts(evidence: list[JSONObject]) -> str:
 
 
 def bounded_history(messages: object) -> list[JSONObject]:
-    """Include at most ten recent turns under 24 KiB, dropping oldest complete messages first."""
+    """Bound original inputs and acknowledged replies; never infer legacy display."""
     if not isinstance(messages, list):
         return []
     selected: list[JSONObject] = []
@@ -454,9 +454,21 @@ def bounded_history(messages: object) -> list[JSONObject]:
         if not isinstance(item, dict):
             continue
         text = item.get("text")
-        if not isinstance(text, str):
+        role = item.get("role")
+        if (
+            not isinstance(role, str)
+            or role not in {"user", "assistant"}
+            or not isinstance(text, str)
+        ):
             continue
-        row: JSONObject = {"role": str(item.get("role")), "text": text[:4000], "historical": True}
+        if role == "assistant" and item.get("displayed") is not True:
+            continue
+        row: JSONObject = {
+            "role": role,
+            "text": text[:4000],
+            "historical": True,
+            "truncated": len(text) > 4000,
+        }
         length = len(json.dumps(row, ensure_ascii=False).encode())
         if size + length > 24000:
             break

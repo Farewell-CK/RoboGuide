@@ -94,6 +94,12 @@ _DEFINITIONS = [
         "仅建议明确请求的任务动作；不执行、不审批、不取消任何任务。",
         {
             "action": {"type": "string", "enum": cast(JSONValue, _ACTIONS)},
+            "start_turn": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16,
+                "description": "proposal_sources 中任务最早的用户原文 ID；独立新任务用 current。",
+            },
         },
     ),
 ]

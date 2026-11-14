@@ -140,11 +140,13 @@ def test_model_proposal_requires_displayed_explicit_plan_and_execution(
 
 def test_session_resume_keeps_natural_history_but_no_tool_or_action_is_replayed(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Resuming retains public tool audit and text while querying only when the model asks."""
     transport = Responses([_response(_message("你好！"))])
     session = session_for(tmp_path, transport)
-    session.ask("你好")
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+    display_question(session, "你好")
     controller, directory = session.controller, session.store.path.parent
     session.store.close()
     resumed_store = SessionStore(directory, "native", {}, True)

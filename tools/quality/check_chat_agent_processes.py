@@ -282,7 +282,7 @@ def fixture_response(payload: dict[str, Any], number: int) -> dict[str, Any]:
     elif "节点" in question:
         route = "read_cluster", {}
     elif "巡检" in question:
-        route = "propose_action", {"action": "plan"}
+        route = "propose_action", {"action": "plan", "start_turn": "current"}
     if route is not None:
         name, arguments = route
         return {
@@ -438,6 +438,20 @@ class ChatProcess:
         started = time.monotonic()
         self.send(text)
         self.wait(lambda: self.endings() > before, text)
+
+        def acknowledged() -> bool:
+            """Observe the saved ACK for this exact input after the original output has flushed."""
+            saved = json.loads((self.output / "sessions" / f"{self.session}.json").read_text())
+            messages = saved.get("messages", [])
+            return bool(
+                len(messages) >= 2
+                and messages[-2].get("role") == "user"
+                and messages[-2].get("text") == text
+                and messages[-1].get("role") == "assistant"
+                and messages[-1].get("displayed") is True
+            )
+
+        self.wait(acknowledged, "persisted display ACK: " + text)
         data = json.loads((self.output / "sessions" / f"{self.session}.json").read_text())
         return {
             "user": text,

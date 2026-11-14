@@ -96,13 +96,20 @@ class ConversationSession(WorkbenchSession):
         self.query_status, self.evidence = result.status, result.evidence
         self._retain_agent_turn(question, result.items)
         if result.proposal is not None:
-            self.suggestion = (result.proposal.kind, question)
+            if result.proposal_text is None:
+                raise WorkbenchError("操作提议缺少完整原文。")
+            self.suggestion = (result.proposal.kind, result.proposal_text)
             options = (
                 "/choose plan 仅规划；/choose run 开始执行流程"
                 if result.proposal.kind in {"plan", "run"}
                 else "/choose " + result.proposal.kind
             )
-            return "我会先保留你的原始要求，等待你确认下一步。\n" + options
+            return (
+                "待确认的原文：\n"
+                + safe_text(result.proposal_text).replace("\\u000a", "\n")
+                + "\n确认后按以上原文继续。\n"
+                + options
+            )
         text = result.text
         if result.evidence:
             summary = adapter.reference_summary(result.evidence)
