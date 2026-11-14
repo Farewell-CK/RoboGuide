@@ -106,6 +106,27 @@ def test_planar_search_and_occupancy_thresholds_are_bounded_before_native_work()
             OccupancyPolicy.parse({**policy(), **change})
 
 
+def test_fusion_strategy_is_opt_in_and_rejects_unknown_values() -> None:
+    """Preserve old policy bytes and reject invalid strategy combinations."""
+    original = policy()
+    default = OccupancyPolicy.parse(original)
+    assert default.strategy == "correlative-icp"
+    assert default.request_policy() == original
+    assert OccupancyPolicy.parse({**original, "strategy": "correlative-icp"}) == default
+    feature = {**original, "strategy": "opencv-akaze"}
+    assert OccupancyPolicy.parse(feature).request_policy() == feature
+    with pytest.raises(ValueError, match="unsupported occupancy fusion strategy"):
+        OccupancyPolicy.parse({**original, "strategy": "unknown"})
+    parent = {
+        "path": "parent.bundle",
+        "content_digest": "sha256:" + "b" * 64,
+        "revision_id": "parent",
+        "frame_id": "source-frame",
+    }
+    with pytest.raises(ValueError, match="incremental parent"):
+        parse_job({**request(), "policy": feature, "parent": parent})
+
+
 def test_planar_aliases_and_unproven_output_frames_cannot_expand_source_evidence() -> None:
     """Renaming one file cannot add an observation or create a global/altitude frame."""
     original = request()

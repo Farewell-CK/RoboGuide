@@ -83,6 +83,17 @@
     "algorithm": {
       "type": "object",
       "additionalProperties": false,
+      "if": {
+        "properties": {
+          "name": {"const": "opencv-akaze-se2-posegraph-conservative-tiles/v0.1"}
+        }
+      },
+      "then": {
+        "properties": {
+          "versions": {"required": ["opencv-python-headless"]},
+          "native_binary_digests": {"required": ["cv2"]}
+        }
+      },
       "required": [
         "name",
         "policy",
@@ -94,7 +105,8 @@
         "name": {
           "enum": [
             "fpfh-ransac-icp-posegraph-observed-voxel-tiles/v0.1",
-            "bounded-se2-correlative-icp-posegraph-conservative-tiles/v0.1"
+            "bounded-se2-correlative-icp-posegraph-conservative-tiles/v0.1",
+            "opencv-akaze-se2-posegraph-conservative-tiles/v0.1"
           ]
         },
         "policy": {
@@ -109,6 +121,9 @@
             "scipy"
           ],
           "properties": {
+            "opencv-python-headless": {
+              "const": "4.13.0.92"
+            },
             "numpy": {
               "const": "2.4.6"
             },
@@ -129,6 +144,10 @@
             "scipy.linalg._fblas"
           ],
           "properties": {
+            "cv2": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
             "numpy._core._multiarray_umath": {
               "type": "string",
               "pattern": "^sha256:[0-9a-f]{64}$"
