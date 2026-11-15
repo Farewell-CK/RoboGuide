@@ -191,6 +191,7 @@ class StateSnapshot:
         if elapsed < 0:
             raise WorkbenchError("本地读取时钟无效，当前状态未知。")
         results: list[JSONObject] = []
+        sources: dict[str, list[str]] = {}
         lines = [
             f"{safe_text(self.target)} · 设备状态",
             f"读取时间：{self.received_at}（客户端 UTC）",
@@ -227,11 +228,11 @@ class StateSnapshot:
             results.append(row)
             lines.append(_render_field(name, sample))
             if evidence.get("source"):
-                lines.append(
-                    f"  来源：{safe_text(cast(str, evidence['source']))}；"
-                    f"Controller 接收时间：{evidence.get('received_at_ms')} ms"
-                )
-        lines.append("显示设备上报数据；位置、姿态不授予移动或物理安全许可。")
+                source = cast(str, evidence["source"])
+                sources.setdefault(source, []).append(LABELS.get(name, name))
+        for source, names in sources.items():
+            labels = "、".join(safe_text(name) for name in names)
+            lines.append(f"来源：{safe_text(source)}（{labels}）")
         complete = all(row["status"] == "reported" for row in results)
         if not complete:
             lines.append(
@@ -384,6 +385,6 @@ def read_state(
         responses[1],
         responses[2],
         started,
-        datetime.now(UTC).isoformat(),
+        datetime.now(UTC).isoformat(timespec="seconds"),
         profiles,
     )

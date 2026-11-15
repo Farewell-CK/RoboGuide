@@ -186,6 +186,8 @@ def test_declared_profiles_use_the_same_state_chain_and_preserve_raw_source(
     assert f"电量：{65 if legacy else 82} %" in result.text and "warehouse" in result.text
     assert "朝向=0.4 rad" in result.text and ("趴下" if legacy else "站立") in result.text
     assert "未验证" in result.text and read.state == original
+    assert result.text.count("来源：") == 1 and "Controller 接收时间" not in result.text
+    assert result.components[0]["received_at_ms"] == 900
     assert result.components[1]["details"] == {
         "localization_verified": False,
         "shared_frame_verified": False,
