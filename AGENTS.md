@@ -1180,6 +1180,14 @@ Assistant history, including queued and resumed turns. Native proposals select a
 user-turn source and freeze the complete dialogue suffix, preserving limits and clarifications.
 Show that exact text before /choose; clipped or missing originals refuse rather than borrow a summary.
 These local context annotations grant no Mission, Controller or physical authority.
+The generic State read extension is owned by workbench state_queries.py/state_profiles.py and
+test_workbench_state{,_chat}.py. Exact tenant-visible export declarations bind source/object/schema;
+versioned decoders retain original outer/native validity and recheck expiry after model latency.
+Unknown formats, ambiguous sources and stale values never become physical facts. Keep Node health,
+World physical reports and action authority separate; no arbitrary plugin/schema download or new
+Mission follows from a read. State object references share the original display ACK/queue/resume
+rules. The installed chat process gate covers declared physical State and actual stale refusal.
+See conversation-workbench-state-v0.1.md; device and live Provider acceptance remain independent.
 
 ADR-0252 adds explicit opt-in Mission Request v0.5 submission intent. Plan-only requests remain
 AwaitingExecution across edits/restarts; execute grants only the displayed exact revision/digest

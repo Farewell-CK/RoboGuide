@@ -56,6 +56,8 @@ COMMANDS = [
     "/reset",
     "/quit",
     "/status",
+    "/state",
+    "/state-fields",
     "/sessions",
     "/new",
     "/resume",
@@ -82,6 +84,8 @@ QUEUEABLE_COMMANDS = {
     "/nodes",
     "/sessions",
     "/status",
+    "/state",
+    "/state-fields",
 }
 
 
@@ -171,7 +175,7 @@ def _is_queueable(text: str) -> bool:
     if not text.startswith("/"):
         return True
     if (
-        _command_name(text) in {"/node", "/mission", "/explain"}
+        _command_name(text) in {"/node", "/mission", "/explain", "/state"}
         and not text.partition(" ")[2].strip()
     ):
         return False
@@ -295,8 +299,9 @@ async def interactive(session: WorkbenchSession) -> int:
         waiting = f" · 队列 {len(queued)}/{MAX_QUEUED_REQUESTS}" if queued else ""
         if foreground and not foreground.done():
             elapsed = time.monotonic() - started_at if started_at is not None else 0.0
-            return f" {phase} · {elapsed:.1f}s{waiting} · Ctrl-C 停止等待"
-        return f" 就绪{waiting} · Enter 发送 · Alt-Enter 换行 · / 命令"
+            return f" {phase} · {elapsed:.1f}s{waiting} · Ctrl-C 停止显示，原请求继续收尾"
+        selected = f" · 状态对象 {safe_text(session.last_state)}" if session.last_state else ""
+        return f" 就绪{selected}{waiting} · Enter 发送 · Alt-Enter 换行 · / 命令"
 
     prompt.bottom_toolbar = toolbar
     # The right prompt remains visible on terminals which cannot answer CPR, where
@@ -340,14 +345,15 @@ async def interactive(session: WorkbenchSession) -> int:
             flush=True,
         )
         print(
-            "  直接输入，开始对话。\n",
+            "  直接提问，例如：有哪些设备？它还有多少电？\n"
+            "  /state-fields 查看状态对象；/help 查看命令。\n",
             file=output,
             flush=True,
         )
 
     manager = WatchManager(session, notify)
 
-    async def display(result: str, has_suggestion: bool = False) -> bool:
+    async def display(result: str, suggestion: tuple[str, str] | None = None) -> bool:
         """Flush a role-labeled, wrapped assistant turn before acknowledging its state."""
 
         def write() -> bool:
@@ -367,12 +373,12 @@ async def interactive(session: WorkbenchSession) -> int:
                 for chunk in chunks:
                     print(("RG > " if first_line else "     ") + chunk, file=output, flush=True)
                     first_line = False
-            if has_suggestion:
-                print(
-                    "F1：仅规划/确认所示动作；F2：开始执行流程（仅在显示该选项时有效）。",
-                    file=output,
-                    flush=True,
-                )
+            if suggestion is not None:
+                if suggestion[0] in {"plan", "run"}:
+                    shortcut = "F1：只规划；F2：开始执行流程。"
+                else:
+                    shortcut = "F1：确认上面显示的动作。"
+                print(shortcut, file=output, flush=True)
             print("──", file=output, flush=True)
             return True
 
@@ -396,7 +402,7 @@ async def interactive(session: WorkbenchSession) -> int:
             result = await asyncio.to_thread(session.ask, text)
             turn.stage()
             if not muted:
-                displayed = await display(result, turn.suggestion is not None)
+                displayed = await display(result, turn.suggestion)
                 if displayed and not muted:
                     turn.acknowledge()
         except (ValueError, OSError) as error:
@@ -475,10 +481,19 @@ async def interactive(session: WorkbenchSession) -> int:
                         session.suggestion = None
                         session.pending_cancel = None
                 if text == "/watches":
-                    notify("跟踪：" + ", ".join(map(safe_text, manager.tasks)))
+                    notify(
+                        "跟踪：" + ", ".join(map(safe_text, manager.tasks))
+                        if manager.tasks
+                        else "当前没有任务跟踪；用 /watch MissionID 开始。"
+                    )
                     continue
                 if text.startswith("/unwatch "):
-                    await manager.stop(text.partition(" ")[2].strip())
+                    target = text.partition(" ")[2].strip()
+                    if target not in manager.tasks:
+                        notify("没有正在跟踪这个任务；用 /watches 查看当前跟踪。")
+                    else:
+                        await manager.stop(target)
+                        notify("已停止本地跟踪：" + target + "；任务仍按原流程运行。")
                     continue
                 if text == "/watch" or text.startswith("/watch "):
                     if foreground and not foreground.done():

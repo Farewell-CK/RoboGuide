@@ -7,14 +7,23 @@ import hashlib
 import math
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import cast
 
 from mission.models import JSONObject, JSONValue
 
 from roboguide_workbench.client import WorkbenchError, identifier
-from roboguide_workbench.evidence import ReadResult
+from roboguide_workbench.evidence import READ_COSTS, ReadResult
 from roboguide_workbench.routing import Query
 from roboguide_workbench.session import Session
+from roboguide_workbench.state_queries import (
+    StateSnapshot,
+    discover,
+    read_state,
+)
+from roboguide_workbench.state_queries import (
+    fields as state_fields,
+)
 from roboguide_workbench.views import safe_text
 from roboguide_workbench.workspace import WorkbenchSession
 
@@ -49,6 +58,24 @@ _DEFINITIONS = [
     _function("read_cluster", "读取当前身份可见的节点数量、能力和合同。", {}),
     _function("read_active_missions", "读取当前活动及状态未知的 Mission，终态分别统计。", {}),
     _function("list_missions", "读取当前身份可见的全部 Mission 状态。", {}),
+    _function(
+        "list_state_fields",
+        "查看设备已声明的状态字段；target 留空列出可见对象。",
+        {"target": {"type": "string", "maxLength": 256}},
+    ),
+    _function(
+        "read_state",
+        "读取设备已上报状态，消耗三次 GET；字段可用中文或目录中的名称。",
+        {
+            "target": _text_parameter("用户提供或目录返回的原始设备/对象 ID。"),
+            "fields": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 8,
+                "items": {"type": "string", "minLength": 1, "maxLength": 64},
+            },
+        },
+    ),
     _function(
         "read_node",
         "按用户提供或本轮工具结果中的原始 ID 读取节点。",
@@ -170,6 +197,10 @@ class _Projection:
     nodes_read: bool
     missions_read: bool
     single_mission: str | None
+    states: tuple[str, ...]
+    last_state: str | None
+    states_read: bool
+    state_focus: bool
 
 
 class ReadToolAdapter:
@@ -188,6 +219,8 @@ class ReadToolAdapter:
         self._shadow.displayed_missions = _ids(references.get("displayed_missions", []))
         self._shadow.last_node = _optional_id(references.get("last_node"))
         self._shadow.last_mission = _optional_id(references.get("last_mission"))
+        self._shadow.displayed_states = _ids(references.get("state_targets", []))
+        self._shadow.last_state = _optional_id(references.get("last_state"))
         self._shadow.last_raw = copy.deepcopy(session.last_raw)
         self._shadow.input_references = None
         self._shadow.input_history = None
@@ -199,12 +232,19 @@ class ReadToolAdapter:
         self._nodes_read = False
         self._missions_read = False
         self._single_mission: str | None = None
+        self._states_read = False
+        self._state_focus = False
+        self._state_reads: dict[str, StateSnapshot] = {}
+        self._read_results: dict[str, ReadResult] = {}
         self._known_nodes = set(self._shadow.displayed_nodes)
         self._known_missions = set(self._shadow.displayed_missions)
         if self._shadow.last_node:
             self._known_nodes.add(self._shadow.last_node)
         if self._shadow.last_mission:
             self._known_missions.add(self._shadow.last_mission)
+        self._known_states = set(self._shadow.displayed_states) | self._known_nodes
+        if self._shadow.last_state:
+            self._known_states.add(self._shadow.last_state)
         self._update_references()
 
     def definitions(self) -> list[JSONObject]:
@@ -219,6 +259,8 @@ class ReadToolAdapter:
                 "displayed_missions": list(self._shadow.displayed_missions),
                 "last_node": self._shadow.last_node,
                 "last_mission": self._shadow.last_mission,
+                "state_targets": list(self._shadow.displayed_states),
+                "last_state": self._shadow.last_state,
             }
         )
 
@@ -228,7 +270,13 @@ class ReadToolAdapter:
         if not isinstance(value, str):
             raise WorkbenchError("读取工具需要原始对象 ID。")
         target = identifier(value)
-        known = self._known_nodes if domain == "nodes" else self._known_missions
+        known = (
+            self._known_nodes
+            if domain == "nodes"
+            else self._known_states
+            if domain == "states"
+            else self._known_missions
+        )
         if target not in known and target not in self.question:
             raise WorkbenchError("对象 ID 没有当前问题、已展示引用或本轮读取依据。")
         return target
@@ -241,11 +289,17 @@ class ReadToolAdapter:
         if isinstance(remaining, bool) or not math.isfinite(remaining) or remaining <= 0:
             raise WorkbenchError("本轮读取时间预算已耗尽。")
         target: str | None = None
+        state_snapshot: StateSnapshot | None = None
         targets: tuple[str, ...] = ()
         if name == "read_node":
             target = self._target(arguments, "node_id", "nodes")
         elif name in {"read_mission", "read_explanation"}:
             target = self._target(arguments, "mission_id", "missions")
+        elif name in {"list_state_fields", "read_state"}:
+            if name == "list_state_fields" and arguments.get("target") == "":
+                target = ""
+            else:
+                target = self._target(arguments, "target", "states")
         elif name == "search_capabilities":
             value = arguments.get("keyword")
             if not isinstance(value, str):
@@ -260,11 +314,41 @@ class ReadToolAdapter:
             )
             if len(set(targets)) != len(targets):
                 raise WorkbenchError("节点比较包含重复 ID。")
-        cost = 3 if name == "read_explanation" else 1
+        cost = READ_COSTS.get(name, 1)
         controller_timeout = self._shadow.controller.timeout
         self._shadow.controller.timeout = min(controller_timeout, remaining / cost)
         try:
-            if name in {"read_active_missions", "list_missions"}:
+            if name == "list_state_fields":
+                raw = self._shadow.controller.state_providers()
+                result, targets_ = discover(raw, target or "")
+                self._shadow.displayed_states = targets_
+                self._shadow.last_state = targets_[0] if len(targets_) == 1 else None
+                self._shadow.last_raw = raw
+                self._states_read = True
+                self._state_focus = True
+            elif name == "read_state":
+                values = arguments.get("fields")
+                if not isinstance(values, list) or any(
+                    not isinstance(value, str) for value in values
+                ):
+                    raise WorkbenchError("状态查询需要明确的字段列表。")
+                # read_state itself clips every GET to the original remaining deadline.
+                self._shadow.controller.timeout = min(controller_timeout, remaining)
+                state_snapshot = read_state(
+                    self._shadow.controller,
+                    target or "",
+                    state_fields(cast(list[str], values)),
+                    remaining,
+                )
+                result = state_snapshot.render()
+                self._shadow.last_state = target
+                self._state_focus = True
+                self._shadow.last_raw = {
+                    "providers": state_snapshot.catalog,
+                    "inventory": state_snapshot.inventory,
+                    "state": state_snapshot.state,
+                }
+            elif name in {"read_active_missions", "list_missions"}:
                 result = self._shadow.read_missions(active_only=name == "read_active_missions")
             elif name == "read_mission":
                 result = ReadResult(self._shadow.read_mission(target or ""))
@@ -294,14 +378,22 @@ class ReadToolAdapter:
             if self._shadow.last_mission not in self._shadow.displayed_missions:
                 self._shadow.last_mission = None
             self._single_mission = None
-        else:
+        elif name in {"read_mission", "read_explanation"}:
             self._single_mission = target
         self._known_nodes.update(self._shadow.displayed_nodes)
         self._known_missions.update(self._shadow.displayed_missions)
+        self._known_states.update(self._shadow.displayed_states)
+        self._known_states.update(self._shadow.displayed_nodes)
+        if self._shadow.last_state:
+            self._known_states.add(self._shadow.last_state)
         if self._shadow.last_mission:
             self._known_missions.add(self._shadow.last_mission)
         self._update_references()
         read_id = hashlib.sha256(f"{self._nonce}:{len(self._projections)}".encode()).hexdigest()
+        if state_snapshot is not None:
+            self._state_reads[read_id] = state_snapshot
+        if name in {"read_state", "list_state_fields"}:
+            self._shadow.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
         self._projections.append(
             _Projection(
                 read_id,
@@ -314,6 +406,10 @@ class ReadToolAdapter:
                 self._nodes_read,
                 self._missions_read,
                 self._single_mission,
+                tuple(self._shadow.displayed_states),
+                self._shadow.last_state,
+                self._states_read,
+                self._state_focus,
             )
         )
         component: JSONObject = {
@@ -326,7 +422,9 @@ class ReadToolAdapter:
             "node_ids": list(self._shadow.displayed_nodes),
             "mission_ids": list(self._shadow.displayed_missions),
         }
-        return ReadResult(text, result.complete, (*result.components, component))
+        returned = ReadResult(text, result.complete, (*result.components, component))
+        self._read_results[read_id] = returned
+        return returned
 
     def _selected(self, evidence: list[JSONObject] | None) -> _Projection | None:
         """Select only this adapter's reads retained in the actual final evidence bundle."""
@@ -380,7 +478,51 @@ class ReadToolAdapter:
             )
         if projection.single_mission:
             lines.append("本轮查询任务：" + safe_text(projection.single_mission))
+        if projection.states_read:
+            lines.append(
+                "本轮状态对象："
+                + (
+                    "；".join(
+                        f"#{i} {safe_text(value)}" for i, value in enumerate(projection.states, 1)
+                    )
+                    or "无"
+                )
+            )
         return "\n".join(lines)
+
+    def state_answer(self, evidence: list[JSONObject]) -> ReadResult | None:
+        """Recheck State after model latency, retaining other host answers in mixed queries."""
+        results: list[ReadResult] = []
+        has_state = False
+        for item in evidence:
+            components = item.get("components")
+            if not isinstance(components, list):
+                continue
+            for component in components:
+                if not isinstance(component, dict) or component.get("source") != _READ_SOURCE:
+                    continue
+                read_id = component.get("read_id")
+                if not isinstance(read_id, str) or read_id not in self._read_results:
+                    continue
+                snapshot = self._state_reads.get(read_id)
+                if snapshot is None:
+                    results.append(self._read_results[read_id])
+                    continue
+                has_state = True
+                result = snapshot.render()
+                item["consumption_check"] = {
+                    "complete": result.complete,
+                    "checked_at": datetime.now(UTC).isoformat(),
+                    "fields": cast(JSONValue, list(result.components)),
+                }
+                results.append(result)
+        if not has_state:
+            return None
+        return ReadResult(
+            "\n\n".join(result.text for result in results),
+            all(result.complete for result in results),
+            tuple(component for result in results for component in result.components),
+        )
 
     def publish(self, evidence: list[JSONObject]) -> None:
         """Adopt only the exact host-rendered references; DisplayTurn still owns durable ACK."""
@@ -391,7 +533,12 @@ class ReadToolAdapter:
             self.session.displayed_nodes = list(projection.node_ids)
         if projection.missions_read:
             self.session.displayed_missions = list(projection.mission_ids)
-        self.session.last_node = projection.last_node
-        self.session.last_mission = projection.last_mission
+        if projection.nodes_read or projection.missions_read or projection.single_mission:
+            self.session.last_node = projection.last_node
+            self.session.last_mission = projection.last_mission
+        if projection.states_read:
+            self.session.displayed_states = list(projection.states)
+        if projection.state_focus:
+            self.session.last_state = projection.last_state
         self.session.last_raw = copy.deepcopy(projection.raw)
         self.session.last_read_at = projection.received_at

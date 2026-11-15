@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import time
 import uuid
 from collections.abc import Callable
@@ -19,38 +20,41 @@ from roboguide_workbench.mission_views import render_mission_list
 from roboguide_workbench.persistence import SessionStore
 from roboguide_workbench.routing import Query, Router
 from roboguide_workbench.session import HELP, Session
+from roboguide_workbench.state_queries import discover, fields, read_state
 from roboguide_workbench.views import inventory_view, render_mission, render_nodes, safe_text
 
-EXTRA_HELP = """
-第四版：
-  /status              当前集群、身份、模型、会话与任务
-  /sessions            当前连接身份范围内的本地会话
-  /new [名称]           新会话（未确定命令会阻止切换）
-  /resume 名称          恢复会话，原执行选择不继承
-  /check               检查已展示计划，既不提交也不授予执行权限
-  /cancel request ID   预览放弃规划 Request
-  /cancel mission ID   预览取消已运行的 Mission
-  /cancel confirm      确认已展示的精确取消目标
-  /feedback [目录]      本地保存脱敏日志与诊断包
-第二版：
+EXTRA_HELP = """可以直接提问：有哪些设备？dog2 还有多少电？它在哪里？当前有哪些任务？
+
+设备与状态（无需模型）：
+  /nodes、/node ID       查看节点；/node #2 查询上次展示的第二个节点
+  /capabilities 建图     检索能力；/compare 比较上次展示的节点
+  /state-fields [ID]     查看状态对象及可查询字段
+  /state ID 电量 位置    查询状态；也支持 battery/position/posture
+  /state #2 姿态         查询上次状态目录中的第二个对象；/state 重查当前对象
+
+任务与规划：
   /missions             当前身份可见的任务列表
   /missions active      仅显示当前 Running、Accepted、Cancelling 或 Unknown 任务
-  /mission #2           查询列表中的第二项
-  /compare              比较上轮展示的节点（最多四个）
+  /mission ID 或 #2      查询任务及各步骤
   /explain ID 或 #2      组合读取任务、绑定与恢复依据
-  /watch [ID]           持续观察任务，Ctrl-C 仅停止观察
-  /plan 目标            只生成计划
-  /run 目标             按既有审批策略进入执行流程
+  /watch [ID]            后台跟踪；/watches 查看，/unwatch ID 停止跟踪
+  /plan 目标             只生成计划；/run 目标 按既有审批策略进入执行流程
   /request [ID]         刷新当前或指定的 Mission Request
-  /answer 内容          回答当前问题或修改当前草案
-  /answer-to 问题ID 内容 回答多个问题中的指定一个
-  /execute              授权当前已展示版本提交执行
-  /approve              对当前已展示版本进行风险审批（需要 approver 权限）
-  /choose plan|run      对刚才的自然语言提议作明确选择
-  /choose answer|execute|approve  确认对应提议
-  /observe              只读核对上一条命令，不重发
-  /reconcile            对账原命令日志，不重新执行原操作
-  /history              查看本会话最近的问答
+  /answer 内容          回答澄清或修改草案；/answer-to 问题ID 内容 指定问题
+  /plan-detail          展开计划；/check 检查当前版本
+  /execute              授权已展示版本；/approve 独立风险审批
+  /choose plan|run       确认刚显示的提议；也支持 answer/execute/approve
+  /cancel request ID 或 /cancel mission ID  预览取消，/cancel confirm 确认
+
+会话与诊断：
+  /status、/sessions     查看当前连接与会话；/new [名称] 新建，/resume 名称 恢复
+  /history、/raw         查看历史；/reset 清除当前对象选择
+  /observe、/reconcile   核对原命令，不重发原操作
+  /feedback [目录]       本地保存脱敏诊断包
+  /quit                 等原请求收尾后退出
+
+Enter 发送，Alt-Enter 换行，Tab 补全。Ctrl-C 停止显示和清空排队，任务取消使用 /cancel。
+设备状态缺失、过期或来源冲突会明确显示；历史记录不能代替当前读取。
 """
 
 
@@ -175,6 +179,8 @@ class WorkbenchSession(Session):
             raise WorkbenchError("会话上下文损坏。")
         self.displayed_nodes = self._ids(context.get("nodes", []))
         self.displayed_missions = self._ids(context.get("missions", []))
+        self.displayed_states = self._ids(context.get("states", []))
+        self.last_state = self._optional_id(context.get("last_state"))
         self.last_node = self._optional_id(context.get("last_node"))
         self.last_mission = self._optional_id(context.get("last_mission"))
         self.request_id = self._optional_id(context.get("request_id"))
@@ -197,6 +203,8 @@ class WorkbenchSession(Session):
             "displayed_missions": list(self.displayed_missions),
             "last_node": self.last_node,
             "last_mission": self.last_mission,
+            "state_targets": list(self.displayed_states),
+            "last_state": self.last_state,
             "previous_question": self.previous_question,
         }
         if self.input_references is not None:
@@ -231,12 +239,15 @@ class WorkbenchSession(Session):
             "missions": list(self.displayed_missions),
             "last_node": self.last_node,
             "last_mission": self.last_mission,
+            "states": list(self.displayed_states),
+            "last_state": self.last_state,
             "request_id": self.request_id,
             "previous_question": self.previous_question,
         }
         if self.reference_checkpoint is not None:
-            for field in ("nodes", "missions", "last_node", "last_mission"):
-                context[field] = self.reference_checkpoint[field]
+            for field in ("nodes", "missions", "last_node", "last_mission", "states", "last_state"):
+                if field in self.reference_checkpoint:
+                    context[field] = self.reference_checkpoint[field]
         self.store.data["context"] = context
         self.store.save()
 
@@ -289,7 +300,7 @@ class WorkbenchSession(Session):
         if not question.startswith("/cancel"):
             self.pending_cancel = None
         if question == "/help":
-            return HELP.replace("当前版本只查询；执行、取消和修改操作尚未接入。", "") + EXTRA_HELP
+            return EXTRA_HELP
         if question == "/history":
             return safe_text(
                 json.dumps(self.store.data.get("messages"), ensure_ascii=False, indent=2)
@@ -297,6 +308,8 @@ class WorkbenchSession(Session):
         if question == "/reset":
             super().reset()
             self.displayed_missions = []
+            self.displayed_states = []
+            self.last_state = None
             self.request_id = None
             self.shown_draft = None
             self.suggestion = None
@@ -495,6 +508,49 @@ class WorkbenchSession(Session):
         """Dispatch explicit commands; model output never enters this method as a write."""
         command, _, argument = text.partition(" ")
         argument = argument.strip()
+        if command in {"/state", "/state-fields"}:
+            try:
+                values = shlex.split(argument)
+            except ValueError as error:
+                raise WorkbenchError('命令引号或转义不完整；例如 /state "设备ID" 电量。') from error
+            target = values[0] if values else "" if command == "/state-fields" else self.last_state
+            if target is None:
+                raise WorkbenchError("请先 /state-fields 查看设备，或使用 /state 设备ID battery。")
+            if target.startswith("#"):
+                try:
+                    index = int(target[1:])
+                except ValueError as error:
+                    raise WorkbenchError("请使用 /state #2 battery 这样的设备序号。") from error
+                if not 1 <= index <= len(self.displayed_states):
+                    raise WorkbenchError("上次展示的状态对象中没有这个序号，请先 /state-fields。")
+                target = self.displayed_states[index - 1]
+            if command == "/state-fields":
+                if len(values) > 1:
+                    raise WorkbenchError("用法：/state-fields [设备ID]。")
+                raw = self.controller.state_providers()
+                state_result, targets = discover(raw, target)
+                self.displayed_states = targets
+                self.last_state = targets[0] if len(targets) == 1 else None
+                self.last_raw = raw
+            else:
+                requested = fields(values[1:] or ["battery", "position", "posture"])
+                snapshot = read_state(self.controller, target, requested, self.controller.timeout)
+                state_result = snapshot.render()
+                self.last_state = target
+                self.last_raw = {
+                    "providers": snapshot.catalog,
+                    "inventory": snapshot.inventory,
+                    "state": snapshot.state,
+                }
+            self.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
+            self.query_status = (
+                "complete"
+                if state_result.complete
+                else "partial"
+                if any(item.get("complete") is True for item in state_result.components)
+                else "failed"
+            )
+            return state_result.text
         if command == "/status":
             from roboguide_workbench.status import status_line
 

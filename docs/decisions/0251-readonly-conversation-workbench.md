@@ -37,3 +37,17 @@ Use deterministic routing fixtures plus actual local HTTP and CLI boundaries to 
 fresh follow-ups, original displayed ordering, malformed responses, tenant forwarding, redirect
 refusal, bounded I/O and absence of writes. Real Provider and deployed cluster acceptance remain
 separate from fake-transport and fixture-server checks.
+
+## Generic State read extension · 2026-11-15
+
+The conversation workbench discovers the existing tenant-visible State export catalog and joins
+exact registered object/source/channel/schema evidence to current reported records. Host-owned
+versioned field profiles interpret battery, pose and posture initially; additional maintained
+profiles reuse the same discovery/read tools. Unknown schemas remain metadata, never executable
+decoders or inferred physical facts. No server or Node contract changes are required.
+
+State reads retain the original four-GET turn budget, exact source ownership, outer and nested
+sample validity, independent liveness and display ACK. The host rechecks original sample expiry
+after Provider latency and renders the actual qualified values itself. Conflicts and unavailable
+fields remain explicit; no source or model output acquires action/physical authority.
+See [State workbench v0.1](../development/conversation-workbench-state-v0.1.md).

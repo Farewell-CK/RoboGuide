@@ -118,6 +118,79 @@ def mission_state() -> dict[str, Any]:
     }
 
 
+def device_state(*, stale: bool = False) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Publish explicit synthetic State registration and physical reports without any device I/O."""
+    schema = "roboguide.world.robot-physical-observation/v0.1"
+    obj = {
+        "class": "world",
+        "object_type": "robot-physical-observation",
+        "object_id": "entity-beta",
+    }
+    export = {
+        "export_id": "physical-observation",
+        "local_system_id": "physical-observer",
+        "object": obj,
+        "semantic": "reported",
+        "payload_schema": schema,
+        "valid_for_ms": 5000,
+    }
+    catalog = {
+        "schema": "roboguide.state-provider-catalog/v0.1",
+        "built_in": [],
+        "nodes": [{"node_id": "node-beta", "state_exports": [export]}],
+    }
+    observed = int(time.time() * 1000)
+    value = {
+        "schema_version": schema,
+        "physical_entity_id": "entity-beta",
+        "battery": {
+            "availability": "reported_current",
+            "percent": 82,
+            "remaining_at_publisher_ms": 4900,
+        },
+        "posture": {
+            "availability": "reported_current",
+            "reported_posture": "standing",
+            "aggregate_age_ms": 100,
+            "source_stale_ms": 5000,
+            "remaining_at_publisher_ms": 4900,
+        },
+        "mapping": {
+            "response_availability": "reported_current_response",
+            "map_id": "fixture-map",
+            "mode": "localization",
+            "response_age_ms": 100,
+            "reported_pose": {"x": 1.25, "y": -2.5, "theta": 0.4},
+            "localization_verified": False,
+            "pose_measurement_time": None,
+            "localization_quality": None,
+            "map_revision_id": None,
+        },
+    }
+    records = {
+        "schema": "roboguide.state-query/v0.1",
+        "observed_at_ms": observed,
+        "records": [
+            {
+                "object": obj,
+                "semantic": "reported",
+                "source": "node:node-beta/physical-observer",
+                "channel_id": "physical-observation",
+                "stale": stale,
+                "value": {
+                    "payload_schema": schema,
+                    "value": value,
+                    "received_at_ms": observed - (20000 if stale else 50),
+                    "valid_for_ms": 5000,
+                    "source_epoch": "fixture-session",
+                    "sequence": 7,
+                },
+            }
+        ],
+    }
+    return catalog, records
+
+
 @dataclass
 class Trace:
     """Own HTTP observations and explicit fault controls for this one isolated run."""
@@ -125,6 +198,7 @@ class Trace:
     reads: list[dict[str, Any]] = field(default_factory=list)
     writes: list[str] = field(default_factory=list)
     provider: list[dict[str, Any]] = field(default_factory=list)
+    stale_state: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
     delay_next_inventory: bool = False
     entered: threading.Event = field(default_factory=threading.Event)
@@ -193,6 +267,10 @@ def controller_handler(trace: Trace) -> type[JsonHandler]:
                     return
             if self.path == "/v1/inventory":
                 self.send_json(200, inventory())
+            elif self.path == "/v1/state/providers":
+                self.send_json(200, device_state()[0])
+            elif self.path == "/v1/state/records?semantic=reported":
+                self.send_json(200, device_state(stale=trace.stale_state)[1])
             elif self.path.startswith("/v1/state/records?"):
                 self.send_json(200, mission_state())
             elif self.path == "/v1/missions/mission-unavailable":
@@ -265,6 +343,8 @@ def fixture_response(payload: dict[str, Any], number: int) -> dict[str, Any]:
         and supplied[-1].get("type") == "function_call_output"
     )
     if completed:
+        if any(word in question for word in ("电", "位置", "姿态")):
+            return final_message("设备状态已读取。")
         if "unavailable" in question:
             return final_message("这条任务的当前状态暂时无法读取，不能判断它是否还在运行。")
         if "任务" in question:
@@ -275,6 +355,8 @@ def fixture_response(payload: dict[str, Any], number: int) -> dict[str, Any]:
     route: tuple[str, dict[str, Any]] | None = None
     if "unavailable" in question:
         route = "read_mission", {"mission_id": "mission-unavailable"}
+    elif any(word in question for word in ("电", "位置", "姿态")):
+        route = "read_state", {"target": "node-beta", "fields": ["battery", "position", "posture"]}
     elif "第二个" in question:
         route = "read_node", {"node_id": "node-beta"}
     elif "任务" in question:
@@ -623,6 +705,23 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
                     assert "mission-running" in row["assistant"], row
                     assert "mission-history-001" not in row["assistant"], row
                 transcript.append(row)
+            before = len(trace.reads)
+            row = question_step(chat, trace, "node-beta 还有多少电，位置和姿态呢？")
+            assert len(trace.reads) == before + 3 and "82 %" in row["assistant"], row
+            assert "fixture-map" in row["assistant"] and "站立" in row["assistant"], row
+            transcript.append(row)
+            before = len(trace.reads)
+            row = question_step(chat, trace, "/state-fields")
+            assert len(trace.reads) == before + 1 and "entity-beta" in row["assistant"], row
+            transcript.append(row)
+            row = question_step(chat, trace, "/state #1 电量 位置")
+            assert "82 %" in row["assistant"] and "fixture-map" in row["assistant"], row
+            transcript.append(row)
+            trace.stale_state = True
+            row = question_step(chat, trace, "/state node-beta 电量")
+            assert "已过期" in row["assistant"] and "82 %" not in row["assistant"], row
+            transcript.append(row)
+            trace.stale_state = False
             row = question_step(chat, trace, "请查询 mission-unavailable 的当前状态")
             assert any("mission-unavailable" in entry["path"] for entry in trace.reads)
             assert any(
@@ -689,6 +788,8 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
                 ordinary_chat_controller_reads=0,
                 resume=True,
                 queue_exactly_once=True,
+                generic_state_queries=True,
+                stale_state_refused=True,
             )
     finally:
         trace.release.set()

@@ -434,6 +434,16 @@ class ReadOnlyController:
         """Read the current identity-visible inventory without selecting any executor."""
         return self._get("/v1/inventory")
 
+    def state_providers(self) -> JSONObject:
+        """Discover identity-visible State declarations without granting device authority."""
+        return self._get("/v1/state/providers")
+
+    def state_records(self, semantic: str = "reported") -> JSONObject:
+        """Read tenant-visible reports, preserving stale and conflicting sources."""
+        if semantic not in {"reported", "observed", ""}:
+            raise WorkbenchError("状态语义超出设备只读查询范围。")
+        return self._get("/v1/state/records" + ("?semantic=" + semantic if semantic else ""))
+
     def mission(self, mission_id: str) -> JSONObject:
         """Read an encoded literal Mission identity without accepting arbitrary route suffixes."""
         return self._get("/v1/missions/" + quote(identifier(mission_id), safe=""))

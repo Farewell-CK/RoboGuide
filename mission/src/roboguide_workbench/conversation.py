@@ -41,10 +41,7 @@ class ConversationSession(WorkbenchSession):
         if not question.startswith("/cancel"):
             self.pending_cancel = None
         if question == "/help":
-            return super()._turn(question) + (
-                "\n第三版：/plan-detail 展开完整计划；异步终端可用 /watches、/unwatch ID。\n"
-                "解释引用本轮证据；/history 是历史，不能代替当前状态。"
-            )
+            return super()._turn(question)
         if question == "/plan-detail":
             if self.shown_draft is None:
                 raise WorkbenchError("请先 /request 查看当前计划。")
@@ -111,6 +108,17 @@ class ConversationSession(WorkbenchSession):
                 + options
             )
         text = result.text
+        state_answer = adapter.state_answer(result.evidence)
+        if state_answer is not None:
+            text = state_answer.text
+            if not state_answer.complete:
+                self.query_status = (
+                    "partial"
+                    if any(item.get("complete") is True for item in state_answer.components)
+                    else "failed"
+                )
+            elif result.status != "complete":
+                text += "\n本轮其它读取或回复未完成；以上为已取得的设备上报。"
         if result.evidence:
             summary = adapter.reference_summary(result.evidence)
             if summary:

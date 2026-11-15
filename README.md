@@ -91,6 +91,9 @@ MI 新增显式宿主目标草案格式：见 [ADR-0255](docs/decisions/0255-hos
 调用的机器可读事件。
 多轮任务会在确认前展示原任务和澄清原文；仅完整显示的助手回复进入后续模型历史，
 静音或输出失败的内容保留在本地审计记录中。
+通用[设备状态查询](docs/development/conversation-workbench-state-v0.1.md)已接入电量、位置和姿态：
+`/state-fields` 发现上报对象，`/state ID 电量 位置` 直接读取；自然语言和独立 `roboguide state`
+复用相同的来源、有效期和冲突检查。状态缺失或过期保持未知，不创建 Mission。
 
 真机接入的专题设计见 [ADR-0231 两类接入与本机任务委派](docs/decisions/0231-local-eaios-and-device-integration.md)。
 该提案以验证 RG 的任务、调度、执行与恢复为目标，区分已有具身操作系统的参与者和

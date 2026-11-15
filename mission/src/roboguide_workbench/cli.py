@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import shlex
 import sys
 import uuid
 from contextlib import suppress
@@ -43,6 +44,8 @@ def parser() -> argparse.ArgumentParser:
         ("capabilities", "按能力或合同检索"),
         ("mission", "指定 Mission/Task 状态"),
         ("missions", "当前任务列表"),
+        ("state-fields", "发现设备可查询的状态字段"),
+        ("state", "读取设备电量、位置或姿态"),
         ("doctor", "检查连接与配置"),
         ("init", "配置全局工作台，之后任意目录可直接启动"),
     ):
@@ -54,7 +57,7 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--ca", type=Path)
         command.add_argument("--client-cert", type=Path)
         command.add_argument("--client-key", type=Path)
-        if name in {"chat", "missions", "doctor", "init"}:
+        if name in {"chat", "missions", "doctor", "init", "state", "state-fields"}:
             command.add_argument("--mission-service", default="http://127.0.0.1:8070")
             command.add_argument("--mission-timeout", type=float, default=60)
             command.add_argument("--mission-ca", type=Path)
@@ -89,6 +92,14 @@ def parser() -> argparse.ArgumentParser:
                 command.add_argument("--output", type=Path, help="全局工作台配置输出路径")
         elif name in {"node", "mission", "capabilities"}:
             command.add_argument("target")
+        elif name in {"state", "state-fields"}:
+            command.add_argument(
+                "target", nargs="?" if name == "state-fields" else None, default=""
+            )
+            if name == "state":
+                command.add_argument(
+                    "fields", nargs="*", help="battery/position/posture 或中文字段名"
+                )
     return root
 
 
@@ -173,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
             return ResponsesRouter(settings, current_environment())
 
         session: Session = Session(reader, router_factory)
-        if arguments.command in {"chat", "missions", "doctor"}:
+        if arguments.command in {"chat", "missions", "doctor", "state", "state-fields"}:
             mission = ReadOnlyController(
                 arguments.mission_service,
                 timeout=arguments.mission_timeout,
@@ -230,6 +241,14 @@ def main(argv: list[str] | None = None) -> int:
             if arguments.command == "missions":
                 display_question(session, "/missions")
                 return 0
+            if arguments.command in {"state", "state-fields"}:
+                values = ([arguments.target] if arguments.target else []) + getattr(
+                    arguments, "fields", []
+                )
+                display_question(
+                    session, "/" + arguments.command + (" " + shlex.join(values) if values else "")
+                )
+                return 0 if session.query_status == "complete" else 2
         if arguments.command != "chat":
             command = {
                 "nodes": "/nodes",
@@ -348,6 +367,8 @@ def interactive(session: Session) -> int:
             "/reset",
             "/quit",
             "/status",
+            "/state",
+            "/state-fields",
             "/sessions",
             "/new",
             "/resume",
