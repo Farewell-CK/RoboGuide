@@ -46,6 +46,22 @@ class RealTimeNavigationService {
   int _sessionGeneration = 0;
   bool _orientationTransitionPending = false;
   final NavigationDiagnostics _diagnostics = NavigationDiagnostics();
+  DateTime? _lastObstacleDiagnostic;
+  String? _lastObstacleMessage;
+
+  void recordObstacleDiagnostic(Map<String, dynamic> event) {
+    final now = DateTime.now();
+    final message = event['message'] as String?;
+    if (_lastObstacleDiagnostic == null ||
+        message != _lastObstacleMessage ||
+        now.difference(_lastObstacleDiagnostic!) >=
+            const Duration(seconds: 3)) {
+      _lastObstacleDiagnostic = now;
+      _lastObstacleMessage = message;
+      _diagnostics.add({'type': 'obstacle', ...event});
+    }
+  }
+
   final NavigationWaypointTracker _waypointTracker =
       NavigationWaypointTracker();
   String _matchingStatus = '等待路线画面匹配';

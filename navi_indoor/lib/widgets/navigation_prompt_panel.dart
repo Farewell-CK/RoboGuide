@@ -8,11 +8,13 @@ class NavigationPromptLayout extends StatelessWidget {
     required this.prompts,
     required this.details,
     required this.actions,
+    this.assist,
   });
 
   final NavigationPrompts prompts;
   final Widget details;
   final Widget actions;
+  final Widget? assist;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -25,8 +27,30 @@ class NavigationPromptLayout extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Flexible(child: SingleChildScrollView(child: details)),
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (assist != null &&
+                      MediaQuery.textScalerOf(context).scale(14) > 21)
+                    assist!,
+                  details,
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 8),
+          if (assist != null &&
+              MediaQuery.textScalerOf(context).scale(14) <= 21) ...[
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * .20,
+              ),
+              child: SingleChildScrollView(child: assist!),
+            ),
+            const SizedBox(height: 8),
+          ],
           NavigationPromptPanel(prompts: prompts),
           const SizedBox(height: 8),
           actions,
@@ -44,7 +68,9 @@ class NavigationPromptPanel extends StatelessWidget {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: prompts,
     builder: (context, _) {
-      final warning = prompts.kind == NavigationPromptKind.warning;
+      final warning =
+          prompts.kind == NavigationPromptKind.warning ||
+          prompts.kind == NavigationPromptKind.obstacle;
       final arrived = prompts.kind == NavigationPromptKind.arrival;
       return Semantics(
         container: true,

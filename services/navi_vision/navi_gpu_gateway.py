@@ -59,6 +59,8 @@ async def gpu_lifespan(app):
 
 
 app = gateway.app
+from obstacle_bridge import router as obstacle_router
+app.include_router(obstacle_router)
 app.router.lifespan_context = gpu_lifespan
 # The upstream health response lists optional models even when absent. Report
 # actual capabilities for this deliberately DINOv2-only comparison instance.

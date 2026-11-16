@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import '../services/registration_http_diagnostics.dart';
 import '../services/supabase_service.dart';
+import 'registration_feedback.dart';
 
 class RegisterScreen extends StatefulWidget {
   final bool allowAdminCreation;
-  
-  const RegisterScreen({
-    Key? key, 
-    this.allowAdminCreation = false,
-  }) : super(key: key);
+
+  const RegisterScreen({Key? key, this.allowAdminCreation = false})
+    : super(key: key);
 
   @override
   _RegisterScreenState createState() => _RegisterScreenState();
@@ -22,9 +23,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _supabaseService = SupabaseService();
   bool _isLoading = false;
   String? _errorMessage;
+  String? _registrationDiagnostic;
   bool _isAdmin = false;
   bool _showAdminCodeField = false;
-  
+
   static const String _adminRegistrationCode = "ADMIN123";
 
   @override
@@ -38,75 +40,57 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   Future<void> _signUp() async {
     if (!_formKey.currentState!.validate()) return;
-    
-    // Admin validation
     if (_isAdmin && _adminCodeController.text != _adminRegistrationCode) {
       setState(() {
-        _errorMessage = 'Invalid admin code. Please try again or register as a regular user.';
+        _errorMessage = '管理员注册码不正确，请核对后重试或注册普通用户。';
+        _registrationDiagnostic = null;
       });
       return;
     }
-    
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _registrationDiagnostic = null;
+      RegistrationRequestObservation.last = null;
     });
 
     try {
-      final emailExists = await _supabaseService.checkEmailExists(_emailController.text.trim());
-      
-      if (emailExists) {
-        setState(() {
-          _errorMessage = 'This email is already registered. Please try logging in.';
-          _isLoading = false;
-        });
-        return;
-      }
-      
+      // Let Auth check duplicates; the deployed project has no email_exists RPC.
       final result = await _supabaseService.signUpWithCheck(
         email: _emailController.text.trim(),
         password: _passwordController.text,
         role: _isAdmin ? UserRole.admin : UserRole.user,
-        data: {
-        },
       );
-      
       if (!mounted) return;
-      
-      // This part now handles only successful new signups
+
       if (result.authResponse.user != null && result.isNewUser) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('注册成功！请查收邮件并确认账号。'),
+          SnackBar(
+            content: Text(
+              result.authResponse.session != null
+                  ? '注册成功，已自动登录。'
+                  : '注册成功！请查收邮件并确认账号。',
+            ),
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.of(context).pop(); 
+        Navigator.of(context).pop();
       } else {
         setState(() {
-          _errorMessage = 'An unexpected error occurred. The email might already be registered.';
+          _errorMessage = '该邮箱可能已注册，请尝试登录或找回密码。';
         });
       }
-    } catch (e) {
-      // Handle explicit errors thrown by our service or Supabase
-      String errorMessage = 'Registration failed. Please try again.';
-      
-      // Check for specific error messages
-      String errorString = e.toString().toLowerCase();
-      if (errorString.contains('already registered') || 
-          errorString.contains('already exists') || 
-          errorString.contains('user already registered')) {
-        errorMessage = 'This email is already registered. Please use a different email or try logging in.';
-      } else if (errorString.contains('invalid email')) {
-        errorMessage = 'Please enter a valid email address.';
-      } else if (errorString.contains('weak password') || errorString.contains('password')) {
-        errorMessage = 'Password is too weak. Please use a stronger password.';
-      } else if (errorString.contains('network') || errorString.contains('connection')) {
-        errorMessage = '网络连接失败，请检查手机与电脑连接后重试。';
-      }
-      
+    } catch (error, stack) {
+      if (!mounted) return;
       setState(() {
-        _errorMessage = errorMessage;
+        _errorMessage = registrationErrorMessage(error);
+        _registrationDiagnostic = registrationDiagnostic(
+          error,
+          stack,
+          configuredUrl: dotenv.env['SUPABASE_URL'],
+          configuredKey: dotenv.env['SUPABASE_ANON_KEY'],
+        );
       });
     } finally {
       if (mounted) {
@@ -135,10 +119,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Semantics(
-          label: 'Register screen',
-          child: const Text('注册'),
-        ),
+        title: Semantics(label: 'Register screen', child: const Text('注册')),
         elevation: 0,
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
@@ -166,6 +147,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                       ),
                       SizedBox(height: verticalSpacing),
+                      if (_registrationDiagnostic != null) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          color: Colors.grey.shade100,
+                          child: SelectableText(
+                            _registrationDiagnostic!,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: verticalSpacing),
+                      ],
                     ],
                     Semantics(
                       label: 'Registration title',
@@ -188,7 +184,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           decoration: BoxDecoration(
                             color: Colors.red.shade50,
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.red.shade600, width: 2),
+                            border: Border.all(
+                              color: Colors.red.shade600,
+                              width: 2,
+                            ),
                           ),
                           child: Row(
                             children: [
@@ -222,25 +221,40 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       textField: true,
                       child: TextFormField(
                         controller: _emailController,
-                        style: const TextStyle(fontSize: 16, color: Colors.black),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          color: Colors.black,
+                        ),
                         decoration: InputDecoration(
                           labelText: '邮箱',
                           labelStyle: const TextStyle(color: Colors.black87),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.black, width: 2),
+                            borderSide: const BorderSide(
+                              color: Colors.black,
+                              width: 2,
+                            ),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.black54, width: 1),
+                            borderSide: const BorderSide(
+                              color: Colors.black54,
+                              width: 1,
+                            ),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.black, width: 2),
+                            borderSide: const BorderSide(
+                              color: Colors.black,
+                              width: 2,
+                            ),
                           ),
                           filled: true,
                           fillColor: Colors.white,
-                          prefixIcon: const Icon(Icons.email, color: Colors.black87),
+                          prefixIcon: const Icon(
+                            Icons.email,
+                            color: Colors.black87,
+                          ),
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 16,
@@ -265,40 +279,55 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       textField: true,
                       child: TextFormField(
                         controller: _passwordController,
-                        style: const TextStyle(fontSize: 16, color: Colors.black),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          color: Colors.black,
+                        ),
                         decoration: InputDecoration(
                           labelText: '密码',
                           labelStyle: const TextStyle(color: Colors.black87),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.black, width: 2),
+                            borderSide: const BorderSide(
+                              color: Colors.black,
+                              width: 2,
+                            ),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.black54, width: 1),
+                            borderSide: const BorderSide(
+                              color: Colors.black54,
+                              width: 1,
+                            ),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.black, width: 2),
+                            borderSide: const BorderSide(
+                              color: Colors.black,
+                              width: 2,
+                            ),
                           ),
                           filled: true,
                           fillColor: Colors.white,
-                          prefixIcon: const Icon(Icons.lock, color: Colors.black87),
+                          prefixIcon: const Icon(
+                            Icons.lock,
+                            color: Colors.black87,
+                          ),
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 16,
                           ),
                         ),
-                      obscureText: true,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter a password';
-                        }
-                        if (value.length < 6) {
-                          return 'Password should be at least 6 characters';
-                        }
-                        return null;
-                      },
+                        obscureText: true,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter a password';
+                          }
+                          if (value.length < 6) {
+                            return 'Password should be at least 6 characters';
+                          }
+                          return null;
+                        },
                       ),
                     ),
                     SizedBox(height: verticalSpacing),
@@ -308,106 +337,142 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       textField: true,
                       child: TextFormField(
                         controller: _confirmPasswordController,
-                        style: const TextStyle(fontSize: 16, color: Colors.black),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          color: Colors.black,
+                        ),
                         decoration: InputDecoration(
                           labelText: '确认密码',
                           labelStyle: const TextStyle(color: Colors.black87),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.black, width: 2),
+                            borderSide: const BorderSide(
+                              color: Colors.black,
+                              width: 2,
+                            ),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.black54, width: 1),
+                            borderSide: const BorderSide(
+                              color: Colors.black54,
+                              width: 1,
+                            ),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.black, width: 2),
+                            borderSide: const BorderSide(
+                              color: Colors.black,
+                              width: 2,
+                            ),
                           ),
                           filled: true,
                           fillColor: Colors.white,
-                          prefixIcon: const Icon(Icons.lock_outline, color: Colors.black87),
+                          prefixIcon: const Icon(
+                            Icons.lock_outline,
+                            color: Colors.black87,
+                          ),
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 16,
                           ),
                         ),
-                      obscureText: true,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return '请再次输入密码';
-                        }
-                        if (value != _passwordController.text) {
-                          return '两次输入的密码不一致';
-                        }
-                        return null;
-                      },
-                      ),
-                    ),
-                    SizedBox(height: verticalSpacing),
-                    
-                    // Only show this if admin creation is allowed
-                    widget.allowAdminCreation ? Card(
-                      child: SwitchListTile(
-                        title: const Text('管理员注册'),
-                        subtitle: const Text('需要管理员注册码'),
-                        value: _isAdmin,
-                        onChanged: (value) {
-                          setState(() {
-                            _isAdmin = value;
-                            _showAdminCodeField = value;
-                          });
-                        },
-                      ),
-                    ) : const SizedBox.shrink(),
-
-                    // Admin code field - only shown when admin option selected
-                    _showAdminCodeField ? Column(
-                      children: [
-                        SizedBox(height: verticalSpacing),
-                        Semantics(
-                        label: 'Admin code input field',
-                        hint: 'Enter the admin registration code',
-                        textField: true,
-                        child: TextFormField(
-                          controller: _adminCodeController,
-                          style: const TextStyle(fontSize: 16, color: Colors.black),
-                          decoration: InputDecoration(
-                            labelText: '管理员注册码',
-                            labelStyle: const TextStyle(color: Colors.black87),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(color: Colors.black, width: 2),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(color: Colors.black54, width: 1),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(color: Colors.black, width: 2),
-                            ),
-                            filled: true,
-                            fillColor: Colors.white,
-                            prefixIcon: const Icon(Icons.admin_panel_settings, color: Colors.black87),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 16,
-                            ),
-                          ),
                         obscureText: true,
                         validator: (value) {
-                          if (_isAdmin) {
-                            if (value == null || value.isEmpty) {
-                              return 'Admin code is required';
-                            }
+                          if (value == null || value.isEmpty) {
+                            return '请再次输入密码';
+                          }
+                          if (value != _passwordController.text) {
+                            return '两次输入的密码不一致';
                           }
                           return null;
                         },
-                        ),
-                        ),
-                      ],
-                    ) : const SizedBox.shrink(),
+                      ),
+                    ),
+                    SizedBox(height: verticalSpacing),
+
+                    // Only show this if admin creation is allowed
+                    widget.allowAdminCreation
+                        ? Card(
+                          child: SwitchListTile(
+                            title: const Text('管理员注册'),
+                            subtitle: const Text('需要管理员注册码'),
+                            value: _isAdmin,
+                            onChanged: (value) {
+                              setState(() {
+                                _isAdmin = value;
+                                _showAdminCodeField = value;
+                              });
+                            },
+                          ),
+                        )
+                        : const SizedBox.shrink(),
+
+                    // Admin code field - only shown when admin option selected
+                    _showAdminCodeField
+                        ? Column(
+                          children: [
+                            SizedBox(height: verticalSpacing),
+                            Semantics(
+                              label: 'Admin code input field',
+                              hint: 'Enter the admin registration code',
+                              textField: true,
+                              child: TextFormField(
+                                controller: _adminCodeController,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.black,
+                                ),
+                                decoration: InputDecoration(
+                                  labelText: '管理员注册码',
+                                  labelStyle: const TextStyle(
+                                    color: Colors.black87,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: const BorderSide(
+                                      color: Colors.black,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: const BorderSide(
+                                      color: Colors.black54,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: const BorderSide(
+                                      color: Colors.black,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                  prefixIcon: const Icon(
+                                    Icons.admin_panel_settings,
+                                    color: Colors.black87,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 16,
+                                  ),
+                                ),
+                                obscureText: true,
+                                validator: (value) {
+                                  if (_isAdmin) {
+                                    if (value == null || value.isEmpty) {
+                                      return 'Admin code is required';
+                                    }
+                                  }
+                                  return null;
+                                },
+                              ),
+                            ),
+                          ],
+                        )
+                        : const SizedBox.shrink(),
 
                     SizedBox(height: verticalSpacing * 2),
                     Semantics(
@@ -425,22 +490,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                           elevation: 2,
                         ),
-                        child: _isLoading
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
+                        child:
+                            _isLoading
+                                ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                                : const Text(
+                                  '注册',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
-                              )
-                            : const Text(
-                                '注册',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
                       ),
                     ),
                     SizedBox(height: verticalSpacing),
@@ -454,10 +520,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         },
                         child: const Text(
                           '已有账号？登录',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.black87,
-                          ),
+                          style: TextStyle(fontSize: 14, color: Colors.black87),
                         ),
                       ),
                     ),

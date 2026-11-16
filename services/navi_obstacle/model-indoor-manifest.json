@@ -1,0 +1,10 @@
+{
+  "repo": "facebook/mask2former-swin-large-ade-semantic",
+  "revision": "aa25c92404a40599614215e76514c79b427c7527",
+  "profile": "indoor",
+  "files": {
+    "config.json": {"size": 82540, "sha256": "573b9330846ed787069557d7eaf78d20a695a4ac7155b957becff02748a8d293"},
+    "preprocessor_config.json": {"size": 538, "sha256": "d5304644f28d4e7316aa528bf19a044155193382dd4d94769d283dc96e947899"},
+    "model.safetensors": {"size": 866052064, "sha256": "b143c144341c15b4f20165cc6d2c9305fb1b66792f68a6e0e06d2b20dc063b14"}
+  }
+}

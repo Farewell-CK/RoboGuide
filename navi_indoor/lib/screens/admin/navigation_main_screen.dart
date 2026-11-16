@@ -21,12 +21,18 @@ import '../../services/navigation_camera_session.dart';
 import '../../services/navigation_prompts.dart';
 import '../../widgets/navigation_prompt_panel.dart';
 import '../../widgets/debug_overlay.dart';
+import '../../services/obstacle_monitor.dart';
+import '../../widgets/obstacle_assist_panel.dart';
 
 class NavigationMainScreen extends StatefulWidget {
   final CameraDescription camera;
+  final bool showDiagnostics;
 
-  const NavigationMainScreen({Key? key, required this.camera})
-    : super(key: key);
+  const NavigationMainScreen({
+    Key? key,
+    required this.camera,
+    this.showDiagnostics = true,
+  }) : super(key: key);
 
   @override
   State<NavigationMainScreen> createState() => _NavigationMainScreenState();
@@ -44,6 +50,8 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
   // TTS for location announcements
   late FlutterTts _flutterTts;
   late NavigationPrompts _prompts;
+  late ObstacleApi _obstacleApi;
+  late ObstacleMonitor _obstacles;
 
   // Camera
   late final _cameraSession = NavigationCameraSession(_createCameraController);
@@ -119,6 +127,8 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     _navigationService.dispose();
     _localizationService.dispose();
     _voiceAssistant.dispose();
+    _obstacles.dispose();
+    _obstacleApi.dispose();
     _prompts.dispose();
     super.dispose();
   }
@@ -130,10 +140,14 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
       // Stop scans before detaching the controller. Returning from settings or
       // Tailscale must never resume a scan holding the old camera instance.
       _cancelLocalization = true;
+      _obstacles.setActive(false);
       _prompts.suspend();
       _disposeCamera();
     } else if (state == AppLifecycleState.resumed) {
       _prompts.resume();
+      _obstacles.setActive(
+        _navigationService.state == nav_service.NavigationState.navigating,
+      );
       // Reinitialize camera when app resumes
       if (!_isCameraInitialized) {
         _initializeCamera();
@@ -156,6 +170,14 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
         speak: _flutterTts.speak,
         stop: _flutterTts.stop,
         configure: _configureSpeech,
+      );
+      _obstacleApi = ObstacleApi(_clipService.serverUrl);
+      _obstacles = ObstacleMonitor(
+        analyze: _obstacleApi.analyze,
+        onWarning: _prompts.showObstacle,
+        onClear: _prompts.clearObstacle,
+        onDiagnostic:
+            (event) => _navigationService.recordObstacleDiagnostic(event),
       );
       _flutterTts.setErrorHandler((_) => _prompts.reportVoiceError());
       _navigationService = nav_service.RealTimeNavigationService(
@@ -555,6 +577,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     try {
       // Phase 1: Camera access (needs mutual exclusion)
       _isTakingPicture = true;
+      final capturedAt = DateTime.now();
       final captureTimer = Stopwatch()..start();
       final image = await _cameraController!.takePicture();
       captureTimer.stop();
@@ -565,6 +588,14 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
 
       _isTakingPicture = false; // Camera is now free
 
+      // Reuse this capture; bytes survive cleanup. Obstacle inference never
+      // blocks route inference and never opens a second camera controller.
+      if (_obstacles.enabled) {
+        final bytes = await imageFile.readAsBytes();
+        if (mounted && generation == _navigationService.sessionGeneration) {
+          unawaited(_obstacles.submit(bytes, capturedAt));
+        }
+      }
       // Phase 2: Processing (can happen in parallel)
       await _navigationService.processNavigationFrame(
         imageFile,
@@ -593,6 +624,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
   // Callback methods
   void _onNavigationStateChanged(nav_service.NavigationState state) {
     if (!mounted) return;
+    _obstacles.setActive(state == nav_service.NavigationState.navigating);
     // Handle recovery state changes and orientation mode
     setState(() {
       switch (state) {
@@ -847,7 +879,8 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
           children: [
             // Full screen camera preview
             _buildCameraPreview(),
-            if (_screenState == NavigationScreenState.readyToLocalize)
+            if (widget.showDiagnostics &&
+                _screenState == NavigationScreenState.readyToLocalize)
               Positioned(
                 top: 4,
                 left: 8,
@@ -884,7 +917,8 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
               ),
 
             // Debug overlay at top (admin only)
-            if (_screenState == NavigationScreenState.navigating &&
+            if (widget.showDiagnostics &&
+                _screenState == NavigationScreenState.navigating &&
                 !_isInOrientationMode)
               DebugOverlay(
                 debugInfo: _debugInfo,
@@ -994,6 +1028,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
   Widget _buildOverlayControlPanel() {
     return NavigationPromptLayout(
       prompts: _prompts,
+      assist: ObstacleAssistPanel(monitor: _obstacles),
       actions: _buildActionButtons(),
       details: Column(
         mainAxisSize: MainAxisSize.min,

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'user_navigation_main_screen.dart';
+import '../admin/navigation_main_screen.dart';
 import '../common/profile_screen.dart';
 
 class UserHomeScreen extends StatelessWidget {
@@ -16,8 +16,8 @@ class UserHomeScreen extends StatelessWidget {
     // Phone-optimized sizing with small phone adjustments
     final bool isSmallPhone = screenHeight < 600;
     final double buttonHeight = isSmallPhone ? 94.0 : 98.0;
-    final double mainIconSize = 100.0;  
-    final double buttonIconSize = 45.0; 
+    final double mainIconSize = 100.0;
+    final double buttonIconSize = 45.0;
     final double titleFontSize = isSmallPhone ? 18.0 : 20.0;
     final double subtitleFontSize = isSmallPhone ? 12.0 : 14.0;
     final double padding = 24.0;
@@ -40,7 +40,7 @@ class UserHomeScreen extends StatelessWidget {
         elevation: 0,
       ),
       body: Container(
-        color: Colors.white, 
+        color: Colors.white,
         child: SafeArea(
           child: Padding(
             padding: EdgeInsets.all(padding),
@@ -48,7 +48,9 @@ class UserHomeScreen extends StatelessWidget {
               children: [
                 // Welcome Header
                 Container(
-                  padding: EdgeInsets.symmetric(vertical: isSmallPhone ? 12 : 16),
+                  padding: EdgeInsets.symmetric(
+                    vertical: isSmallPhone ? 12 : 16,
+                  ),
                   child: Column(
                     children: [
                       Semantics(
@@ -98,7 +100,8 @@ class UserHomeScreen extends StatelessWidget {
                       // Start Navigation Button
                       Semantics(
                         label: 'Start Navigation button',
-                        hint: 'Opens the indoor navigation system to help you find your way',
+                        hint:
+                            'Opens the indoor navigation system to help you find your way',
                         button: true,
                         child: _buildAccessibleButton(
                           context: context,
@@ -110,7 +113,9 @@ class UserHomeScreen extends StatelessWidget {
                             if (cameras.isEmpty) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text('No camera available on this device'),
+                                  content: Text(
+                                    'No camera available on this device',
+                                  ),
                                   backgroundColor: Colors.red,
                                 ),
                               );
@@ -119,9 +124,11 @@ class UserHomeScreen extends StatelessWidget {
 
                             Navigator.of(context).push(
                               MaterialPageRoute(
-                                builder: (context) => UserNavigationMainScreen(
-                                  camera: cameras.first,
-                                ),
+                                builder:
+                                    (context) => NavigationMainScreen(
+                                      showDiagnostics: false,
+                                      camera: cameras.first,
+                                    ),
                               ),
                             );
                           },
@@ -137,7 +144,8 @@ class UserHomeScreen extends StatelessWidget {
                       // Profile Button
                       Semantics(
                         label: 'Profile button',
-                        hint: 'Opens your account settings and profile information',
+                        hint:
+                            'Opens your account settings and profile information',
                         button: true,
                         child: _buildAccessibleButton(
                           context: context,
@@ -198,11 +206,7 @@ class UserHomeScreen extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
             child: Row(
               children: [
-                Icon(
-                  icon,
-                  color: Colors.white,
-                  size: iconSize,
-                ),
+                Icon(icon, color: Colors.white, size: iconSize),
                 const SizedBox(width: 20),
                 Expanded(
                   child: Column(
@@ -228,11 +232,7 @@ class UserHomeScreen extends StatelessWidget {
                     ],
                   ),
                 ),
-                Icon(
-                  Icons.arrow_forward,
-                  color: Colors.white,
-                  size: 28,
-                ),
+                Icon(Icons.arrow_forward, color: Colors.white, size: 28),
               ],
             ),
           ),

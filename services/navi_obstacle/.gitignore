@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+model/
+model-indoor/
+eval-*.jpg
+bus-test.jpg
+*.pid
+*.log
+.deploying
+deploy-backups/
+verification-*.json

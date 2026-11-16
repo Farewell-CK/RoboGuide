@@ -1,6 +1,12 @@
 # RoboGuide：导航过程数据记录
 
-本地整合分支增加了 **NAVI 室内导航**：在“导航”页打开同一 APK 内的 Flutter 页面，保留现有地图、定位、路线跟踪和中文语音字幕。源码、构建及验证边界见 [NAVI 整合说明](docs/navi/整合说明.zh-CN.md)。
+`codex/navi-indoor-obstacle` 分支基于 `feat/navigation-data-archive` 整合 **NAVI 室内导航与实验性障碍提醒**：在“导航”页打开同一 APK 内的 Flutter 页面，保留地图、定位、路线跟踪和中文语音字幕。当前模块源码同步至 NAVI 1.0.18；本轮更新尚未重新构建 RoboGuide 原生宿主 APK。源码、构建及验证边界见 [NAVI 整合说明](docs/navi/整合说明.zh-CN.md)。
+
+- [NAVI 手机端源码](navi_indoor/)：地图与导航、语音字幕、室内障碍提醒、注册诊断及测试。
+- [DINOv2 视觉服务](services/navi_vision/)：CPU/GPU 特征接口与障碍服务转发。
+- [室内障碍服务与部署说明](services/navi_obstacle/README.zh-CN.md)：Swin-L / Mask2Former 室内模型、类别过滤、短时确认及验证记录。
+
+模型权重、安装包、地图数据和运行密钥不在本次新增源码中，按说明另行准备。
 
 本分支在 `feat/guide-assistant` 上整合已验证的 Swin-L 384×288 NPU 导航与过程数据归档。点击“开始导航”后记录，结束导航后封存；手机可以导出 ZIP、补填实验标注、删除本机记录，或上传到配套平台。
 

@@ -2,7 +2,7 @@ name: indoor_navigation_app
 description: Indoor navigation system for visually impaired users
 
 publish_to: 'none'
-version: 1.0.14+15
+version: 1.0.18+19
 
 environment:
   sdk: ">=3.7.0 <4.0.0"

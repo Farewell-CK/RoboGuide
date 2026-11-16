@@ -7,6 +7,7 @@ enum NavigationPromptKind {
   instruction,
   turn,
   warning,
+  obstacle,
   arrival,
 }
 
@@ -38,6 +39,39 @@ class NavigationPrompts extends ChangeNotifier {
   String? _queued;
   int _revision = 0;
   DateTime? _turnUntil;
+  Timer? _obstacleExpiry;
+  String? _deferredText;
+  NavigationPromptKind? _deferredKind;
+  bool _deferredAnnounce = false;
+
+  void showObstacle(String message) {
+    if (_closed || !_active || kind == NavigationPromptKind.arrival) return;
+    if (kind != NavigationPromptKind.obstacle) {
+      _deferredText = text;
+      _deferredKind = kind;
+      _deferredAnnounce = false;
+    }
+    show(
+      message,
+      kind: NavigationPromptKind.obstacle,
+      key: 'obstacle:$message',
+    );
+    _obstacleExpiry?.cancel();
+    _obstacleExpiry = Timer(const Duration(seconds: 3), clearObstacle);
+  }
+
+  void clearObstacle() {
+    _obstacleExpiry?.cancel();
+    if (!_closed && kind == NavigationPromptKind.obstacle) {
+      final message = _deferredText;
+      final announce = _deferredAnnounce;
+      kind = _deferredKind ?? NavigationPromptKind.instruction;
+      _deferredText = null;
+      _deferredKind = null;
+      if (message != null) show(message, kind: kind, announce: announce);
+    }
+  }
+
   final Map<String, DateTime> _spokenAt = {};
 
   void show(
@@ -50,6 +84,15 @@ class NavigationPrompts extends ChangeNotifier {
     if (this.kind == NavigationPromptKind.arrival &&
         kind != NavigationPromptKind.arrival)
       return;
+    if (this.kind == NavigationPromptKind.obstacle &&
+        kind != NavigationPromptKind.obstacle &&
+        kind != NavigationPromptKind.arrival &&
+        kind != NavigationPromptKind.warning) {
+      _deferredText = message;
+      _deferredKind = kind;
+      _deferredAnnounce = announce;
+      return;
+    }
     final now = _clock();
     if (this.kind == NavigationPromptKind.turn &&
         _turnUntil != null &&
@@ -83,6 +126,9 @@ class NavigationPrompts extends ChangeNotifier {
     _revision++;
     _queued = null;
     _spokenAt.clear();
+    _obstacleExpiry?.cancel();
+    _deferredText = null;
+    _deferredKind = null;
     _turnUntil = null;
     kind = NavigationPromptKind.progress;
     text = '请站在已录制的节点附近，点击开始定位。';
@@ -113,6 +159,7 @@ class NavigationPrompts extends ChangeNotifier {
   }
 
   void suspend() {
+    clearObstacle();
     _active = false;
     _revision++;
     _queued = null;
@@ -185,6 +232,7 @@ class NavigationPrompts extends ChangeNotifier {
 
   @override
   void dispose() {
+    _obstacleExpiry?.cancel();
     _closed = true;
     suspend();
     super.dispose();

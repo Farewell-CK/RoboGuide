@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import '../models/path_models.dart';
 import '../models/embedding_values.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'registration_http_diagnostics.dart';
 
 // Define user roles
 enum UserRole {
@@ -36,6 +37,7 @@ class SupabaseService {
     await Supabase.initialize(
       url: dotenv.env['SUPABASE_URL']!,
       anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
+      httpClient: RegistrationDiagnosticClient(),
     );
 
     // Initialize required storage buckets
@@ -235,46 +237,15 @@ class SupabaseService {
       print(
           '  - Session: ${response.session?.accessToken != null ? "exists" : "null"}');
 
-      // Determine if this is a new user
-      // For new signups, session is typically null until email confirmation
-      isNewUser = response.session == null;
+      // A new signup can return a session when email confirmation is disabled.
+      // With confirmation enabled, Auth may mask an existing account by returning
+      // an obfuscated user with an empty identities list and no session.
+      final user = response.user;
+      isNewUser = user != null &&
+          (response.session != null || user.identities?.isEmpty != true);
 
-      if (response.user != null && isNewUser) {
-        print('New user signup detected - inserting into profiles table.');
-        try {
-          final String userRoleString = role == UserRole.admin ? 'admin' : 'user';
-          final String currentTime = DateTime.now().toIso8601String();
-
-          print(
-              'Attempting to insert into profiles: id=${response.user!.id}, role=$userRoleString');
-
-          await client.from('profiles').insert({
-            'id': response.user!.id,
-            'email': response.user!.email,
-            'role': userRoleString,
-            'created_at': currentTime,
-            'updated_at': currentTime,
-          });
-          print(
-              'User profile inserted into profiles table for ${response.user!.id}');
-        } catch (e) {
-          print('Error saving user profile to profiles table: $e');
-          if (e is PostgrestException) {
-            print('Postgrest Error Details: ${e.details}');
-            print('Postgrest Error Hint: ${e.hint}');
-            print('Postgrest Error Code: ${e.code}');
-          }
-
-          // Don't fail the signup if profiles insert fails - user can still use the app
-          print(
-              'Continuing with signup despite profiles insert failure - user can still use the app');
-        }
-      } else if (response.user != null && !isNewUser) {
-        print('Existing user detected - skipping profiles insert.');
-      } else {
-        print(
-            'Signup response did not contain a user object. Skipping profiles insert.');
-      }
+      // public.navi_create_profile creates the profile in the Auth transaction.
+      // Do not insert from this unauthenticated or newly authenticated client.
 
       // For debugging: log the final decision
       print(
