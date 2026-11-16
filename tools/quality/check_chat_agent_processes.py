@@ -238,6 +238,32 @@ class JsonHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_sse(self, value: dict[str, Any]) -> None:
+        """Send actual public text delta frames before the independently completed response."""
+        text = "".join(
+            part.get("text", "")
+            for item in value.get("output", [])
+            if item.get("type") == "message"
+            for part in item.get("content", [])
+            if part.get("type") == "output_text"
+        )
+        events: list[dict[str, Any]] = [
+            {"type": "response.output_text.delta", "delta": text[index : index + 6]}
+            for index in range(0, len(text), 6)
+        ]
+        events.append({"type": "response.completed", "response": value})
+        frames = [
+            ("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode() for event in events
+        ]
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Length", str(sum(map(len, frames))))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        for frame in frames:
+            self.wfile.write(frame)
+            self.wfile.flush()
+
 
 def controller_handler(trace: Trace) -> type[JsonHandler]:
     """Expose only the production-shaped read facade and record every attempted write."""
@@ -465,13 +491,13 @@ def provider_handler(
                 if remote is None:
                     result = fixture_response(payload, number)
                 else:
-                    payload["model"] = model
+                    forwarded = {**payload, "model": model, "stream": False}
                     headers = {"Content-Type": "application/json"}
                     if secret:
                         headers["Authorization"] = "Bearer " + secret
                     request = urllib.request.Request(
                         remote.rstrip("/") + "/responses",
-                        data=json.dumps(payload, ensure_ascii=False).encode(),
+                        data=json.dumps(forwarded, ensure_ascii=False).encode(),
                         headers=headers,
                         method="POST",
                     )
@@ -483,7 +509,11 @@ def provider_handler(
                         result = json.loads(raw)
                 entry["response"] = result
                 entry["elapsed_seconds"] = round(time.time() - entry["started_at"], 3)
-                self.send_json(200, result)
+                entry["stream_transport"] = payload.get("stream") is True
+                if entry["stream_transport"]:
+                    self.send_sse(result)
+                else:
+                    self.send_json(200, result)
             except Exception as error:
                 entry["error_type"] = type(error).__name__
                 entry["elapsed_seconds"] = round(time.time() - entry["started_at"], 3)
@@ -834,6 +864,9 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
                 "doesn't support cursor position requests" not in path.read_text(errors="replace")
                 for path in output.glob("*.ansi")
             )
+            assert any(
+                "生成中" in path.read_text(errors="replace") for path in output.glob("*.ansi")
+            )
             result.update(
                 passed=True,
                 feedback_bundle=str(bundles[0]),
@@ -849,6 +882,7 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
                 native_task_request=True,
                 editable_queue=True,
                 mi_request_posts=len(trace.mi_writes),
+                responses_streaming=True,
             )
     finally:
         trace.release.set()
