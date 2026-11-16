@@ -1147,6 +1147,18 @@ actual retained commands offline. These are software-process/file proofs, never 
 
 ## Project Structure & Module Organization
 
+ADR-0256 makes the default Chat a native task agent. task_tools.py reuses actual MissionActions
+and original dialogue, scope, unknown receipts, one mutation per turn and acknowledged-plan gates;
+device_context.py provides advisory actual-contract/alias context. Default model tools start/answer/
+inspect/execute/approve/cancel tasks and observe original operations without a /choose detour.
+Server approval, Catalog/Review, Control and device authority are unchanged. streaming.py owns
+bounded public SSE previews; complete responses alone authorize tools and final display ACK.
+State source choices and historical raw_query retain original display scope and freshness.
+test_workbench_live_agent.py and test_workbench_streaming.py own actual HTTP/MI/SQL regressions;
+the installed chat process gate separately checks native fixture Requests, editable queues and
+operation without CPR. Preserve field report versus local software evidence. See
+docs/development/chat-real-use-remediation-20261116.md and ADR-0256.
+
 ADR-0254 adds installed chat v0.4 global and explicitly selected project model profiles, first-run setup, local status and
 scope-bound session navigation. Existing displayed-reference confirmation and original pending
 command fences remain. Exact-plan `/check` reuses only assessment ports. Explicit two-stage cancel

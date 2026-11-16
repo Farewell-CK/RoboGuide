@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -126,6 +126,19 @@ class BoundedProviderTransport:
         return request_json(
             url, "POST", headers, json.dumps(payload, ensure_ascii=False).encode(), timeout_seconds
         )
+
+    def post_stream_json(
+        self,
+        url: str,
+        headers: Mapping[str, str],
+        payload: JSONObject,
+        timeout_seconds: float,
+        emit: Callable[[str], None],
+    ) -> JSONObject:
+        """Stream public answer text while retaining completed-response tool validation."""
+        from roboguide_workbench.streaming import post_stream
+
+        return post_stream(url, headers, payload, timeout_seconds, emit)
 
 
 class RouterSettings(Protocol):

@@ -11,6 +11,7 @@ from typing import cast
 from mission.models import JSONObject, JSONValue
 
 from roboguide_workbench.client import ReadOnlyController, WorkbenchError, identifier
+from roboguide_workbench.device_context import alias_matches
 from roboguide_workbench.evidence import ReadResult
 from roboguide_workbench.state_profiles import DEFAULT_PROFILES, StateProfile, StateValue
 from roboguide_workbench.views import safe_text
@@ -27,6 +28,20 @@ def fields(values: list[str]) -> tuple[str, ...]:
     if len(set(selected)) != len(selected) or any(len(value) > 64 for value in selected):
         raise WorkbenchError("状态字段重复或过长。")
     return selected
+
+
+def choices(result: ReadResult) -> list[str]:
+    """Retain only source selectors actually included in the host-rendered ambiguity choices."""
+    targets: list[str] = []
+    for component in result.components:
+        candidates = component.get("candidates")
+        if not isinstance(candidates, list):
+            continue
+        for candidate in candidates:
+            target = candidate.get("target") if isinstance(candidate, dict) else None
+            if isinstance(target, str) and target not in targets:
+                targets.append(identifier(target))
+    return targets
 
 
 @dataclass(frozen=True)
@@ -119,7 +134,20 @@ def exports(raw: JSONObject, profiles: tuple[StateProfile, ...] = DEFAULT_PROFIL
 
 def _selected(exports_: list[Export], target: str) -> list[Export]:
     """Keep every exact object/publisher match so ambiguous names never select a foreign object."""
-    return [item for item in exports_ if item.object["object_id"] == target or item.node == target]
+    if target.startswith("object:"):
+        return [item for item in exports_ if item.object["object_id"] == target[7:]]
+    exact = [item for item in exports_ if item.object["object_id"] == target or item.node == target]
+    return exact or [item for item in exports_ if alias_matches(item.node, target)]
+
+
+def selection(item: Export, all_exports: list[Export]) -> str:
+    """Offer an explicit object selector when its literal ID also denotes multiple Node exports."""
+    target = str(item.object["object_id"])
+    return (
+        "object:" + target
+        if target.startswith("object:") or len(_selected(all_exports, target)) > 1
+        else target
+    )
 
 
 def discover(
@@ -132,7 +160,8 @@ def discover(
     targets: list[str] = []
     for item in selected[:64]:
         object_id = cast(str, item.object["object_id"])
-        index = targets.index(object_id) + 1 if object_id in targets else len(targets) + 1
+        selector = selection(item, all_exports)
+        index = targets.index(selector) + 1 if selector in targets else len(targets) + 1
         names = (
             "、".join(LABELS.get(name, name) + f" [{name}]" for name in item.profile.fields)
             if item.profile
@@ -141,13 +170,15 @@ def discover(
         entry = [
             f"{index}. {safe_text(object_id)} · 上报节点 {safe_text(item.node)}",
             f"   {names}；来源 {safe_text(item.source)}；格式 {safe_text(item.schema)}",
+            f"   选择：/state {safe_text(selector)} "
+            + " ".join(item.profile.fields if item.profile else ()),
         ]
         if len("\n".join([*lines, *entry]).encode()) > 18_000:
             lines.append("展示已截断；请指定明确对象 ID 缩小范围。")
             break
         lines.extend(entry)
-        if object_id not in targets:
-            targets.append(object_id)
+        if selector not in targets:
+            targets.append(selector)
     if not selected:
         lines.append("当前身份可见的目录中没有匹配的状态声明；请核对对象 ID 或设备的状态上报配置。")
     if len(selected) > 64:
@@ -191,6 +222,7 @@ class StateSnapshot:
         if elapsed < 0:
             raise WorkbenchError("本地读取时钟无效，当前状态未知。")
         results: list[JSONObject] = []
+        displayed_choices: list[str] = []
         sources: dict[str, list[str]] = {}
         lines = [
             f"{safe_text(self.target)} · 设备状态",
@@ -203,9 +235,16 @@ class StateSnapshot:
             if len(candidates) > 1:
                 sample = StateValue(
                     "conflict",
-                    reason="存在多个状态来源或对象，请先 /state-fields 查看并指定明确对象",
+                    reason="这台设备有多套状态上报，请选择下面的具体对象；不会合并或猜测来源",
                 )
-                evidence["candidates"] = [cast(JSONValue, item.object) for item in candidates]
+                evidence["candidates"] = [
+                    {
+                        "object": item.object,
+                        "target": "object:" + str(item.object["object_id"]),
+                        "source": item.source,
+                    }
+                    for item in candidates[:8]
+                ]
             elif candidates:
                 item = candidates[0]
                 matches = [row for row in rows if isinstance(row, dict) and item.matches(row)]
@@ -227,6 +266,16 @@ class StateSnapshot:
             }
             results.append(row)
             lines.append(_render_field(name, sample))
+            if sample.status == "conflict" and candidates:
+                for candidate in candidates[:8]:
+                    selector = "object:" + str(candidate.object["object_id"])
+                    if selector not in displayed_choices:
+                        displayed_choices.append(selector)
+                    index = displayed_choices.index(selector) + 1
+                    lines.append(
+                        f"  {index}. {safe_text(selector)} · {safe_text(candidate.source)}；"
+                        f"/state {safe_text(selector)} {name}"
+                    )
             if evidence.get("source"):
                 source = cast(str, evidence["source"])
                 sources.setdefault(source, []).append(LABELS.get(name, name))

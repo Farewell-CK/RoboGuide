@@ -56,6 +56,7 @@ class DisplayTurn:
                 "last_mission": self.last_mission,
                 "states": list(self.states),
                 "last_state": self.last_state,
+                "raw_query": session.raw_query(),
             }
 
     def stage(self) -> None:

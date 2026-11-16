@@ -212,7 +212,9 @@ def test_whole_tool_batch_validates_before_the_first_read(bad: JSONObject) -> No
 def test_reused_call_id_and_repeated_read_do_not_reissue_http(call_id: str) -> None:
     """Both duplicate protocol identity and a new ID for the same query refuse another read."""
     followup = _call("read_cluster", call_id=call_id)
-    transport = Responses([_response(_call("read_cluster")), _response(followup)])
+    transport = Responses(
+        [_response(_call("read_cluster")), _response(followup), _response(_message("已有两个节点"))]
+    )
     reads: list[str] = []
 
     def read(name: str, _arguments: JSONObject, _remaining: float) -> ReadResult:
@@ -221,22 +223,32 @@ def test_reused_call_id_and_repeated_read_do_not_reissue_http(call_id: str) -> N
         return ReadResult("已有两个节点")
 
     result = _agent(transport).answer("查询", {}, [], read, tool_definitions=TOOLS)
-    assert reads == ["read_cluster"] and result.status == "partial"
+    assert reads == ["read_cluster"] and result.status == (
+        "partial" if call_id == "call-1" else "complete"
+    )
     assert "已有两个节点" in result.text
 
 
-def test_composite_read_cost_is_charged_before_batch_admission() -> None:
-    """Two three-HTTP diagnostics cannot enter a four-read turn as two cheap model tools."""
+def test_composite_read_cost_is_charged_before_each_admission() -> None:
+    """A second diagnostic cannot exceed the original four-HTTP budget or erase the first."""
     transport = Responses(
         [
             _response(
                 _call("read_explanation", {"mission_id": "a"}),
                 _call("read_explanation", {"mission_id": "b"}, "c2"),
-            )
+            ),
+            _response(_message("a 的记录已读取，b 暂未读取。")),
         ]
     )
-    result = _agent(transport).answer("解释任务", {}, [], _no_read, tool_definitions=TOOLS)
-    assert result.status == "failed" and result.evidence == []
+    reads: list[str] = []
+
+    def read(_name: str, arguments: JSONObject, _remaining: float) -> ReadResult:
+        """Observe exactly which bounded composite read was actually admitted."""
+        reads.append(str(arguments["mission_id"]))
+        return ReadResult("a 的记录")
+
+    result = _agent(transport).answer("解释任务", {}, [], read, tool_definitions=TOOLS)
+    assert reads == ["a"] and result.status == "partial" and "a 的记录" in result.text
 
 
 def test_timeout_after_current_read_keeps_facts_and_original_wait_budget() -> None:

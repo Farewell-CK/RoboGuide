@@ -12,7 +12,7 @@ from typing import cast
 
 from mission.models import JSONObject, JSONValue
 
-from roboguide_workbench.client import WorkbenchError, decode_object
+from roboguide_workbench.client import ToolRefusal, WorkbenchError, decode_object
 from roboguide_workbench.evidence import READ_COSTS, QueryStatus, ReadResult
 from roboguide_workbench.routing import Query, ResponsesRouter
 from roboguide_workbench.views import safe_text
@@ -30,13 +30,22 @@ read_state 的最终数值由宿主重新检查有效期并展示；未知和过
 节点可达、软件任务完成或已接收取消，不代表物理就绪、设备安全停止或目标满足。
 工具结果已包含节点能力/任务聚合；只查需要的信息，避免重复查询或无关历史任务追查。
 对象 ID 必须来自用户明确输入、原来展示的引用，或本轮真实读取；序号依据上下文原顺序。
-需要计划、修改计划、执行或审批时，只能用 propose_action 提议；它没有执行权限。
-propose_action.start_turn 选择 proposal_sources 中本次任务最早的用户原文 ID；宿主保留其后
+你是能推进任务的 Agent。用户明确要求“让设备做某事”时，先核对当前能力和必要参数，再用
+start_task(mode=run) 开始正常执行流程；明确只规划时用 mode=plan。不要要求 /choose。
+可以先读节点/目录，再执行对应工具，并根据工具实际结果继续处理；不能声称尚未发生的成功。
+缺少区域、目标或成功标准时自然追问。明确能力缺口时先解释，不能通过编造合同来完成任务。
+answer_request 使用用户原始补充更新当前 Request；read_request 查询规划/审批/运行进度。
+execute_plan/approve_plan 只用于用户明确授权的已完整显示版本；审批仍需服务端 approver 权限。
+工具错误或重复调用只影响对应部分，继续完成复合问题中的其它独立部分。成功结果不重复读取。
+设备名可直接使用用户原话如“狗2”，宿主会读取实际目录解析；object: 前缀明确选择目录对象。
+歧义时列出实际可选对象及来源并询问选择，不反复查询同一个含糊 Node ID。
+start_task.start_turn 选择 proposal_sources 中本次任务最早的用户原文 ID；宿主保留其后
 的完整原文与澄清上下文。必须包含原任务和全部限制；独立新任务用 current。无法找全原文时
 先请用户完整重述，不从摘要补写。execute/approve 只用 current，仍由独立命令检查原计划。
 proposal_sources 的 input_index 从 0 计数，指向本次 input 中对应的用户消息。
-“好的”“谢谢”等普通回应不表示新执行或审批授权；需要确认的动作由工作台展示明确选项。
-取消任务请指导用户使用 /cancel 的预览和确认流程，不声称已经取消。
+“好的”“谢谢”等普通回应不创建新任务；风险审批须由用户明确要求并由服务端核对权限。
+用户明确要求取消时，用 cancel_task 取消精确 Request 或 Mission；不声称设备已经物理停止。
+操作回执丢失时用 observe_operation 核对原命令，绝不重发或换 ID 重试。
 最终使用自然语言回答，不输出意图标签、工具名、JSON、E1 编号或“模型解释”标题。
 普通聊天不附依据；使用工具后直接总结本轮事实，工作台会另附来源说明。
 """
@@ -55,6 +64,24 @@ _READ_LABELS = {
     "compare_nodes": "正在比较节点能力",
     "list_state_fields": "正在查看设备状态目录",
     "read_state": "正在读取设备状态",
+}
+_ACTION_LABELS = {
+    "start_task": "正在准备任务",
+    "answer_request": "正在补充任务要求",
+    "read_request": "正在查看任务规划进度",
+    "execute_plan": "正在提交已显示计划",
+    "approve_plan": "正在审批已显示计划",
+    "cancel_task": "正在取消指定任务",
+    "observe_operation": "正在核对原操作回执",
+}
+_ACTION_COSTS = {
+    "start_task": 2,
+    "answer_request": 1,
+    "read_request": 1,
+    "execute_plan": 2,
+    "approve_plan": 2,
+    "cancel_task": 3,
+    "observe_operation": 3,
 }
 
 
@@ -157,7 +184,7 @@ def _definitions(tools: list[JSONObject]) -> dict[str, JSONObject]:
         if (
             tool.get("type") != "function"
             or not isinstance(name, str)
-            or name not in {*_READ_LABELS, "propose_action"}
+            or name not in {*_READ_LABELS, *_ACTION_LABELS, "propose_action"}
             or name in definitions
             or not isinstance(parameters, dict)
             or tool.get("strict") is not True
@@ -382,12 +409,12 @@ class AgentConversation:
         """Freeze per-turn time and I/O limits without conferring any Mission write authority."""
         if (
             type(tools) is not int
-            or not 1 <= tools <= 4
+            or not 1 <= tools <= 32
             or type(calls) is not int
-            or not 1 <= calls <= 3
+            or not 1 <= calls <= 16
             or isinstance(seconds, bool)
             or not math.isfinite(seconds)
-            or not 0 < seconds <= 60
+            or not 0 < seconds <= 300
         ):
             raise WorkbenchError("查询预算超出范围。")
         self.router, self.tools, self.calls, self.seconds = router, tools, calls, seconds
@@ -401,6 +428,8 @@ class AgentConversation:
         *,
         tool_definitions: list[JSONObject],
         progress: Callable[[str], None] | None = None,
+        act: Callable[[str, JSONObject, str, float], ReadResult] | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> AgentAnswer:
         """Continue native tool-call outputs until natural final text or a bounded failure."""
         if not question.strip() or len(question) > 4096:
@@ -410,10 +439,24 @@ class AgentConversation:
         public_items: list[JSONObject] = []
         evidence: list[JSONObject] = []
         seen_ids: set[str] = set()
-        seen_queries: set[str] = set()
+        seen_queries: dict[str, JSONObject] = {}
+        pending: dict[str, tuple[str, str]] = {}
+        mutated = False
         spent = 0
+        output: JSONObject
         deadline = time.monotonic() + self.seconds
         notify = progress or (lambda _: None)
+
+        def retain_pending() -> None:
+            """Keep unresolved subqueries visible without charging a nonexistent HTTP request."""
+            for name, reason in pending.values():
+                evidence.append(
+                    _evidence(
+                        name, ReadResult("这部分尚未完成：" + reason, False), len(evidence) + 1
+                    )
+                )
+            pending.clear()
+
         try:
             for _ in range(self.calls):
                 remaining = deadline - time.monotonic()
@@ -423,22 +466,43 @@ class AgentConversation:
                 headers = {"Content-Type": "application/json"}
                 if self.router.key:
                     headers["Authorization"] = "Bearer " + self.router.key
-                response = self.router.transport.post_json(
-                    self.router.endpoint,
-                    headers,
-                    {
-                        "model": self.router.settings.llm.model,
-                        "store": False,
-                        "include": ["reasoning.encrypted_content"],
-                        "instructions": INSTRUCTIONS,
-                        "input": cast(JSONValue, inputs),
-                        "tools": cast(JSONValue, tool_definitions),
-                        "tool_choice": "auto",
-                        "parallel_tool_calls": False,
-                        "reasoning": {"effort": self.router.settings.llm.reasoning_effort},
-                    },
-                    min(self.router.settings.llm.timeout_seconds, remaining),
+                payload: JSONObject = {
+                    "model": self.router.settings.llm.model,
+                    "store": False,
+                    "include": ["reasoning.encrypted_content"],
+                    "instructions": INSTRUCTIONS,
+                    "input": cast(JSONValue, inputs),
+                    "tools": cast(
+                        JSONValue,
+                        [
+                            tool
+                            for tool in tool_definitions
+                            if act is None or tool.get("name") != "propose_action"
+                        ],
+                    ),
+                    "tool_choice": "auto",
+                    "parallel_tool_calls": False,
+                    "reasoning": {"effort": self.router.settings.llm.reasoning_effort},
+                }
+                stream = getattr(self.router.transport, "post_stream_json", None)
+                timeout = min(self.router.settings.llm.timeout_seconds, remaining)
+                # State and task lifecycle values are rendered by the host after final checks.
+                protected = any(
+                    item.get("source") in {"read_state", *_ACTION_LABELS} for item in evidence
                 )
+                response: JSONObject
+                if on_delta is not None and callable(stream):
+                    response = stream(
+                        self.router.endpoint,
+                        headers,
+                        payload,
+                        timeout,
+                        (lambda _: None) if protected else on_delta,
+                    )
+                else:
+                    response = self.router.transport.post_json(
+                        self.router.endpoint, headers, payload, timeout
+                    )
                 if time.monotonic() > deadline:
                     raise WorkbenchError("模型返回时本轮等待时间已用完。")
                 text, calls, continuation = _parse_response(response, definitions, seen_ids)
@@ -447,6 +511,7 @@ class AgentConversation:
                     item for item in continuation if item.get("type") != "reasoning"
                 )
                 if not calls:
+                    retain_pending()
                     if evidence and not _available(evidence):
                         return _fallback(evidence, "当前状态无法确认，请稍后重试。", public_items)
                     if any(item["complete"] is not True for item in evidence):
@@ -485,29 +550,91 @@ class AgentConversation:
                     json.dumps([call.name, call.arguments], ensure_ascii=False, sort_keys=True)
                     for call in calls
                 ]
-                cost = sum(READ_COSTS.get(call.name, 1) for call in calls)
-                if len(set(batch_keys)) != len(batch_keys) or any(
-                    key in seen_queries for key in batch_keys
-                ):
-                    raise WorkbenchError("本轮已经读取过相同结果，请基于已有事实回答。")
-                if spent + cost > self.tools:
-                    raise WorkbenchError("本轮读取次数已用完。")
-                seen_queries.update(batch_keys)
-                spent += cost
-                for call in calls:
+                for call, key in zip(calls, batch_keys, strict=True):
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise WorkbenchError("本轮等待时间已用完。")
-                    notify(_READ_LABELS[call.name])
+                    cached = seen_queries.get(key)
+                    if cached is not None:
+                        output = {
+                            "type": "function_call_output",
+                            "call_id": call.call_id,
+                            "output": json.dumps(
+                                {
+                                    "status": "already_read",
+                                    "result": cached,
+                                    "guidance": "复用本轮结果，继续完成其它部分；不要重复调用。",
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                        inputs.append(output)
+                        public_items.append(output)
+                        continue
+                    action = call.name in _ACTION_LABELS
+                    cost = _ACTION_COSTS[call.name] if action else READ_COSTS.get(call.name, 1)
+                    label = _ACTION_LABELS[call.name] if action else _READ_LABELS[call.name]
+                    target = call.arguments.get(
+                        "target",
+                        call.arguments.get("node_id", call.arguments.get("mission_id", "")),
+                    )
+                    notify(label + (f"（{safe_text(str(target))}）" if target else ""))
                     try:
-                        returned = read(call.name, call.arguments, remaining)
+                        if spent + cost > self.tools:
+                            raise ToolRefusal("本轮剩余请求预算不足，继续处理其它可完成的部分。")
+                        if action:
+                            if act is None:
+                                raise ToolRefusal("当前入口未开放任务工具。")
+                            if call.name not in {"read_request", "observe_operation"} and mutated:
+                                raise ToolRefusal(
+                                    "本轮已有一次任务操作；请依据原回执跟踪，不重复提交。"
+                                )
+                            source = _proposal_text(
+                                "plan", call.arguments.get("start_turn", "current"), dialogue
+                            )
+                            returned = act(call.name, call.arguments, source, remaining)
+                            spent += cost
+                            if call.name not in {"read_request", "observe_operation"}:
+                                mutated = True
+                        else:
+                            returned = read(call.name, call.arguments, remaining)
+                            spent += cost
+                    except ToolRefusal as error:
+                        reason = (f"{safe_text(str(target))}：" if target else "") + str(error)
+                        pending[key] = (call.name, reason)
+                        output = {
+                            "type": "function_call_output",
+                            "call_id": call.call_id,
+                            "output": json.dumps(
+                                {
+                                    "status": "needs_context",
+                                    "error": safe_text(str(error)),
+                                    "network_requests": 0,
+                                    "guidance": "修正对象或补充上下文，继续完成其它独立部分。",
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                        inputs.append(output)
+                        public_items.append(output)
+                        continue
                     except (ValueError, OSError) as error:
-                        returned = ReadResult("当前读取不可用：" + safe_text(str(error)), False)
+                        spent += cost
+                        if action and call.name not in {"read_request", "observe_operation"}:
+                            mutated = True
+                        prefix = (
+                            "任务操作未确定，保留原命令且不会自动重发："
+                            if action
+                            else "当前读取不可用："
+                        )
+                        returned = ReadResult(prefix + safe_text(str(error)), False)
                     if not isinstance(returned, ReadResult):
                         raise WorkbenchError("读取工具未返回有效来源结果。")
                     item = _evidence(call.name, returned, len(evidence) + 1)
+                    pending.pop(key, None)
                     evidence.append(item)
-                    output: JSONObject = {
+                    seen_queries[key] = item
+                    output = {
                         "type": "function_call_output",
                         "call_id": call.call_id,
                         "output": json.dumps(item, ensure_ascii=False),
@@ -515,5 +642,7 @@ class AgentConversation:
                     inputs.append(output)
                     public_items.append(output)
         except (ValueError, OSError, RuntimeError) as error:
+            retain_pending()
             return _fallback(evidence, str(error), public_items)
+        retain_pending()
         return _fallback(evidence, "本轮回复尚未完成，请继续提问。", public_items)

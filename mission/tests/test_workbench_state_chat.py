@@ -22,7 +22,7 @@ from roboguide_workbench.cli import display_question, main
 from roboguide_workbench.client import WorkbenchError
 from roboguide_workbench.conversation import ConversationSession
 from roboguide_workbench.persistence import SessionStore
-from test_workbench_agent_loop import Responses, _agent, _call, _message, _no_read, _response
+from test_workbench_agent_loop import Responses, _agent, _call, _message, _response
 from test_workbench_dialogue import _router
 from test_workbench_display_v4 import FailingOutput
 from test_workbench_state import StateController
@@ -152,7 +152,7 @@ def test_discovery_then_field_query_fits_original_tool_budget(tmp_path: Path) ->
 
 
 def test_two_state_reads_cannot_bypass_the_four_get_bound(tmp_path: Path) -> None:
-    """A model batch with six underlying GETs is refused before the first source read."""
+    """Only the first three-GET read fits; an independent failure cannot exceed four GETs."""
     session = session_for_state(tmp_path, Responses([]))
     adapter = ReadToolAdapter(session, "dog2", session.query_references())
     transport = Responses(
@@ -160,14 +160,17 @@ def test_two_state_reads_cannot_bypass_the_four_get_bound(tmp_path: Path) -> Non
             _response(
                 _call("read_state", {"target": "dog2", "fields": ["battery"]}),
                 _call("read_state", {"target": "dog2", "fields": ["posture"]}, "second"),
-            )
+            ),
+            _response(_message("电量已读；姿态尚未读取。")),
         ]
     )
     try:
         result = _agent(transport).answer(
-            "dog2 状态", {}, [], _no_read, tool_definitions=adapter.definitions()
+            "dog2 状态", {}, [], adapter.read, tool_definitions=adapter.definitions()
         )
-        assert result.status == "failed" and result.evidence == []
+        assert result.status == "partial" and len(result.evidence) == 2
+        assert isinstance(session.controller, StateController)
+        assert session.controller.reads == ["providers", "inventory", "state"]
     finally:
         session.store.close()
 

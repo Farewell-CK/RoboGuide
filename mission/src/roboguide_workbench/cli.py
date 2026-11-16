@@ -73,9 +73,14 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument(
                 "--answer-mode", choices=["agent", "grounded", "legacy", "facts"], default="agent"
             )
-            command.add_argument("--tool-limit", type=int, default=4)
-            command.add_argument("--call-limit", type=int, default=3)
-            command.add_argument("--turn-seconds", type=float, default=60)
+            command.add_argument("--tool-limit", type=int, default=12)
+            command.add_argument("--call-limit", type=int, default=8)
+            command.add_argument("--turn-seconds", type=float, default=120)
+            command.add_argument(
+                "--no-stream",
+                action="store_true",
+                help="使用单次 JSON 回复兼容不支持流式输出的模型服务",
+            )
             command.add_argument("--ask", help="执行一个问题后退出；支持 /nodes 等命令")
             if name == "chat":
                 command.add_argument(
@@ -217,15 +222,16 @@ def main(argv: list[str] | None = None) -> int:
             )
             if arguments.command == "chat":
                 session.answer_mode = arguments.answer_mode
+                session.stream_enabled = not arguments.no_stream
                 if session.answer_mode not in {"agent", "grounded", "legacy", "facts"}:
                     raise WorkbenchError("未知 answer_mode。")
                 session.tool_limit = arguments.tool_limit
                 session.call_limit = arguments.call_limit
                 session.turn_seconds = arguments.turn_seconds
                 if not (
-                    1 <= session.tool_limit <= 4
-                    and 1 <= session.call_limit <= 3
-                    and 0 < session.turn_seconds <= 60
+                    1 <= session.tool_limit <= 32
+                    and 1 <= session.call_limit <= 16
+                    and 0 < session.turn_seconds <= 300
                 ):
                     raise WorkbenchError("查询预算超出范围。")
                 session.progress = lambda message: print(
@@ -418,17 +424,38 @@ def display_question(
                 ) from error
             return
     turn = DisplayTurn(session)
+    previous_stream = getattr(session, "stream_output", None)
+    preview: list[str] = []
+
+    def emit_delta(delta: str) -> None:
+        """Show public draft text without acknowledging it as a completed Assistant turn."""
+        if output_format == "stream-json":
+            _json_event("assistant.delta", delta=safe_text(delta).replace("\\u000a", "\n"))
+        else:
+            if not preview:
+                print("RG · 生成中：", flush=True)
+            print(safe_text(delta).replace("\\u000a", "\n"), end="", flush=True)
+        preview.append(delta)
+
+    if isinstance(session, ConversationSession):
+        session.stream_output = emit_delta
     try:
         result = session.ask(question)
         turn.stage()
         if output_format == "stream-json":
             _json_event("assistant.completed", text=result)
         else:
-            print(prefix + result, flush=True)
+            streamed = "".join(preview)
+            if streamed and result.startswith(streamed):
+                print(result[len(streamed) :], flush=True)
+            else:
+                print(("\n" if streamed else "") + prefix + result, flush=True)
         turn.acknowledge()
         if output_format == "stream-json":
             _json_event("turn.completed", status=getattr(session, "query_status", "complete"))
     finally:
+        if isinstance(session, ConversationSession):
+            session.stream_output = previous_stream
         turn.reject()
 
 

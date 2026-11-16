@@ -94,6 +94,10 @@ MI 新增显式宿主目标草案格式：见 [ADR-0255](docs/decisions/0255-hos
 通用[设备状态查询](docs/development/conversation-workbench-state-v0.1.md)已接入电量、位置和姿态：
 `/state-fields` 发现上报对象，`/state ID 电量 位置` 直接读取；自然语言和独立 `roboguide state`
 复用相同的来源、有效期和冲突检查。状态缺失或过期保持未知，不创建 Mission。
+默认 [Chat 任务 Agent](docs/development/chat-real-use-remediation-20261116.md) 可按明确的自然语言
+目标直接开始 MI 规划或执行流程、补充澄清、读取进度及取消原任务；普通任务无需 `/choose`。
+保留服务端审批、完整显示版本和 Control 准入。终端支持实际流式文本、持久处理轨迹与可撤回的
+待发消息；重复工具调用、设备别名和历史 `/raw` 的现场反馈有独立回归覆盖。
 
 真机接入的专题设计见 [ADR-0231 两类接入与本机任务委派](docs/decisions/0231-local-eaios-and-device-integration.md)。
 该提案以验证 RG 的任务、调度、执行与恢复为目标，区分已有具身操作系统的参与者和

@@ -12,12 +12,14 @@ from typing import cast
 
 from mission.models import JSONObject, JSONValue
 
-from roboguide_workbench.client import WorkbenchError, identifier
+from roboguide_workbench.client import ToolRefusal, WorkbenchError, identifier
+from roboguide_workbench.device_context import alias_matches, aliases
 from roboguide_workbench.evidence import READ_COSTS, ReadResult
 from roboguide_workbench.routing import Query
 from roboguide_workbench.session import Session
 from roboguide_workbench.state_queries import (
     StateSnapshot,
+    choices,
     discover,
     read_state,
 )
@@ -118,7 +120,7 @@ _DEFINITIONS = [
     ),
     _function(
         "propose_action",
-        "仅建议明确请求的任务动作；不执行、不审批、不取消任何任务。",
+        "旧客户端兼容提议；默认任务必须使用 start_task，勿使用此兼容入口。",
         {
             "action": {"type": "string", "enum": cast(JSONValue, _ACTIONS)},
             "start_turn": {
@@ -251,6 +253,15 @@ class ReadToolAdapter:
         """Return fresh native schemas; model-visible schema edits cannot widen host dispatch."""
         return copy.deepcopy(_DEFINITIONS)
 
+    def learn_task(self, nodes: set[str]) -> None:
+        """Admit only actual current Mission receipt IDs created by the same foreground owner."""
+        self._known_nodes.update(nodes)
+        self._known_states.update(nodes)
+        if self.session.last_mission:
+            self._known_missions.add(self.session.last_mission)
+            self._shadow.last_mission = self.session.last_mission
+            self._update_references()
+
     def _update_references(self) -> None:
         """Update the shared model-context object in place after a validated original read."""
         self.references.update(
@@ -278,7 +289,13 @@ class ReadToolAdapter:
             else self._known_missions
         )
         if target not in known and target not in self.question:
-            raise WorkbenchError("对象 ID 没有当前问题、已展示引用或本轮读取依据。")
+            if domain == "states" and alias_matches(target, self.question):
+                # The actual scoped catalog, not a model-generated suffix, selects candidates.
+                return sorted(aliases(target) & aliases(self.question))[0]
+            raise ToolRefusal(
+                "对象 ID 没有当前问题、已展示引用或本轮读取依据；"
+                "请先查目录，或使用用户原话中的设备名。"
+            )
         return target
 
     def read(self, name: str, arguments: JSONObject, remaining: float) -> ReadResult:
@@ -338,9 +355,13 @@ class ReadToolAdapter:
                     self._shadow.controller,
                     target or "",
                     state_fields(cast(list[str], values)),
-                    remaining,
+                    min(60, remaining),
                 )
                 result = state_snapshot.render()
+                selected_choices = choices(result)
+                if selected_choices:
+                    self._shadow.displayed_states = selected_choices
+                    self._states_read = True
                 self._shadow.last_state = target
                 self._state_focus = True
                 self._shadow.last_raw = {
@@ -524,7 +545,7 @@ class ReadToolAdapter:
             tuple(component for result in results for component in result.components),
         )
 
-    def publish(self, evidence: list[JSONObject]) -> None:
+    def publish(self, evidence: list[JSONObject], *, publish_raw: bool = True) -> None:
         """Adopt only the exact host-rendered references; DisplayTurn still owns durable ACK."""
         projection = self._selected(evidence)
         if projection is None:
@@ -540,5 +561,6 @@ class ReadToolAdapter:
             self.session.displayed_states = list(projection.states)
         if projection.state_focus:
             self.session.last_state = projection.last_state
-        self.session.last_raw = copy.deepcopy(projection.raw)
-        self.session.last_read_at = projection.received_at
+        if publish_raw:
+            self.session.last_raw = copy.deepcopy(projection.raw)
+            self.session.last_read_at = projection.received_at

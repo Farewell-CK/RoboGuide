@@ -22,6 +22,8 @@ from roboguide_workbench.answers import (
 from roboguide_workbench.client import WorkbenchError
 from roboguide_workbench.evidence import ReadResult
 from roboguide_workbench.routing import Query, ResponsesRouter
+from roboguide_workbench.task_tools import TaskTools
+from roboguide_workbench.task_tools import definitions as task_definitions
 from roboguide_workbench.views import safe_text
 from roboguide_workbench.workspace import WorkbenchSession
 
@@ -31,9 +33,11 @@ class ConversationSession(WorkbenchSession):
 
     answer_mode = "agent"
     evidence: list[JSONObject]
-    tool_limit = 4
-    call_limit = 3
-    turn_seconds = 60.0
+    tool_limit = 12
+    call_limit = 8
+    turn_seconds = 120.0
+    stream_output: Callable[[str], None] | None = None
+    stream_enabled = True
     progress: Callable[[str], None] = staticmethod(lambda message: None)
 
     def _turn(self, question: str) -> str:
@@ -79,6 +83,16 @@ class ConversationSession(WorkbenchSession):
             else bounded_history(self.store.data.get("messages"))
         )
         adapter = ReadToolAdapter(self, question, references)
+        tasks = TaskTools(self, question)
+
+        def invoke_task(
+            name: str, arguments: JSONObject, original: str, remaining: float
+        ) -> ReadResult:
+            """Publish actual new receipt IDs to subsequent reads without guessing targets."""
+            returned = tasks.invoke(name, arguments, original, remaining)
+            adapter.learn_task(tasks.known_nodes)
+            return returned
+
         self.progress("正在思考")
         result = AgentConversation(
             self.router, tools=self.tool_limit, calls=self.call_limit, seconds=self.turn_seconds
@@ -87,8 +101,10 @@ class ConversationSession(WorkbenchSession):
             adapter.references,
             history,
             adapter.read,
-            tool_definitions=adapter.definitions(),
+            tool_definitions=adapter.definitions() + task_definitions(),
             progress=self.progress,
+            act=invoke_task,
+            on_delta=self.stream_output if self.stream_enabled else None,
         )
         self.query_status, self.evidence = result.status, result.evidence
         self._retain_agent_turn(question, result.items)
@@ -108,9 +124,12 @@ class ConversationSession(WorkbenchSession):
                 + options
             )
         text = result.text
+        task_answer = tasks.answer()
+        if task_answer is not None:
+            text = task_answer
         state_answer = adapter.state_answer(result.evidence)
         if state_answer is not None:
-            text = state_answer.text
+            text = state_answer.text + ("\n\n" + task_answer if task_answer else "")
             if not state_answer.complete:
                 self.query_status = (
                     "partial"
@@ -123,7 +142,10 @@ class ConversationSession(WorkbenchSession):
             summary = adapter.reference_summary(result.evidence)
             if summary:
                 text += "\n\n" + summary
-            adapter.publish(result.evidence)
+            mission = self.last_mission
+            adapter.publish(result.evidence, publish_raw=task_answer is None)
+            if task_answer is not None:
+                self.last_mission = mission
         return text
 
     def _retain_agent_turn(self, question: str, items: list[JSONObject]) -> None:
@@ -226,7 +248,10 @@ class ConversationSession(WorkbenchSession):
                 self.controller.timeout = original_timeout
 
         result = EvidenceConversation(
-            self.router, tools=self.tool_limit, calls=self.call_limit, seconds=self.turn_seconds
+            self.router,
+            tools=min(4, self.tool_limit),
+            calls=min(3, self.call_limit),
+            seconds=min(60, self.turn_seconds),
         ).answer(
             question,
             references,

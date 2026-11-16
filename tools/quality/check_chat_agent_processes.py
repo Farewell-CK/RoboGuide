@@ -197,6 +197,7 @@ class Trace:
 
     reads: list[dict[str, Any]] = field(default_factory=list)
     writes: list[str] = field(default_factory=list)
+    mi_writes: list[dict[str, Any]] = field(default_factory=list)
     provider: list[dict[str, Any]] = field(default_factory=list)
     stale_state: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -291,7 +292,50 @@ def controller_handler(trace: Trace) -> type[JsonHandler]:
                 self.send_json(404, {"error": "no fixture at this route"})
 
         def do_POST(self) -> None:
-            """Reject and retain every attempted business write instead of inventing execution."""
+            """Accept a private fixture Request without admitting a Controller or device effect."""
+            if self.path == "/v1/mission-requests":
+                from mission.request_record import (
+                    DialogueSpeaker,
+                    DialogueTurn,
+                    DialogueTurnKind,
+                    MissionRequestLifecycle,
+                    MissionRequestRecord,
+                )
+                from mission.submission_intent import SubmissionIntent
+
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                assert body["schema_version"] == "roboguide.mission-request-create/v0.2"
+                assert body["submission_mode"] == "draft_only"
+                assert not trace.mi_writes, "duplicate MI Request POST"
+                trace.mi_writes.append(
+                    {"path": self.path, "body": body, "key": self.headers.get("Idempotency-Key")}
+                )
+                now = int(time.time() * 1000)
+                record = MissionRequestRecord(
+                    request_id="fixture-request",
+                    mission_id="fixture-unadmitted-mission",
+                    dialogue=(
+                        DialogueTurn(
+                            "instruction-1",
+                            DialogueSpeaker.USER,
+                            DialogueTurnKind.INSTRUCTION,
+                            body["instruction"],
+                            now,
+                        ),
+                    ),
+                    lifecycle=MissionRequestLifecycle.RECEIVED,
+                    assessment=None,
+                    plan=None,
+                    draft_revision=0,
+                    draft_digest=None,
+                    approval_required=False,
+                    issues=(),
+                    created_at_ms=now,
+                    updated_at_ms=now,
+                    submission_intent=SubmissionIntent("draft_only"),
+                )
+                self.send_json(201, record.to_json())
+                return
             trace.writes.append(self.path)
             self.send_json(405, {"error": "no effects permitted by this software gate"})
 
@@ -364,7 +408,7 @@ def fixture_response(payload: dict[str, Any], number: int) -> dict[str, Any]:
     elif "节点" in question:
         route = "read_cluster", {}
     elif "巡检" in question:
-        route = "propose_action", {"action": "plan", "start_turn": "current"}
+        route = "start_task", {"mode": "plan", "start_turn": "current"}
     if route is not None:
         name, arguments = route
         return {
@@ -463,7 +507,8 @@ class ChatProcess:
         fcntl.ioctl(slave, 0x5414, struct.pack("HHHH", 32, 110, 0, 0))
         environment = dict(os.environ)
         environment.pop("OPENAI_API_KEY", None)
-        environment.update(TERM="xterm-256color", PROMPT_TOOLKIT_NO_CPR="1")
+        environment.pop("PROMPT_TOOLKIT_NO_CPR", None)
+        environment.update(TERM="xterm-256color")
         self.process = subprocess.Popen(
             [
                 str(cli),
@@ -731,6 +776,8 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
             transcript.append(row)
             row = question_step(chat, trace, "帮我制定一个巡检计划")
             assert trace.writes == [], trace.writes
+            assert len(trace.mi_writes) == 1 and "/choose" not in row["assistant"], row
+            assert "fixture-request" in row["assistant"], row
             transcript.append(row)
             trace.entered.clear()
             trace.release.clear()
@@ -741,6 +788,11 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
             chat.send("谢谢")
             active_chat = chat
             chat.wait(lambda: "已加入待处理队列" in active_chat.text(), "queued ordinary message")
+            chat.send("/queue")
+            chat.wait(lambda: "1. 谢谢" in active_chat.text(), "visible pending message")
+            chat.send("/dequeue 1")
+            chat.wait(lambda: "已撤回待发消息" in active_chat.text(), "withdraw unsent message")
+            chat.send("谢谢")
             trace.release.set()
             chat.wait(
                 lambda: active_chat.endings() >= before + 2, "original and queued response drain"
@@ -778,6 +830,10 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
             chat.close()
             chat = None
             assert trace.writes == [], trace.writes
+            assert all(
+                "doesn't support cursor position requests" not in path.read_text(errors="replace")
+                for path in output.glob("*.ansi")
+            )
             result.update(
                 passed=True,
                 feedback_bundle=str(bundles[0]),
@@ -790,6 +846,9 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
                 queue_exactly_once=True,
                 generic_state_queries=True,
                 stale_state_refused=True,
+                native_task_request=True,
+                editable_queue=True,
+                mi_request_posts=len(trace.mi_writes),
             )
     finally:
         trace.release.set()
@@ -797,6 +856,7 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
             chat.close()
         save(output / "controller-requests.json", trace.reads)
         save(output / "controller-writes.json", trace.writes)
+        save(output / "mi-request-posts.json", trace.mi_writes)
         save(output / "provider-exchanges.json", trace.provider)
         result["cli"] = str(arguments.cli.resolve())
         result["cli_sha256"] = digest(arguments.cli.resolve())

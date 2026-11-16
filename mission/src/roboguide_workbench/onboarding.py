@@ -124,9 +124,9 @@ def write_configuration(
         "config": "model.toml",
         "session_dir": str(global_state_directory() / "sessions"),
         "answer_mode": "agent",
-        "tool_limit": 4,
-        "call_limit": 3,
-        "turn_seconds": 60,
+        "tool_limit": 12,
+        "call_limit": 8,
+        "turn_seconds": 120,
     }
     if tenant is not None:
         profile["tenant"] = identifier(tenant)

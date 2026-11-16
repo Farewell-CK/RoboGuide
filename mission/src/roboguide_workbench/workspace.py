@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import shlex
 import time
@@ -20,10 +21,12 @@ from roboguide_workbench.mission_views import render_mission_list
 from roboguide_workbench.persistence import SessionStore
 from roboguide_workbench.routing import Query, Router
 from roboguide_workbench.session import HELP, Session
-from roboguide_workbench.state_queries import discover, fields, read_state
+from roboguide_workbench.state_queries import choices, discover, fields, read_state
 from roboguide_workbench.views import inventory_view, render_mission, render_nodes, safe_text
 
 EXTRA_HELP = """可以直接提问：有哪些设备？dog2 还有多少电？它在哪里？当前有哪些任务？
+也可以直接说：让狗1巡检东区；先只规划；把目标改成门口；执行刚才的计划；取消该请求。
+Agent 会查能力、补问和调用 MI；原有权限、风险审批与执行准入照常检查。
 
 设备与状态（无需模型）：
   /nodes、/node ID       查看节点；/node #2 查询上次展示的第二个节点
@@ -43,7 +46,7 @@ EXTRA_HELP = """可以直接提问：有哪些设备？dog2 还有多少电？�
   /answer 内容          回答澄清或修改草案；/answer-to 问题ID 内容 指定问题
   /plan-detail          展开计划；/check 检查当前版本
   /execute              授权已展示版本；/approve 独立风险审批
-  /choose plan|run       确认刚显示的提议；也支持 answer/execute/approve
+  /choose plan|run       旧提议协议的兼容确认；普通自然语言任务无需此步骤
   /cancel request ID 或 /cancel mission ID  预览取消，/cancel confirm 确认
 
 会话与诊断：
@@ -51,9 +54,11 @@ EXTRA_HELP = """可以直接提问：有哪些设备？dog2 还有多少电？�
   /history、/raw         查看历史；/reset 清除当前对象选择
   /observe、/reconcile   核对原命令，不重发原操作
   /feedback [目录]       本地保存脱敏诊断包
+  /queue、/dequeue 序号、/edit-queued 序号  查看、撤回或取回待发消息（交互终端）
   /quit                 等原请求收尾后退出
 
-Enter 发送，Alt-Enter 换行，Tab 补全。Ctrl-C 停止显示和清空排队，任务取消使用 /cancel。
+Enter 发送，Alt-Enter 换行，Tab 补全。Ctrl-C 停止显示和清空排队，取消任务请明确说出目标。
+Alt-Up 取回末条待发消息编辑；Alt-Backspace 撤回末条。处理轨迹留在对话区。
 设备状态缺失、过期或来源冲突会明确显示；历史记录不能代替当前读取。
 """
 
@@ -156,7 +161,7 @@ def render_request(raw: JSONObject) -> str:
 
 
 class WorkbenchSession(Session):
-    """Add durable scoped context while keeping model routing unable to invoke writes."""
+    """Own durable scope and commands used by direct input and closed native task tools."""
 
     query_status: QueryStatus = "complete"
     model_label = "未加载"
@@ -195,6 +200,29 @@ class WorkbenchSession(Session):
         self.input_references: JSONObject | None = None
         self.input_history: list[JSONObject] | None = None
         self.display_turn_id: str | None = None
+        historical = context.get("raw_query")
+        if historical is not None:
+            if not isinstance(historical, dict) or set(historical) != {"value", "read_at"}:
+                raise WorkbenchError("会话历史查询记录损坏。")
+            value, read_at = historical["value"], historical["read_at"]
+            if (
+                not isinstance(value, dict)
+                or not isinstance(read_at, str)
+                or len(json.dumps(historical, ensure_ascii=False).encode()) > 2 * 1024 * 1024
+            ):
+                raise WorkbenchError("会话历史查询记录无效或超过上限。")
+            self.last_raw, self.last_read_at = copy.deepcopy(value), read_at
+
+    def raw_query(self) -> JSONObject | None:
+        """Persist a complete bounded historical result, never a clipped value or fresh evidence."""
+        if self.last_raw is None or self.last_read_at is None:
+            return None
+        historical: JSONObject = {"value": self.last_raw, "read_at": self.last_read_at}
+        return (
+            copy.deepcopy(historical)
+            if len(json.dumps(historical, ensure_ascii=False).encode()) <= 2 * 1024 * 1024
+            else None
+        )
 
     def query_references(self) -> JSONObject:
         """Resolve queued questions against their original visible identities, never permission."""
@@ -243,11 +271,13 @@ class WorkbenchSession(Session):
             "last_state": self.last_state,
             "request_id": self.request_id,
             "previous_question": self.previous_question,
+            "raw_query": self.raw_query(),
         }
         if self.reference_checkpoint is not None:
             for field in ("nodes", "missions", "last_node", "last_mission", "states", "last_state"):
                 if field in self.reference_checkpoint:
                     context[field] = self.reference_checkpoint[field]
+            context["raw_query"] = self.reference_checkpoint.get("raw_query")
         self.store.data["context"] = context
         self.store.save()
 
@@ -305,6 +335,9 @@ class WorkbenchSession(Session):
             return safe_text(
                 json.dumps(self.store.data.get("messages"), ensure_ascii=False, indent=2)
             ).replace("\\u000a", "\n")
+        if question == "/raw" and self.last_raw is None:
+            self.query_status = "failed"
+            return "尚无可恢复的完整查询原文；请先查询。超过保存上限的原文不会截断后冒充完整结果。"
         if question == "/reset":
             super().reset()
             self.displayed_missions = []
@@ -536,6 +569,9 @@ class WorkbenchSession(Session):
                 requested = fields(values[1:] or ["battery", "position", "posture"])
                 snapshot = read_state(self.controller, target, requested, self.controller.timeout)
                 state_result = snapshot.render()
+                selected_choices = choices(state_result)
+                if selected_choices:
+                    self.displayed_states = selected_choices
                 self.last_state = target
                 self.last_raw = {
                     "providers": snapshot.catalog,

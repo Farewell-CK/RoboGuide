@@ -18,8 +18,8 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.application.current import set_app
 from prompt_toolkit.completion import WordCompleter
-from prompt_toolkit.filters import is_done
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
+from prompt_toolkit.output.vt100 import Vt100_Output
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
@@ -64,6 +64,9 @@ COMMANDS = [
     "/check",
     "/cancel",
     "/feedback",
+    "/queue",
+    "/dequeue",
+    "/edit-queued",
 ]
 
 # A short queue keeps a fast typist from losing questions while the provider or
@@ -220,6 +223,10 @@ async def interactive(session: WorkbenchSession) -> int:
     started_at: float | None = None
     phase = "待命"
     loop = asyncio.get_running_loop()
+    stream_buffer = ""
+    previewed = ""
+    preview_tasks: list[asyncio.Task[None]] = []
+    preview_lock = asyncio.Lock()
 
     @keys.add("enter")
     def submit_line(event: KeyPressEvent) -> None:
@@ -256,6 +263,23 @@ async def interactive(session: WorkbenchSession) -> int:
             event.app.current_buffer.text = "/choose run"
             event.app.current_buffer.validate_and_handle()
 
+    @keys.add("escape", "up")
+    def edit_pending(event: KeyPressEvent) -> None:
+        """Take the last unsent message back into an empty composer without executing it."""
+        if queued and not event.app.current_buffer.text:
+            text, _, _ = queued.pop()
+            event.app.current_buffer.text = text
+            event.app.current_buffer.cursor_position = len(text)
+            refresh_toolbar()
+
+    @keys.add("escape", "backspace")
+    def delete_pending(event: KeyPressEvent) -> None:
+        """Withdraw only the last unsent message; the running operation keeps its identity."""
+        if queued:
+            text, _, _ = queued.pop()
+            notify("已撤回待发消息：" + safe_text(text))
+            refresh_toolbar()
+
     # Keep the constructor surface used by the plain test harness.  The live
     # session receives the richer multiline behavior through attributes below.
     try:
@@ -273,7 +297,10 @@ async def interactive(session: WorkbenchSession) -> int:
         )
         prompt.multiline = True
     prompt.prompt_continuation = lambda width, line_number, is_soft_wrap: "· "
-    prompt.show_frame = True
+    prompt.show_frame = False
+    terminal_output = getattr(prompt, "output", None)
+    if isinstance(terminal_output, Vt100_Output):
+        terminal_output.enable_cpr = False
     prompt.style = Style.from_dict(
         {
             "frame.border": "#5f6f86",
@@ -298,8 +325,7 @@ async def interactive(session: WorkbenchSession) -> int:
         """Render connection, elapsed work, progress and queue count in the bottom status bar."""
         waiting = f" · 队列 {len(queued)}/{MAX_QUEUED_REQUESTS}" if queued else ""
         if foreground and not foreground.done():
-            elapsed = time.monotonic() - started_at if started_at is not None else 0.0
-            return f" {phase} · {elapsed:.1f}s{waiting} · Ctrl-C 停止显示，原请求继续收尾"
+            return f" {phase}{waiting} · Ctrl-C 停止显示，原请求继续收尾"
         selected = f" · 状态对象 {safe_text(session.last_state)}" if session.last_state else ""
         return f" 就绪{selected}{waiting} · Enter 发送 · Alt-Enter 换行 · / 命令"
 
@@ -307,8 +333,8 @@ async def interactive(session: WorkbenchSession) -> int:
     # The right prompt remains visible on terminals which cannot answer CPR, where
     # prompt_toolkit deliberately hides its screen-bottom toolbar.
     prompt.rprompt = toolbar
-    prompt.refresh_interval = 0.5
-    prompt.app.refresh_interval = 0.5
+    prompt.refresh_interval = 0
+    prompt.app.refresh_interval = None
 
     def refresh_toolbar() -> None:
         """Request a redraw after progress arrives from the worker thread."""
@@ -316,13 +342,23 @@ async def interactive(session: WorkbenchSession) -> int:
             loop.call_soon_threadsafe(prompt.app.invalidate)
 
     def update_progress(message: str) -> None:
-        """Keep provider progress in the toolbar instead of fabricating token output."""
-        nonlocal phase
-        phase = safe_text(message)
-        refresh_toolbar()
+        """Retain compact public processing steps in scrollback without timer redraws."""
+
+        def record() -> None:
+            """Publish a changed phase on the terminal owner without exposing raw tool messages."""
+            nonlocal phase
+            value = safe_text(message)
+            if value != phase:
+                phase = value
+                if not muted and not closing:
+                    notify("· " + value)
+                refresh_toolbar()
+
+        loop.call_soon_threadsafe(record)
 
     previous_progress = getattr(session, "progress", None)
     session.progress = update_progress  # type: ignore[attr-defined]
+    previous_stream = getattr(session, "stream_output", None)
 
     def notify(message: str) -> None:
         """Keep status output visible without interrupting the drain of original operations."""
@@ -352,6 +388,48 @@ async def interactive(session: WorkbenchSession) -> int:
         )
 
     manager = WatchManager(session, notify)
+
+    async def show_preview(text: str) -> None:
+        """Flush actual public text deltas while keeping input editing and final ACK separate."""
+        nonlocal previewed
+        async with preview_lock:
+            if muted or closing:
+                return
+
+            def write() -> None:
+                """Write public text without reasoning or incomplete tool arguments."""
+                nonlocal previewed
+                if not previewed:
+                    print("\n── RG · 生成中", file=output, flush=True)
+                print(
+                    ("RG > " if not previewed else "     ")
+                    + safe_text(text).replace("\\u000a", "\n"),
+                    file=output,
+                    flush=True,
+                )
+                previewed += text
+
+            with set_app(prompt.app):
+                await run_in_terminal(write)
+
+    def update_stream(delta: str) -> None:
+        """Buffer real tokens into short lines and schedule their rendering on the UI owner."""
+
+        def record() -> None:
+            """Avoid full input-frame refreshes for each individual Provider token."""
+            nonlocal stream_buffer
+            if muted or closing:
+                return
+            stream_buffer += delta
+            while len(stream_buffer) >= 80 or "\n" in stream_buffer:
+                split = stream_buffer.find("\n") + 1 if "\n" in stream_buffer else 80
+                text, stream_buffer = stream_buffer[:split], stream_buffer[split:]
+                preview_tasks.append(asyncio.create_task(show_preview(text)))
+
+        loop.call_soon_threadsafe(record)
+
+    if hasattr(session, "stream_output"):
+        session.stream_output = update_stream
 
     async def display(result: str, suggestion: tuple[str, str] | None = None) -> bool:
         """Flush a role-labeled, wrapped assistant turn before acknowledging its state."""
@@ -393,16 +471,30 @@ async def interactive(session: WorkbenchSession) -> int:
         """Run one serialized turn and start the next queued question after its receipt drains."""
         nonlocal muted, unavailable, foreground, started_at, phase
         nonlocal visible_references, visible_history
+        nonlocal stream_buffer, previewed
         started_at, phase = time.monotonic(), "处理中"
+        stream_buffer, previewed = "", ""
+        preview_tasks.clear()
         refresh_toolbar()
         turn = DisplayTurn(session)
         session.input_references = original_references
         session.input_history = original_history
         try:
             result = await asyncio.to_thread(session.ask, text)
+            await asyncio.sleep(0)
+            if stream_buffer:
+                preview_tasks.append(asyncio.create_task(show_preview(stream_buffer)))
+                stream_buffer = ""
+            if preview_tasks:
+                await asyncio.gather(*preview_tasks)
             turn.stage()
             if not muted:
-                displayed = await display(result, turn.suggestion)
+                remaining_text = (
+                    result[len(previewed) :].strip()
+                    if previewed and result.startswith(previewed)
+                    else result
+                )
+                displayed = await display(remaining_text or "回复完成。", turn.suggestion)
                 if displayed and not muted:
                     turn.acknowledge()
         except (ValueError, OSError) as error:
@@ -412,6 +504,9 @@ async def interactive(session: WorkbenchSession) -> int:
                 except (ValueError, OSError):
                     pass
         finally:
+            if preview_tasks:
+                await asyncio.gather(*preview_tasks, return_exceptions=True)
+            stream_buffer = ""
             session.input_references = None
             session.input_history = None
             try:
@@ -422,6 +517,8 @@ async def interactive(session: WorkbenchSession) -> int:
             muted = False
             visible_references = session.query_references()
             visible_history = bounded_history(session.store.data.get("messages"))
+            if started_at is not None and not muted and not closing:
+                notify(f"· 本轮结束 · {time.monotonic() - started_at:.1f}s")
             started_at, phase = None, "待命"
             refresh_toolbar()
             if not closing and not unavailable and queued:
@@ -440,15 +537,25 @@ async def interactive(session: WorkbenchSession) -> int:
 
     async def read_prompt(default: str = "") -> str:
         """Read one prompt, restoring a rejected action as an editable default when supported."""
+
+        def composer() -> str:
+            """Keep unsent message previews directly above the current input buffer."""
+            lines = [
+                f"待发 {index}. {safe_text(item[0])[:100]}" for index, item in enumerate(queued, 1)
+            ]
+            if lines:
+                lines.append("Alt-Up 取回编辑 · Alt-Backspace 撤回末条 · /queue 管理")
+            return "\n".join([*lines, "你 > "])
+
         if _prompt_supports_option(prompt, "show_frame"):
             # prompt_async resets show_frame on every call unless it is explicit.
-            return await prompt.prompt_async("你 > ", default=default, show_frame=~is_done)
+            return await prompt.prompt_async(composer, default=default, show_frame=False)
         if default and _prompt_supports_option(prompt, "default"):
-            return await prompt.prompt_async("你 > ", default=default)
+            return await prompt.prompt_async(composer, default=default)
         if default:
             with suppress(AttributeError):
                 prompt.app.current_buffer.text = default
-        return await prompt.prompt_async("你 > ")
+        return await prompt.prompt_async(composer)
 
     print_header()
     with patch_stdout():
@@ -476,6 +583,31 @@ async def interactive(session: WorkbenchSession) -> int:
                 if text in {"/quit", "/exit"}:
                     closing = True
                     break
+                if _command_name(text) in {"/queue", "/dequeue", "/edit-queued"}:
+                    command, _, argument = text.partition(" ")
+                    if command == "/queue":
+                        notify(
+                            "待发消息：\n"
+                            + "\n".join(f"{i}. {item[0]}" for i, item in enumerate(queued, 1))
+                            if queued
+                            else "当前没有待发消息。"
+                        )
+                    else:
+                        try:
+                            index = int(argument) if argument else len(queued)
+                            if not 1 <= index <= len(queued):
+                                raise ValueError
+                            item = queued[index - 1]
+                            del queued[index - 1]
+                            if command == "/edit-queued":
+                                retained_input = item[0]
+                                notify("已取回待发消息，请编辑后重新发送。")
+                            else:
+                                notify("已撤回待发消息：" + item[0])
+                        except ValueError:
+                            notify("请用 /queue 查看序号，再 /edit-queued 1 或 /dequeue 1。")
+                    refresh_toolbar()
+                    continue
                 if not foreground or foreground.done():
                     if _command_name(text) in {"/watch", "/watches", "/unwatch"}:
                         session.suggestion = None
@@ -529,7 +661,8 @@ async def interactive(session: WorkbenchSession) -> int:
                     )
                     notify(
                         f"已加入待处理队列（{len(queued)}/{MAX_QUEUED_REQUESTS}），"
-                        "将在当前回复显示并保存后处理。"
+                        f"将在当前回复显示并保存后处理：{safe_text(text)}\n"
+                        "Alt-Up 取回编辑；/queue 查看，/dequeue 序号 撤回。"
                     )
                     continue
                 if _command_name(text) in {"/new", "/resume"}:
@@ -568,4 +701,6 @@ async def interactive(session: WorkbenchSession) -> int:
             discard_confirmation(session)
             if callable(previous_progress):
                 session.progress = previous_progress  # type: ignore[attr-defined]
+            if hasattr(session, "stream_output"):
+                session.stream_output = previous_stream
     return 2 if unavailable else 0
