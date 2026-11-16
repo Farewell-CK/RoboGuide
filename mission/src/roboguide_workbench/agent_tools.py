@@ -511,12 +511,23 @@ class ReadToolAdapter:
             )
         return "\n".join(lines)
 
-    def state_answer(self, evidence: list[JSONObject]) -> ReadResult | None:
-        """Recheck State after model latency, retaining other host answers in mixed queries."""
+    def read_answer(
+        self, evidence: list[JSONObject], *, include_nonstate: bool = False
+    ) -> ReadResult | None:
+        """Recheck State and retain independent host reads beside native task receipts."""
         results: list[ReadResult] = []
         has_state = False
         for item in evidence:
             components = item.get("components")
+            source, text = item.get("source"), item.get("text")
+            if (
+                not isinstance(components, list)
+                and isinstance(source, str)
+                and source in _FIELDS
+                and source != "propose_action"
+                and isinstance(text, str)
+            ):
+                results.append(ReadResult(text, item.get("complete") is True))
             if not isinstance(components, list):
                 continue
             for component in components:
@@ -537,7 +548,7 @@ class ReadToolAdapter:
                     "fields": cast(JSONValue, list(result.components)),
                 }
                 results.append(result)
-        if not has_state:
+        if not has_state and not include_nonstate or not results:
             return None
         return ReadResult(
             "\n\n".join(result.text for result in results),

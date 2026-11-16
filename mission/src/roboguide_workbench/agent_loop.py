@@ -35,6 +35,7 @@ start_task(mode=run) 开始正常执行流程；明确只规划时用 mode=plan�
 可以先读节点/目录，再执行对应工具，并根据工具实际结果继续处理；不能声称尚未发生的成功。
 缺少区域、目标或成功标准时自然追问。明确能力缺口时先解释，不能通过编造合同来完成任务。
 answer_request 使用用户原始补充更新当前 Request；read_request 查询规划/审批/运行进度。
+多轮补充区域或参数不会撤销用户先前“只规划、不执行”的要求；只有后续明确改变意图才可执行。
 execute_plan/approve_plan 只用于用户明确授权的已完整显示版本；审批仍需服务端 approver 权限。
 工具错误或重复调用只影响对应部分，继续完成复合问题中的其它独立部分。成功结果不重复读取。
 设备名可直接使用用户原话如“狗2”，宿主会读取实际目录解析；object: 前缀明确选择目录对象。
@@ -313,9 +314,9 @@ def _messages(
     return selected, original
 
 
-def _proposal_text(action: str, start: JSONValue, dialogue: list[JSONObject]) -> str:
-    """Freeze a complete original dialogue suffix, never a model-authored replacement task."""
-    if not isinstance(start, str) or action in {"execute", "approve"} and start != "current":
+def _proposal_dialogue(start: JSONValue, dialogue: list[JSONObject]) -> list[JSONObject]:
+    """Select complete original role-attributed turns before task text or intent is derived."""
+    if not isinstance(start, str):
         raise WorkbenchError("操作提议缺少合法的用户原文来源。")
     positions = [i for i, row in enumerate(dialogue) if row.get("id") == start]
     if len(positions) != 1:
@@ -323,6 +324,14 @@ def _proposal_text(action: str, start: JSONValue, dialogue: list[JSONObject]) ->
     selected = dialogue[positions[0] :]
     if any(row["complete"] is not True for row in selected):
         raise WorkbenchError("任务原文或澄清已截断，请完整重述本次任务。")
+    return selected
+
+
+def _proposal_text(action: str, start: JSONValue, dialogue: list[JSONObject]) -> str:
+    """Freeze a complete original dialogue suffix, never a model-authored replacement task."""
+    if action in {"execute", "approve"} and start != "current":
+        raise WorkbenchError("操作提议缺少合法的用户原文来源。")
+    selected = _proposal_dialogue(start, dialogue)
     if len(selected) == 1:
         return cast(str, selected[0]["content"])
     instruction = (
@@ -428,7 +437,8 @@ class AgentConversation:
         *,
         tool_definitions: list[JSONObject],
         progress: Callable[[str], None] | None = None,
-        act: Callable[[str, JSONObject, str, float], ReadResult] | None = None,
+        act: Callable[[str, JSONObject, str, tuple[str, ...], float], ReadResult] | None = None,
+        task_read_context: Callable[[str, JSONObject], JSONObject] | None = None,
         on_delta: Callable[[str], None] | None = None,
     ) -> AgentAnswer:
         """Continue native tool-call outputs until natural final text or a bounded failure."""
@@ -546,11 +556,14 @@ class AgentConversation:
                         items=public_items,
                         proposal_text=instruction,
                     )
-                batch_keys = [
-                    json.dumps([call.name, call.arguments], ensure_ascii=False, sort_keys=True)
-                    for call in calls
-                ]
-                for call, key in zip(calls, batch_keys, strict=True):
+                for call in calls:
+                    key_parts: list[JSONValue] = [call.name, call.arguments]
+                    if task_read_context is not None and call.name in {
+                        "read_request",
+                        "observe_operation",
+                    }:
+                        key_parts.append(task_read_context(call.name, call.arguments))
+                    key = json.dumps(key_parts, ensure_ascii=False, sort_keys=True)
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise WorkbenchError("本轮等待时间已用完。")
@@ -589,10 +602,14 @@ class AgentConversation:
                                 raise ToolRefusal(
                                     "本轮已有一次任务操作；请依据原回执跟踪，不重复提交。"
                                 )
-                            source = _proposal_text(
-                                "plan", call.arguments.get("start_turn", "current"), dialogue
+                            start = call.arguments.get("start_turn", "current")
+                            source = _proposal_text("plan", start, dialogue)
+                            user_turns = tuple(
+                                cast(str, row["content"])
+                                for row in _proposal_dialogue(start, dialogue)
+                                if row["role"] == "user"
                             )
-                            returned = act(call.name, call.arguments, source, remaining)
+                            returned = act(call.name, call.arguments, source, user_turns, remaining)
                             spent += cost
                             if call.name not in {"read_request", "observe_operation"}:
                                 mutated = True

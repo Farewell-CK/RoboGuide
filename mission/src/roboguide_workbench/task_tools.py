@@ -12,7 +12,7 @@ from mission.models import JSONObject
 from roboguide_workbench.client import ToolRefusal, WorkbenchError
 from roboguide_workbench.device_context import context_nodes, mentioned, task_context
 from roboguide_workbench.evidence import ReadResult
-from roboguide_workbench.workspace import WorkbenchSession
+from roboguide_workbench.workspace import WorkbenchSession, draft_reference
 
 
 def definitions() -> list[JSONObject]:
@@ -71,18 +71,84 @@ def definitions() -> list[JSONObject]:
     ]
 
 
+def _check_start_intent(mode: str, user_turns: tuple[str, ...]) -> None:
+    """Retain explicit user limits through clarification until a later explicit change."""
+    restriction: str | None = None
+    for text in user_turns:
+        if re.search(r"只讨论|仅讨论|先讨论|不要创建|不用创建", text):
+            restriction = "discussion"
+        elif re.search(r"不(?:要|能|可以)?执行|别执行|勿执行|只规划|只出方案|仅规划", text):
+            restriction = "plan"
+        elif re.search(
+            r"现在(?:可以)?执行|开始执行|直接执行|确认执行|可以执行|执行吧|改为执行", text
+        ):
+            restriction = None
+        elif restriction == "discussion" and re.search(r"只规划|开始规划|生成计划|创建任务", text):
+            restriction = "plan"
+    if restriction == "discussion" or restriction == "plan" and mode == "run":
+        raise ToolRefusal("用户要求讨论或仅规划，不能开启执行流程。")
+
+
 class TaskTools:
     """Keep one foreground action owner, original command IDs and acknowledged-plan bindings."""
 
     def __init__(self, session: WorkbenchSession, question: str) -> None:
         """Capture the displayed plan before in-turn observations can change it."""
         self.session, self.question = session, question
+        references = session.query_references()
+        self.input_request_id = references.get("request_id")
+        self.input_draft = copy.deepcopy(references.get("draft"))
+        self.started_request_id = session.request_id
+        self.current_request_id = (
+            self.input_request_id if isinstance(self.input_request_id, str) else None
+        )
         self.original_draft = copy.deepcopy(session.shown_draft)
         self.results: list[ReadResult] = []
         self.known_nodes: set[str] = set()
+        self.known_targets = [
+            *cast(list[str], references.get("displayed_missions", [])),
+            references.get("last_mission"),
+            self.input_request_id,
+        ]
+
+    def _require_input_request(self) -> None:
+        """Refuse rebinding queued edits or grants to a Request selected after input."""
+        if (
+            self.input_request_id != self.started_request_id
+            or self.session.request_id != self.started_request_id
+        ):
+            raise ToolRefusal("输入时看到的任务已变化；请查看当前任务后再明确操作。")
+
+    def cache_context(self, name: str, arguments: JSONObject) -> JSONObject:
+        """Resolve task reads against their actual target and original command generation."""
+        commands = self.session.store.data.get("commands")
+        if not isinstance(commands, list):
+            raise WorkbenchError("会话命令日志损坏。")
+        latest = commands[-1] if commands else None
+        if latest is not None and not isinstance(latest, dict):
+            raise WorkbenchError("会话命令日志损坏。")
+        return {
+            "current_request": self.current_request_id,
+            "target": arguments.get("request_id") or self.current_request_id
+            if name == "read_request"
+            else None,
+            "command_count": len(commands),
+            "command": {
+                key: latest.get(key)
+                for key in ("service", "idempotency_key", "operation_id", "path", "state")
+            }
+            if latest is not None
+            else None,
+        }
 
     def invoke(
-        self, name: str, arguments: JSONObject, original: str, remaining: float
+        self,
+        name: str,
+        arguments: JSONObject,
+        original: str,
+        remaining: float,
+        *,
+        user_turns: tuple[str, ...] | None = None,
     ) -> ReadResult:
         """Call the existing commands once under the original remaining time and source text."""
         session = self.session
@@ -98,12 +164,8 @@ class TaskTools:
                 self.question,
             ):
                 raise ToolRefusal("用户本轮没有明确要求执行或审批该版本，未发出操作。")
-        if name == "start_task" and (
-            re.search(r"只讨论|先讨论|不要创建|不用创建", self.question)
-            or arguments.get("mode") == "run"
-            and re.search(r"不执行|只规划|只出方案|仅规划", self.question)
-        ):
-            raise ToolRefusal("用户要求讨论或仅规划，不能开启执行流程。")
+        if name == "start_task":
+            _check_start_intent(cast(str, arguments["mode"]), user_turns or (self.question,))
         if name not in {"read_request", "observe_operation"} and re.fullmatch(
             r"(?:你好|您好|谢谢|多谢|感谢|好的|好|收到|嗯|hello|hi|thanks|thank you)[。！!,.，\s]*",
             self.question,
@@ -124,22 +186,22 @@ class TaskTools:
                     prefix = "当前设备能力未能核对：" + str(error) + "；执行条件保持未知。\n\n"
                 command = "/" + cast(str, arguments["mode"]) + " " + original
             elif name == "answer_request":
+                self._require_input_request()
                 if session.request_id is None:
                     raise ToolRefusal("当前没有可补充的任务 Request；请先明确要开始的任务。")
                 command = "/answer " + original
             elif name == "read_request":
-                target = cast(str, arguments["request_id"])
-                if not target and session.request_id is None:
+                target = cast(str, arguments["request_id"]) or self.current_request_id
+                if target is None:
                     raise ToolRefusal("当前没有任务 Request，请指定实际任务或先提出任务目标。")
-                if target and target != session.request_id and not mentioned(target, self.question):
+                if target != self.current_request_id and not mentioned(target, self.question):
                     raise ToolRefusal("Request ID 必须来自本会话当前任务或用户原话。")
-                command = "/request" + (" " + target if target else "")
+                command = "/request " + target
             elif name == "observe_operation":
                 command = "/observe"
             elif name == "cancel_task":
                 target = cast(str, arguments["target"])
-                known = [*session.displayed_missions, session.last_mission, session.request_id]
-                if target not in known and not mentioned(target, self.question):
+                if target not in self.known_targets and not mentioned(target, self.question):
                     raise ToolRefusal("取消目标必须来自用户原话或本会话实际任务回执。")
                 if re.search(r"不要取消|不取消|不同意|先不|别取消", self.question):
                     raise ToolRefusal("本轮没有明确取消要求，未发送取消。")
@@ -148,6 +210,11 @@ class TaskTools:
                 session._command("/cancel " + cast(str, arguments["kind"]) + " " + target)
                 command = "/cancel confirm"
             else:
+                self._require_input_request()
+                if self.input_draft != draft_reference(self.original_draft):
+                    raise ToolRefusal(
+                        "输入时看到的计划版本已变化；请查看当前计划后再明确执行或审批。"
+                    )
                 if self.original_draft is None or session.shown_draft != self.original_draft:
                     raise ToolRefusal(
                         "尚无已完整显示且未变化的当前计划；请先查看计划，再明确执行或审批。"
@@ -170,6 +237,7 @@ class TaskTools:
             session.actions.connection.timeout = min(mission_timeout, budget / phases)
             session.controller.timeout = min(controller_timeout, budget / phases)
             text = session._command(command)
+            self.current_request_id = session.request_id
             text = text.replace(
                 "尚未提交执行。查看后可用 /execute，修改用 /answer。",
                 "尚未提交执行。可以说“执行这个计划”，或继续补充修改要求。",
@@ -188,6 +256,17 @@ class TaskTools:
             session.controller.timeout = controller_timeout
             session.actions.connection.timeout = mission_timeout
 
-    def answer(self) -> str | None:
-        """Keep the actual Request lifecycle visible even if the model omits its receipt."""
-        return "\n\n".join(result.text for result in self.results) if self.results else None
+    def answer(self, evidence: list[JSONObject]) -> str | None:
+        """Keep full actual receipts and unresolved task parts independently of model wording."""
+        parts = [result.text for result in self.results]
+        names = {cast(str, tool["name"]) for tool in definitions()}
+        for item in evidence:
+            source, text = item.get("source"), item.get("text")
+            if (
+                isinstance(source, str)
+                and source in names
+                and item.get("complete") is not True
+                and isinstance(text, str)
+            ):
+                parts.append(text)
+        return "\n\n".join(dict.fromkeys(parts)) if parts else None

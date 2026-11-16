@@ -41,7 +41,7 @@ class ConversationSession(WorkbenchSession):
     progress: Callable[[str], None] = staticmethod(lambda message: None)
 
     def _turn(self, question: str) -> str:
-        """Use original commands verbatim; only natural-language reads enter evidence reasoning."""
+        """Keep commands verbatim and route natural text through native read and task tools."""
         if not question.startswith("/cancel"):
             self.pending_cancel = None
         if question == "/help":
@@ -62,7 +62,7 @@ class ConversationSession(WorkbenchSession):
         return self._legacy_turn(question)
 
     def _agent_turn(self, question: str) -> str:
-        """Let the model reply or choose read tools; no natural text grants write permission."""
+        """Use original user text with host-checked tools rather than generated task commands."""
         self.evidence = []
         if self.router is None:
             self.router = self.router_factory()
@@ -72,11 +72,6 @@ class ConversationSession(WorkbenchSession):
             return super()._turn(question)
         references = self.query_references()
         references["controller"] = self.controller.endpoint
-        if self.shown_draft:
-            references["draft"] = {
-                key: self.shown_draft.get(key)
-                for key in ("draft_revision", "draft_digest", "lifecycle", "assessment")
-            }
         history = (
             self.input_history
             if self.input_history is not None
@@ -86,10 +81,14 @@ class ConversationSession(WorkbenchSession):
         tasks = TaskTools(self, question)
 
         def invoke_task(
-            name: str, arguments: JSONObject, original: str, remaining: float
+            name: str,
+            arguments: JSONObject,
+            original: str,
+            user_turns: tuple[str, ...],
+            remaining: float,
         ) -> ReadResult:
             """Publish actual new receipt IDs to subsequent reads without guessing targets."""
-            returned = tasks.invoke(name, arguments, original, remaining)
+            returned = tasks.invoke(name, arguments, original, remaining, user_turns=user_turns)
             adapter.learn_task(tasks.known_nodes)
             return returned
 
@@ -104,6 +103,7 @@ class ConversationSession(WorkbenchSession):
             tool_definitions=adapter.definitions() + task_definitions(),
             progress=self.progress,
             act=invoke_task,
+            task_read_context=tasks.cache_context,
             on_delta=self.stream_output if self.stream_enabled else None,
         )
         self.query_status, self.evidence = result.status, result.evidence
@@ -124,20 +124,21 @@ class ConversationSession(WorkbenchSession):
                 + options
             )
         text = result.text
-        task_answer = tasks.answer()
-        if task_answer is not None:
-            text = task_answer
-        state_answer = adapter.state_answer(result.evidence)
-        if state_answer is not None:
-            text = state_answer.text + ("\n\n" + task_answer if task_answer else "")
-            if not state_answer.complete:
+        task_answer = tasks.answer(result.evidence)
+        read_answer = adapter.read_answer(result.evidence, include_nonstate=task_answer is not None)
+        if task_answer is not None or read_answer is not None:
+            text = "\n\n".join(
+                part for part in (read_answer.text if read_answer else None, task_answer) if part
+            )
+            if read_answer is not None and not read_answer.complete:
                 self.query_status = (
                     "partial"
-                    if any(item.get("complete") is True for item in state_answer.components)
+                    if any(item.complete for item in tasks.results)
+                    or any(item.get("complete") is True for item in read_answer.components)
                     else "failed"
                 )
-            elif result.status != "complete":
-                text += "\n本轮其它读取或回复未完成；以上为已取得的设备上报。"
+            if result.status != "complete":
+                text += "\n本轮其它操作、读取或回复未完成；未确认部分保持未知。"
         if result.evidence:
             summary = adapter.reference_summary(result.evidence)
             if summary:
@@ -191,11 +192,6 @@ class ConversationSession(WorkbenchSession):
             return super()._turn(question)
         references = self.query_references()
         references["controller"] = self.controller.endpoint
-        if self.shown_draft:
-            references["draft"] = {
-                key: self.shown_draft.get(key)
-                for key in ("draft_revision", "draft_digest", "lifecycle", "assessment")
-            }
         context = self.store.data.get("context")
         if isinstance(context, dict) and context.get("request_context") is not None:
             references["request_context_historical"] = context["request_context"]

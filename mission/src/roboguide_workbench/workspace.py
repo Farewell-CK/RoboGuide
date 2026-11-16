@@ -160,6 +160,20 @@ def render_request(raw: JSONObject) -> str:
     return "\n".join(lines)
 
 
+def draft_reference(raw: JSONObject | None) -> JSONObject | None:
+    """Copy the acknowledged plan identity without turning historical context into permission."""
+    return (
+        copy.deepcopy(
+            {
+                key: raw.get(key)
+                for key in ("draft_revision", "draft_digest", "lifecycle", "assessment")
+            }
+        )
+        if raw is not None
+        else None
+    )
+
+
 class WorkbenchSession(Session):
     """Own durable scope and commands used by direct input and closed native task tools."""
 
@@ -234,10 +248,11 @@ class WorkbenchSession(Session):
             "state_targets": list(self.displayed_states),
             "last_state": self.last_state,
             "previous_question": self.previous_question,
+            "request_id": self.request_id,
+            "draft": draft_reference(self.shown_draft),
         }
         if self.input_references is not None:
             references.update(self.input_references)
-        references["request_id"] = self.request_id
         return references
 
     @staticmethod
