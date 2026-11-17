@@ -1003,6 +1003,8 @@ CLI 使用 `roboguide-node --validate <config> --plan <plan> --source-profile co
 `core/node-service/src/source_io.rs` 统一限制配置／计划 1 MiB、descriptor 16 MiB，
 单次编译总量 256 MiB，使用原始 30 秒结果接纳预算并拒绝非普通文件；它不承诺内核 I/O 硬超时。
 编译器对同一路径只读取一次 descriptor，方法检查与摘要共用快照。
+运行时 descriptor 排队、读取、解码及后续 gRPC 等待保留原请求截止时间，过期时拒绝派发。
+旧 profile 和 CLI 保留 Unix 原生路径支持；完整来源 profile 才要求摘要中的路径可用 UTF-8 表示。
 `tools/quality/check_node_preflight_processes.py` 负责真实 CLI、mTLS Controller 与 SQL 无写入验收。
 这仍是显式声明的来源证明，不代表 live Node 配置身份或物理运行结果。
 详见 [ADR-0256](docs/decisions/0256-complete-node-preflight-sources.md)。

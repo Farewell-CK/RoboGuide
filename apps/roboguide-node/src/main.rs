@@ -14,9 +14,12 @@ use std::sync::Arc;
 /// Validates an offline extension catalog or runs one immutable catalog with generic drivers.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut arguments = std::env::args().skip(1);
+    let mut arguments = std::env::args_os().skip(1);
     let first = arguments.next();
-    if matches!(first.as_deref(), Some("--validate" | "conformance")) {
+    if matches!(
+        first.as_deref().and_then(std::ffi::OsStr::to_str),
+        Some("--validate" | "conformance")
+    ) {
         let path = arguments
             .next()
             .map_or_else(|| PathBuf::from("config/node.toml"), PathBuf::from);
@@ -24,17 +27,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut plan_path = None;
         let mut complete_sources = false;
         while let Some(flag) = arguments.next() {
-            match flag.as_str() {
-                "--source-profile" if !complete_sources => {
-                    if arguments.next().as_deref() != Some("complete-sources/v0.1") {
+            match flag.to_str() {
+                Some("--source-profile") if !complete_sources => {
+                    if arguments
+                        .next()
+                        .as_deref()
+                        .and_then(std::ffi::OsStr::to_str)
+                        != Some("complete-sources/v0.1")
+                    {
                         return Err("unsupported Node preflight source profile".into());
                     }
                     complete_sources = true;
                 }
-                "--plan" if plan_path.is_none() => {
+                Some("--plan") if plan_path.is_none() => {
                     plan_path = Some(arguments.next().ok_or("--plan requires a plan path")?);
                 }
-                "--node-config" => paths.push(PathBuf::from(
+                Some("--node-config") => paths.push(PathBuf::from(
                     arguments
                         .next()
                         .ok_or("--node-config requires a config path")?,
@@ -57,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         } else {
             if paths.len() > 1 || complete_sources {
-                return Err("additional --node-config inputs require --plan".into());
+                return Err("--node-config and --source-profile require --plan".into());
             }
             println!("{}", compile_extension_config_json(&path)?);
         }

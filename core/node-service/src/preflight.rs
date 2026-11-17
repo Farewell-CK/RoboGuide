@@ -83,7 +83,7 @@ impl NodePlanPreflight {
             } else {
                 directory.to_path_buf()
             };
-            if directory.to_str().is_none() {
+            if complete_sources && directory.to_str().is_none() {
                 return Err("Node preflight resolution base must be UTF-8".into());
             }
             // A shared exact-path snapshot prevents catalogs from compiling different bytes.

@@ -27,7 +27,8 @@ The complete source digest hashes the JSON serialization of the pair
 and `descriptors` (connection-ID-sorted tuples of connection ID, resolved configured descriptor
 path, exact acquired byte count and SHA-256). TOML plus this resolution base binds the compiler's
 deterministic resolution of journal/cache/Memory paths; this is not an inode, permissions or
-future symlink-target attestation. Non-UTF-8 resolution bases refuse. No paths, private identities
+future symlink-target attestation. Non-UTF-8 resolution bases refuse in this complete-source profile.
+Legacy receipts retain native Unix path support. No paths, private identities
 or descriptor bytes are returned in HTTP diagnostics.
 
 `local_engine::CompilationConnections` retains decoded descriptor snapshots only during compilation.
@@ -94,3 +95,35 @@ legacy digest compatibility, original aggregate/deadline gates and strict Missio
 - The local process gate registers zero Nodes and creates no execution workers. No local serial
   or video device was discovered; no explicit device or cross-host deployment endpoint was
   available for this task. Those facts remain unproven, not passing software proxies.
+
+## Review follow-up of `aa0dd857`
+
+Three concrete defects were reproduced and fixed:
+
+1. Runtime descriptor admission started its 30-second clock inside `spawn_blocking`, excluding
+   queue time, and did not retain the original request deadline. A real single-worker pool held
+   beyond a 50 ms request budget allowed a unary RPC to execute after 150 ms. The budget now
+   starts before submission, is capped by the original request deadline, and covers descriptor
+   decoding and delivery back to the async caller. Reflection, readiness and RPC waits use that
+   same deadline; the peer receives only its actual remaining timeout. Source expiry refuses
+   before dispatch, and transport expiry never establishes absence of remote effects.
+2. The complete profile's UTF-8 resolution-base check accidentally applied to legacy library
+   callers too. It now applies only to complete-source JSON receipts. Exact TOML-only identities
+   and normal compilation remain usable under non-UTF-8 Unix directories.
+3. A real CLI regression exposed a pre-existing `std::env::args()` panic for those native paths.
+   The CLI now uses `args_os()`, preserves path bytes, and decodes only option names/profile
+   values as text. The complete profile still refuses unsupported path encoding explicitly.
+
+The legacy-directory and late-RPC counterexamples failed before their fixes. Added checks also
+observe the real backend's method receive count (zero after refused expiry), original expiry
+before opening an unavailable descriptor, and actual CLI legacy acceptance/complete refusal.
+The hard kernel-I/O cancellation and live-Node/physical attestation boundaries above remain.
+
+Follow-up validation: all 181 Node tests, 3 real CLI tests and 5 Controller plan-validation
+contracts passed (189 total), including TCP/Unix gRPC and explicit reflection. Affected Node/CLI
+all-target/all-feature Clippy with warnings denied, Rustfmt and diff checks passed. Rebuilt
+executables passed the maintained mTLS process gate again: three original Controller processes,
+two startup profile refusals, five CLI source refusals and exact checkpoint/event/command rows.
+The new retained receipt is `/tmp/rg-preflight-20261117-review-aa0dd857-a/result.json`; the prior
+receipt above remains unchanged. No public schema or identity recipe changed, and unchanged
+Python/full-repository suites were not rerun.

@@ -750,3 +750,35 @@ fn complete_source_receipts_bind_descriptors_and_resolution_base() {
         4
     );
 }
+
+/// Legacy Unix inputs retain native path support; only complete JSON receipts require UTF-8.
+#[cfg(unix)]
+#[test]
+fn legacy_sources_preserve_non_utf8_resolution_directories() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let directory = root
+        .path()
+        .join(std::ffi::OsString::from_vec(b"node-\xff".to_vec()));
+    std::fs::create_dir(&directory).unwrap();
+    let path = directory.join("node.toml");
+    let ordinary = root.path().join("node.toml");
+    for path in [&path, &ordinary] {
+        std::fs::write(path, include_str!("../../../config/node.toml")).unwrap();
+    }
+    assert!(NodeServiceConfig::load_compiled(&path).is_ok());
+    let legacy = NodePlanPreflight::load_conformant(std::slice::from_ref(&path))
+        .expect("legacy receipts must accept native Unix directories");
+    assert_eq!(
+        legacy.source_digest(),
+        NodePlanPreflight::load(&[ordinary])
+            .unwrap()
+            .source_digest()
+    );
+    assert!(
+        NodePlanPreflight::load_complete(&[path], true)
+            .unwrap_err()
+            .contains("UTF-8")
+    );
+}

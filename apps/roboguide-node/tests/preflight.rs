@@ -166,3 +166,55 @@ fn cli_source_errors_are_configuration_failures() {
     assert!(!output.status.success() && output.stdout.is_empty());
     assert!(!directory.path().join("node-state").exists());
 }
+
+/// Legacy CLI receipts retain native Unix paths while explicit complete receipts refuse them.
+#[cfg(unix)]
+#[test]
+fn cli_legacy_profile_accepts_non_utf8_config_directory() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let directory = root
+        .path()
+        .join(std::ffi::OsString::from_vec(b"node-\xff".to_vec()));
+    std::fs::create_dir(&directory).unwrap();
+    let config = directory.join("node.toml");
+    std::fs::write(
+        &config,
+        include_str!("../../../config/node.toml").replace("compute.noop@v1", "object.relocate@v1"),
+    )
+    .unwrap();
+    let plan = root.path().join("plan.json");
+    let mut document: Value = serde_json::from_str(include_str!(
+        "../../../scenarios/mission-front-half-v0.7/mission-plan.json"
+    ))
+    .unwrap();
+    document["tasks"][0]["roles"][0]["requirements"]["resources"] =
+        json!([{"kind":"compute", "units":1}]);
+    std::fs::write(&plan, document.to_string()).unwrap();
+    for complete in [false, true] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_roboguide-node"));
+        command
+            .arg("--validate")
+            .arg(&config)
+            .arg("--plan")
+            .arg(&plan);
+        if complete {
+            command.args(["--source-profile", "complete-sources/v0.1"]);
+        }
+        let output = command.output().unwrap();
+        assert_eq!(output.status.success(), !complete);
+        if complete {
+            assert!(output.stdout.is_empty());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("UTF-8"));
+        } else {
+            let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(
+                report["schema_version"],
+                "roboguide.node-plan-preflight/v0.1"
+            );
+            assert_eq!(report["decision"], "not_blocked");
+        }
+    }
+    assert!(!directory.join("node-state").exists());
+}

@@ -7,6 +7,10 @@ use prost_types::{
     field_descriptor_proto::{Label, Type},
 };
 use std::convert::Infallible;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::task::{Context, Poll};
 use tonic::codegen::{Body, BoxFuture, Service, StdError};
 
@@ -82,8 +86,11 @@ impl Service<Request<EchoRequest>> for WatchEcho {
 }
 
 /// Minimal tonic router exposing methods described by [`descriptor_set`].
-#[derive(Clone, Copy)]
-struct EchoService;
+#[derive(Clone, Default)]
+struct EchoService {
+    /// Actual application-method receives, independent of the client's eventual timeout result.
+    calls: Arc<AtomicUsize>,
+}
 
 impl<B> Service<http::Request<B>> for EchoService
 where
@@ -101,6 +108,7 @@ where
 
     /// Dispatches only the two fixed descriptor-backed test methods.
     fn call(&mut self, request: http::Request<B>) -> Self::Future {
+        self.calls.fetch_add(1, Ordering::SeqCst);
         match request.uri().path() {
             "/local.test.Echo/Unary" => Box::pin(async move {
                 let codec = tonic_prost::ProstCodec::default();
@@ -187,6 +195,7 @@ fn static_descriptor_set() -> &'static [u8] {
 async fn start_echo_server() -> (
     String,
     tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
+    Arc<AtomicUsize>,
 ) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -197,14 +206,16 @@ async fn start_echo_server() -> (
         .register_encoded_file_descriptor_set(static_descriptor_set())
         .build_v1()
         .expect("reflection service builds");
+    let service = EchoService::default();
+    let calls = Arc::clone(&service.calls);
     let server = tokio::spawn(async move {
         tonic::transport::Server::builder()
-            .add_service(EchoService)
+            .add_service(service)
             .add_service(reflection)
             .serve_with_incoming(incoming)
             .await
     });
-    (format!("http://{address}"), server)
+    (format!("http://{address}"), server, calls)
 }
 
 /// Starts the same deterministic service over a Unix Domain Socket.
@@ -216,7 +227,7 @@ async fn start_echo_uds(
     let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
     tokio::spawn(async move {
         tonic::transport::Server::builder()
-            .add_service(EchoService)
+            .add_service(EchoService::default())
             .serve_with_incoming(incoming)
             .await
     })
@@ -228,7 +239,7 @@ async fn invokes_descriptor_driven_local_grpc_methods() {
     let directory = tempfile::tempdir().expect("temporary directory exists");
     let path = directory.path().join("echo.bin");
     std::fs::write(&path, descriptor_set()).expect("descriptor writes");
-    let (endpoint, server) = start_echo_server().await;
+    let (endpoint, server, calls) = start_echo_server().await;
     let unary = CompiledDriverRequest::Grpc {
         endpoint: endpoint.clone(),
         descriptor_set: Some(path.clone()),
@@ -283,6 +294,7 @@ async fn invokes_descriptor_driven_local_grpc_methods() {
     assert!(!first.terminal);
     assert_eq!(second.payload, serde_json::json!({"text": "run-2"}));
     assert!(second.terminal);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
     server.abort();
 }
 
@@ -326,12 +338,79 @@ async fn validates_configured_streaming_mode() {
     let directory = tempfile::tempdir().expect("temporary directory exists");
     let path = directory.path().join("echo.bin");
     std::fs::write(&path, descriptor_set()).expect("descriptor writes");
-    let error = load_method(&path, "local.test.Echo", "Watch", false)
-        .await
-        .expect_err("stream mismatch fails");
+    let error = load_method(
+        &path,
+        "local.test.Echo",
+        "Watch",
+        false,
+        tokio::time::Instant::now() + Duration::from_secs(1),
+    )
+    .await
+    .expect_err("stream mismatch fails");
     assert!(
         matches!(error, DriverError::InvalidResponse(detail) if detail.contains("streaming mode"))
     );
+}
+
+/// A queued descriptor read cannot renew the original request and dispatch a late unary RPC.
+#[test]
+fn descriptor_worker_queue_consumes_original_request_deadline() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("echo.bin");
+    std::fs::write(&path, descriptor_set()).unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let (endpoint, server, calls) = start_echo_server().await;
+        let (started, held) = tokio::sync::oneshot::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            started.send(()).unwrap();
+            released.recv_timeout(Duration::from_secs(5)).unwrap();
+        });
+        held.await.unwrap();
+        let request = CompiledDriverRequest::Grpc {
+            endpoint,
+            descriptor_set: Some(path),
+            reflection: false,
+            service: "local.test.Echo".into(),
+            method: "Unary".into(),
+            server_streaming: false,
+            credential_metadata: BTreeMap::new(),
+            message: serde_json::json!({"text": "late"}),
+            timeout_ms: 50,
+        };
+        let pending =
+            tokio::spawn(async move { GrpcDriver::new().invoke(&request).await.map(|_| ()) });
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        release.send(()).unwrap();
+        blocker.await.unwrap();
+        let result = pending.await.unwrap();
+        server.abort();
+        assert!(
+            matches!(result, Err(DriverError::Transport(detail)) if detail.contains("timed out")),
+            "expired requests must refuse before local method dispatch"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    });
+}
+
+/// Original expiry wins over source errors, so an already expired read never opens its path.
+#[tokio::test]
+async fn expired_descriptor_deadline_refuses_before_source_open() {
+    let directory = tempfile::tempdir().unwrap();
+    let result = load_method(
+        &directory.path().join("missing.bin"),
+        "local.test.Echo",
+        "Unary",
+        false,
+        tokio::time::Instant::now(),
+    )
+    .await;
+    assert!(matches!(result, Err(DriverError::Transport(detail)) if detail.contains("timed out")));
 }
 
 /// Canonical protobuf JSON round-trips through a descriptor-bearing dynamic message.
@@ -352,7 +431,7 @@ fn dynamic_json_round_trip_uses_descriptor() {
 /// Explicit reflection resolves and invokes the same fixed local method.
 #[tokio::test]
 async fn invokes_reflection_discovered_local_grpc_method() {
-    let (endpoint, server) = start_echo_server().await;
+    let (endpoint, server, _) = start_echo_server().await;
     let request = CompiledDriverRequest::Grpc {
         endpoint,
         descriptor_set: None,

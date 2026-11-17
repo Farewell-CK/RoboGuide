@@ -1,4 +1,4 @@
-//! Bounded local source reads; expired work refuses admission without leaving background readers.
+//! Bounded regular-file source reads checked against their original admission clocks.
 
 use std::fs::OpenOptions;
 use std::io::{self, Read};
@@ -31,6 +31,13 @@ impl SourceBudget {
             deadline: Instant::now() + SOURCE_BUDGET,
             acquired: 0,
         }
+    }
+
+    /// Caps acquisition by an existing caller deadline, including time queued before file work.
+    pub(crate) fn until(deadline: Instant) -> Self {
+        let mut budget = Self::new();
+        budget.deadline = budget.deadline.min(deadline);
+        budget
     }
 
     /// Refuses late results even when a preceding synchronous kernel operation was slow.

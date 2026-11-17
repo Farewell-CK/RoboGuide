@@ -54,9 +54,21 @@ impl LocalDriver for GrpcDriver {
             let deadline = tokio::time::Instant::now() + timeout;
             let channel = connect_channel(endpoint, timeout).await?;
             let method_descriptor = if let Some(descriptor_path) = descriptor_set.as_deref() {
-                load_method(descriptor_path, service, method, *server_streaming).await?
+                load_method(
+                    descriptor_path,
+                    service,
+                    method,
+                    *server_streaming,
+                    deadline,
+                )
+                .await?
             } else if *reflection {
-                reflect_method(channel.clone(), service, method, *server_streaming).await?
+                tokio::time::timeout_at(
+                    deadline,
+                    reflect_method(channel.clone(), service, method, *server_streaming),
+                )
+                .await
+                .map_err(|_| request_timeout())??
             } else {
                 return Err(DriverError::InvalidResponse(
                     "dynamic gRPC connection has neither descriptor set nor reflection".to_string(),
@@ -67,28 +79,43 @@ impl LocalDriver for GrpcDriver {
             let route = PathAndQuery::try_from(format!("/{service}/{method}"))
                 .map_err(|error| DriverError::InvalidResponse(error.to_string()))?;
             let mut grpc = tonic::client::Grpc::new(channel);
-            grpc.ready()
+            tokio::time::timeout_at(deadline, grpc.ready())
                 .await
+                .map_err(|_| request_timeout())?
                 .map_err(|error| DriverError::Transport(error.to_string()))?;
             let mut tonic_request = Request::new(input);
             apply_metadata(&mut tonic_request, credential_metadata)?;
+            let remaining = deadline
+                .checked_duration_since(tokio::time::Instant::now())
+                .filter(|duration| !duration.is_zero())
+                .ok_or_else(request_timeout)?;
+            tonic_request.set_timeout(remaining);
             let codec = DynamicCodec::new(output);
             if *server_streaming {
-                let response = grpc
-                    .server_streaming(tonic_request, route, codec)
-                    .await
-                    .map_err(map_status)?;
+                let response = tokio::time::timeout_at(
+                    deadline,
+                    grpc.server_streaming(tonic_request, route, codec),
+                )
+                .await
+                .map_err(|_| request_timeout())?
+                .map_err(map_status)?;
                 Ok(streaming_response(response.into_inner(), deadline))
             } else {
-                let response = grpc
-                    .unary(tonic_request, route, codec)
-                    .await
-                    .map_err(map_status)?;
+                let response =
+                    tokio::time::timeout_at(deadline, grpc.unary(tonic_request, route, codec))
+                        .await
+                        .map_err(|_| request_timeout())?
+                        .map_err(map_status)?;
                 let payload = encode_json_message(&response.into_inner())?;
                 Ok(single_event_response(payload))
             }
         })
     }
+}
+
+/// Retains a transport failure for expiry, never an assertion that remote effects are absent.
+fn request_timeout() -> DriverError {
+    DriverError::Transport("gRPC request timed out".into())
 }
 
 /// Connects one fixed local gRPC endpoint over TCP/TLS or Unix Domain Socket.
@@ -207,26 +234,43 @@ async fn load_method(
     service_name: &str,
     method_name: &str,
     configured_server_streaming: bool,
+    deadline: tokio::time::Instant,
 ) -> Result<MethodDescriptor, DriverError> {
+    // The original clock starts before submission, so the blocking pool cannot renew it.
+    let mut budget = crate::source_io::SourceBudget::until(deadline.into_std());
+    budget.check().map_err(descriptor_source_error)?;
     let descriptor_path = descriptor_path.to_path_buf();
-    let bytes = tokio::task::spawn_blocking(move || {
-        crate::source_io::SourceBudget::new()
+    let service_name = service_name.to_owned();
+    let method_name = method_name.to_owned();
+    let (descriptor, budget) = tokio::task::spawn_blocking(move || {
+        let bytes = budget
             .read(&descriptor_path, crate::MAX_DESCRIPTOR_SOURCE_BYTES)
+            .map_err(descriptor_source_error)?;
+        let pool = DescriptorPool::decode(bytes.as_slice()).map_err(|error| {
+            DriverError::InvalidResponse(format!("cannot decode gRPC descriptor set: {error}"))
+        })?;
+        let descriptor = find_method(
+            &pool,
+            &service_name,
+            &method_name,
+            configured_server_streaming,
+        )?;
+        budget.check().map_err(descriptor_source_error)?;
+        Ok::<_, DriverError>((descriptor, budget))
     })
     .await
-    .map_err(|error| DriverError::InvalidResponse(error.to_string()))?
-    .map_err(|error| {
+    .map_err(|error| DriverError::InvalidResponse(error.to_string()))??;
+    budget.check().map_err(descriptor_source_error)?;
+    Ok(descriptor)
+}
+
+/// Keeps original source expiry separate from malformed or unavailable descriptor data.
+fn descriptor_source_error(error: std::io::Error) -> DriverError {
+    if error.kind() == std::io::ErrorKind::TimedOut {
+        request_timeout()
+    } else {
         DriverError::InvalidResponse(format!("cannot read bounded gRPC descriptor set: {error}"))
-    })?;
-    let pool = DescriptorPool::decode(bytes.as_slice()).map_err(|error| {
-        DriverError::InvalidResponse(format!("cannot decode gRPC descriptor set: {error}"))
-    })?;
-    find_method(
-        &pool,
-        service_name,
-        method_name,
-        configured_server_streaming,
-    )
+    }
 }
 
 /// Finds and validates one fixed method in a descriptor pool.
