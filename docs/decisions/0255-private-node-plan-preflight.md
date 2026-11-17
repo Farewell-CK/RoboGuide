@@ -88,8 +88,9 @@ attributes 为空，而原始场景已声明 `location-access`/`supports-floor-t
 - Memory 的 discover/export/原始 import outcome 可引用拼错或其他 workflow 的步骤。
   现在对 `/steps/...` 校验精确 workflow，保留既有 invocation 投影及 response-relative
   instance/query 指针，不猜测尚未返回的实际响应字段。
-  discover/export/原始结果 query 的 `/attempt_id` 引用也会拒绝；config v0.10+ 的 prepared import、availability
-  和 use 保留其实际 attempt 输入。Memory 的 staged 文件来自 `/invocation/staged_artifact`，
+  discover/export/原始结果 query 的 `/attempt_id` 引用也会拒绝。先前关于 v0.10+ prepared import
+  可用顶层 attempt 的描述在本轮运行时追踪中证实有误，现按下节修正；availability 和 use
+  保留其实际 attempt 输入。Memory 的 staged 文件来自 `/invocation/staged_artifact`，
   不可借用普通 execution 独立填充的 `/artifacts/inputs/...` 或 `/artifacts/outputs/...`。
 - 上一实现的 CLI `--plan` 分支只用了生产编译器，漏掉 conformance 的额外完整性检查。
   两种 CLI 模式现在对同一份已读取配置复用原 conformance 门禁，避免重新读源产生竞态。
@@ -104,3 +105,74 @@ catalog，不修改原 Debug/identity/digest 表示，也不渲染真实 Control
 Node 163 项、Integration Server 306 项、CLI 真实子进程回归及受影响三个包的
 all-targets/all-features Clippy、Rustfmt 和 diff 检查通过。上一节已在原始 HEAD 复现的
 1 项既有 Node 测试本轮显式跳过；未重复全仓 pytest 或运行模拟器、设备与 HA/recovery gate。
+
+## 扩大审计与修复轮次（基线 `78c2912e`）
+
+### 覆盖表
+
+| 入口 | 实际上下文及字段来源 | 静态校验与本轮结论 |
+|---|---|---|
+| Execute | `spawn_dispatch`：canonical invocation、原始 attempt、选定一个 Artifact slot、按序 responses | 编译器检查平铺字段/代际/阶段、Artifact direction/binding；具体计划检查标量、数组计数和同一 catalog 的资源覆盖 |
+| Status / Cancel | 各自 `WorkflowContext::new`、标量 handle、自身阶段 responses | 不继承 Execute responses、attempt 或 staged paths；原运行时状态/停止门禁保留 |
+| Health / Readiness | 空 invocation 的独立固定观测 | 编译器只允许部署常量；结果 Pointer 为 response-relative，不用 workflow-context 规则误判 |
+| State / Peer observer | 空 invocation 的单步 GET 观测 | 固定只读路由、常量映射、响应 Pointer 语法；未知 payload 字段仍由真实观测验证 |
+| Memory discover | 调用方 invocation，加 `memory_query`、本 workflow responses | 无顶层 attempt/handle/staged paths；结果仅可读实际步骤或 invocation 子路径 |
+| Memory export | 调用方 invocation，加 `memory_manifest`、本 workflow responses | 同上；导出路径必须由 provider 实际返回并通过原 storage-relative 路径校验 |
+| Memory import（包括 prepared） | `import_memory` 始终用 `WorkflowContext::new`，加入 manifest/staged path/原 invocation metadata | 本轮移除所有代际对顶层 attempt 的错误放行；仍允许 `/invocation/execution_id` 等原元数据，未添加新字段 |
+| Memory continuity instance / query | instance 为空；query 仅有 `memory_import` 原始记录 | instance 仅常量；query 不得借用 attempt；typed outcome、instance identity 和 clock 仍由原运行时验证 |
+| Memory availability | prepared invocation 加原始 import/manifest，通过 `with_attempt_id` 建 context | 实际 attempt 可读；GET、原 backend/current-content 校验保留 |
+| Memory use control / query | prepared invocation 加原 use request，通过 `with_attempt_id` 建独立 context | POST/GET、固定 Unix backend、原 session/lease/current permission 均保留；无其他 phase responses |
+| Artifact / 私有资源 | 具体 plan intent 与同一 catalog 的真实声明 | action/slot/map/revision/output anchor/producer owner 与 mandatory ID 覆盖均保持；引用字节、Prepared 状态、grant authority 不由静态预检建立 |
+| CLI / Controller / MI | 显式本地源；Controller 不接受请求传入路径；MI 解析闭合的版本与来源 | CLI 完整 conformance；Controller 保留生产编译兼容入口。共同输入的 logical decision/issues/plan/source digest 对齐；专有 conformance 拒绝不伪装成计划缺陷 |
+
+### 确认的缺陷与修复
+
+1. 未知父值既可能是 object，也可能是 array。原部分求值对 `/0`、`/00`、`/+0` 和 append
+   保留互相独立的字段事实，而实际 target setter 接受它们作为数组索引别名。反例中
+   `/0=true` 后 `/00={}` 再写 `/0/child` 实际成功，旧静态检查却拒绝。
+   现仅对未知父值撤销可能被数字别名写入覆盖的事实；真实已知 object 保留独立数字键，
+   真实已知 array 保留原解析/越界行为。没有修改 source Pointer 或 runtime target 语义。
+2. prepared import 的实际入口也使用 `new`，配置 v0.10 不能创造顶层 attempt。新增反例
+   在修复前通过编译，现拒绝；availability/use 的实际 `with_attempt_id` 不受影响。
+3. Memory result 只检查 `/steps/` 前缀，拼错根 `/step/...`、不存在的 attempt/handle 和
+   空 Artifact 子路径仍可通过。现校验完整结果 namespace，并保留实际步骤和 invocation
+   子路径；不把未知响应内容变为已知事实。
+4. Controller 在持锁时对每个 Role 的全部 catalog 反复构造、格式化并哈希 workflow。
+   现从原 digest 构造器抽出只借用声明的 Artifact 纯校验，保持原 digest 字节配方；
+   兼容扫描找到同一 catalog 的完整匹配即停止。Controller 原权限与发布合同在锁内读取，
+   独立私有检查和响应构造在锁外执行。错误分类和 32 条截断规则不变。
+5. 既有搬运测试的空 attributes 断言与真实场景不符。改为精确核对两条楼层属性，单独
+   拒绝虚构 `max-payload-grams`，保留原资源/owner/readiness/operation-support 断言。
+
+### 来源、兼容性与剩余边界
+
+- v0.3 `source_digest` 只绑定按唯一 Node 身份排序的 TOML 原始字节。本轮以相同 TOML、
+  不同目录和不同有效 descriptor bytes 证实摘要相同。**NOT PROVEN**：摘要不能证明外部
+  descriptor、解析后的 path 或 live Node 使用了同一配置。加强这一含义需要独立的版本化
+  来源合同；本轮没有静默更改。缺失/损坏 descriptor 在启动编译时仍拒绝。
+- 已加载 catalog 可在原 TOML/descriptor 删除后重复只读检查，不重新读源。配置变更须
+  显式重启；冻结来源不等于运行时实际状态。credential 只编译环境变量名，不读取其值。
+- 配置 1 MiB、最多 64 份和 32 条诊断保留原边界，分别测试精确边界及首个越界值。
+  未新增 wire 字段、公共限制、profile 或持久化版本。
+- **TEST GAP**：有限组合测试不是全部 JSON 形状的形式化证明。外部 descriptor 文件大小、
+  本地 CLI plan 文件读取及受信管理员路径的阻塞 IO 无新增全局预算；本轮压力测试不是
+  所有配置同时占满所有边界的 SLO 或硬实时证明。
+- **NOT PROVEN**：实际响应 payload、Artifact bytes/Prepared 状态、实际 grant/session/lease、
+  Node readiness、Actor placement、物理能力和停止结果仍必须经过原运行时门禁。
+
+### 验证证据
+
+- 三个新反例（数组别名误拒绝、prepared import 缺失 attempt、Memory 非法结果根）在修复前
+  均失败；修复后通过。既有搬运测试修复前失败，本轮纳入完整回归，不再跳过。
+- 固定种子 4096 组映射 × 6 个具体补全，共 24576 次实际 renderer 检查，含 2766 组静态
+  拒绝、4736 次成功渲染；样本内无误拒绝。独立穷举比较 512 组资源配置/mandatory 集合
+  × 4 组需求，含缺资源、容量和分配模式拒绝。
+- 原 digest 字节配方对普通 operation 和四类 Artifact action 的兼容回归通过。
+- 相同 debug 构建、64 份配置/256 个 Role：基线 private check 约 5.08 秒，优化后约
+  40.7 毫秒；属于单次本地样例，无固定时间断言，不代表跨主机或负载 SLO。
+- CLI 子进程和 HTTP handler 用真实监听 socket 确认没有 local endpoint connection；HTTP
+  查询前后 checkpoint/event/command 不变，配置文件删除后仍使用冻结来源，journal/cache
+  不产生。夹具自身初始化的 SQLite 文件与查询 effects 分开计量。
+- 本轮不改 MI 回复结构/解析；未重复运行 Python 全仓、模型、模拟器、设备或 HA/recovery gate。
+- 最终完整回归：Node 174 项、Integration Server 306 项、CLI 2 项全部通过，零失败、零跳过；
+  三包 all-targets/all-features Clippy、Rustfmt、diff 检查通过。既有搬运属性测试已关闭。

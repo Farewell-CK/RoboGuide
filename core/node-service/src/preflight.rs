@@ -108,13 +108,6 @@ impl NodePlanPreflight {
                     continue;
                 };
                 let operation = intent.operation().to_string();
-                let candidates = self
-                    .catalogs
-                    .iter()
-                    .filter_map(|catalog| {
-                        catalog.operations().get(&operation).map(|op| (catalog, op))
-                    })
-                    .collect::<Vec<_>>();
                 let path = format!("/tasks/{task_index}/roles/{role_index}");
                 let parameters = intent
                     .parameters()
@@ -142,25 +135,32 @@ impl NodePlanPreflight {
                     "resource_grants": vec![Value::Null; role.resource_requirements().iter()
                         .filter(|demand| demand.allocation_mode() == domain::ResourceAllocationMode::Divisible).count()],
                 });
-                let parameters = candidates
-                    .iter()
-                    .filter(|(catalog, op)| operation_sources_exist(catalog, op, &invocation))
-                    .collect::<Vec<_>>();
-                let issue = if candidates.is_empty() {
+                let mut has_operation = false;
+                let mut has_parameters = false;
+                let compatible = self.catalogs.iter().any(|catalog| {
+                    let Some(op) = catalog.operations().get(&operation) else {
+                        return false;
+                    };
+                    has_operation = true;
+                    if !operation_sources_exist(catalog, op, &invocation) {
+                        return false;
+                    }
+                    has_parameters = true;
+                    resources_compatible(catalog, op, &role.resource_requirements())
+                });
+                let issue = if !has_operation {
                     Some(NodePlanIssue {
                         code: "node_preflight.operation_unsupported",
                         path: format!("{path}/execution_intent/operation"),
                         message: "No supplied Node configuration implements this exact operation.",
                     })
-                } else if parameters.is_empty() {
+                } else if !has_parameters {
                     Some(NodePlanIssue {
                         code: "node_preflight.parameters_incompatible",
                         path: format!("{path}/execution_intent/parameters"),
                         message: "Invocation fields, pure conversions or Artifact directives are incompatible with every supplied operation workflow.",
                     })
-                } else if !parameters.iter().any(|(catalog, op)| {
-                    resources_compatible(catalog, op, &role.resource_requirements())
-                }) {
+                } else if !compatible {
                     Some(NodePlanIssue {
                         code: "node_preflight.resources_incompatible",
                         path: format!("{path}/requirements/resources"),
@@ -206,8 +206,7 @@ fn operation_sources_exist(
     operation: &CompiledOperation,
     invocation: &Value,
 ) -> bool {
-    // The original runtime digest constructor performs pure action/slot/map/revision checks.
-    if crate::engine::workflow_digest(catalog, operation, invocation).is_err() {
+    if crate::engine::validate_artifact_invocation(catalog, operation, invocation).is_err() {
         return false;
     }
     if let Some(slot) = invocation

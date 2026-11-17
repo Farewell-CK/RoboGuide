@@ -2211,19 +2211,27 @@ where
                         tenant.as_deref().unwrap_or("local"),
                     )
                     .map(|_| {
-                        application::plan_validation::assess(
+                        application::plan_validation::issues(
                             &live,
                             &plan,
                             tenant.as_deref().unwrap_or("local"),
                             deployment_feasibility,
                             verifier_feed,
-                            node_preflight,
-                            &request.body,
                         )
                     })
             };
             match result {
-                Ok(result) => ("200 OK", result),
+                Ok(issues) => (
+                    "200 OK",
+                    application::plan_validation::assess(
+                        issues,
+                        &plan,
+                        deployment_feasibility,
+                        verifier_feed,
+                        node_preflight,
+                        &request.body,
+                    ),
+                ),
                 Err(error) => (
                     "403 Forbidden",
                     serde_json::json!({"error":error.to_string()}),

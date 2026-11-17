@@ -230,8 +230,11 @@ async fn published_plan_queries_keep_unknown_and_diagnostic_bounds_explicit() {
 #[tokio::test]
 async fn private_node_preflight_rejects_mismatches_without_inventory_or_writes() {
     let directory = tempfile::tempdir().unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
     let path = directory.path().join("private-node.toml");
     let source = include_str!("../../../../config/node.toml")
+        .replace("http://127.0.0.1:8081", &format!("http://{}",listener.local_addr().unwrap()))
         .replace("generic-node", "private-node-identity")
         .replace("compute.noop@v1", "object.relocate@v1")
         .replace(
@@ -239,7 +242,10 @@ async fn private_node_preflight_rejects_mismatches_without_inventory_or_writes()
             "kind = \"function\"\nfunction = \"to_integer\"\narguments = [{ kind = \"pointer\", pointer = \"/invocation/parameters/destination\" }]",
         );
     std::fs::write(&path, source).unwrap();
-    let preflight = node_service::NodePlanPreflight::load(&[path]).unwrap();
+    let preflight = node_service::NodePlanPreflight::load(std::slice::from_ref(&path)).unwrap();
+    let cli_preflight =
+        node_service::NodePlanPreflight::load_conformant(std::slice::from_ref(&path)).unwrap();
+    std::fs::remove_file(&path).unwrap(); // Every subsequent request must use the frozen catalog.
     let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
     let live = controller(&log);
     let before = server_checkpoint_json(&live.lock().unwrap()).unwrap();
@@ -291,6 +297,16 @@ async fn private_node_preflight_rejects_mismatches_without_inventory_or_writes()
         .await;
         assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
         let result = body(&reply);
+        let decoded =
+            orchestration::decode_mission_plan(std::str::from_utf8(&encoded).unwrap()).unwrap();
+        let offline = cli_preflight.assess(&decoded, &encoded);
+        assert_eq!(result["decision"], offline["decision"]);
+        assert_eq!(result["issues"], offline["issues"]);
+        assert_eq!(result["plan_body_sha256"], offline["plan_body_sha256"]);
+        assert_eq!(
+            result["node_preflight"]["source_digest"],
+            offline["source_digest"]
+        );
         assert_eq!(result["schema_version"], "roboguide.plan-validation/v0.3");
         assert_eq!(
             result["node_preflight"]["source_digest"],
@@ -324,6 +340,10 @@ async fn private_node_preflight_rejects_mismatches_without_inventory_or_writes()
     assert_eq!(log.control_command_count().unwrap(), 0);
     assert!(!directory.path().join("node-state").exists());
     assert!(!directory.path().join("artifact-cache").exists());
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
     let legacy = route(
         &live,
         &log,

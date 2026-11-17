@@ -597,7 +597,8 @@ pub(crate) fn workflow_digest(
         })?;
         identity.push_str(&format!("\n{connection:?}"));
     }
-    if let Some(directive) = artifact_directive(invocation, capability.artifact_operation())? {
+    if let Some((directive, binding)) = validated_artifact_binding(catalog, capability, invocation)?
+    {
         let artifacts = catalog.artifact_service().ok_or_else(|| {
             EngineError::Configuration(
                 "artifact capability requires configured artifact service".to_string(),
@@ -617,44 +618,86 @@ pub(crate) fn workflow_digest(
             directive.revision_id,
             directive.spatial_anchor_id,
         ));
-        match directive.operation {
-            ArtifactOperation::PrepareOutput | ArtifactOperation::Publish => {
-                let binding = artifacts
-                    .output_bindings()
-                    .get(directive.slot)
-                    .ok_or_else(|| {
-                        EngineError::Configuration(format!(
-                            "artifact output binding `{}` is not configured",
-                            directive.slot
-                        ))
-                    })?;
-                validate_artifact_binding_reference(
-                    directive,
-                    &binding.map_id,
-                    &binding.revision_id,
-                    Some(&binding.spatial_anchor_id),
-                )?;
+        match binding {
+            ValidatedArtifactBinding::Output(binding) => {
                 identity.push_str(&format!("\nartifact-output:{binding:?}"));
             }
-            ArtifactOperation::Import | ArtifactOperation::Verify => {
-                let binding = artifacts
-                    .input_bindings()
-                    .get(directive.slot)
-                    .ok_or_else(|| {
-                        EngineError::Configuration(format!(
-                            "artifact input binding `{}` is not configured",
-                            directive.slot
-                        ))
-                    })?;
-                validate_artifact_binding_reference(
-                    directive,
-                    &binding.map_id,
-                    &binding.revision_id,
-                    None,
-                )?;
+            ValidatedArtifactBinding::Input(binding) => {
                 identity.push_str(&format!("\nartifact-input:{binding:?}"));
             }
         }
     }
     Ok(digest_text(&identity))
+}
+
+/// Borrowed declaration only; never persisted or included in original workflow identity bytes.
+enum ValidatedArtifactBinding<'a> {
+    /// Original exact input declaration.
+    Input(&'a crate::ArtifactInputBindingConfig),
+    /// Original exact output declaration.
+    Output(&'a crate::ArtifactOutputBindingConfig),
+}
+
+/// Reuses actual runtime metadata admission without hashing or formatting an entire workflow.
+pub(crate) fn validate_artifact_invocation(
+    catalog: &CompiledLocalCatalog,
+    operation: &CompiledOperation,
+    invocation: &serde_json::Value,
+) -> Result<(), EngineError> {
+    validated_artifact_binding(catalog, operation, invocation).map(|_| ())
+}
+
+/// Joins action, slot and selector to the original declaration without IO or generated authority.
+fn validated_artifact_binding<'a>(
+    catalog: &'a CompiledLocalCatalog,
+    operation: &CompiledOperation,
+    invocation: &'a serde_json::Value,
+) -> Result<Option<(ArtifactDirective<'a>, ValidatedArtifactBinding<'a>)>, EngineError> {
+    let Some(directive) = artifact_directive(invocation, operation.artifact_operation())? else {
+        return Ok(None);
+    };
+    let artifacts = catalog.artifact_service().ok_or_else(|| {
+        EngineError::Configuration(
+            "artifact capability requires configured artifact service".into(),
+        )
+    })?;
+    let binding = match directive.operation {
+        ArtifactOperation::PrepareOutput | ArtifactOperation::Publish => {
+            let binding = artifacts
+                .output_bindings()
+                .get(directive.slot)
+                .ok_or_else(|| {
+                    EngineError::Configuration(format!(
+                        "artifact output binding `{}` is not configured",
+                        directive.slot
+                    ))
+                })?;
+            validate_artifact_binding_reference(
+                directive,
+                &binding.map_id,
+                &binding.revision_id,
+                Some(&binding.spatial_anchor_id),
+            )?;
+            ValidatedArtifactBinding::Output(binding)
+        }
+        ArtifactOperation::Import | ArtifactOperation::Verify => {
+            let binding = artifacts
+                .input_bindings()
+                .get(directive.slot)
+                .ok_or_else(|| {
+                    EngineError::Configuration(format!(
+                        "artifact input binding `{}` is not configured",
+                        directive.slot
+                    ))
+                })?;
+            validate_artifact_binding_reference(
+                directive,
+                &binding.map_id,
+                &binding.revision_id,
+                None,
+            )?;
+            ValidatedArtifactBinding::Input(binding)
+        }
+    };
+    Ok(Some((directive, binding)))
 }

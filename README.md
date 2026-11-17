@@ -990,6 +990,10 @@ Controller 启动前设置
 `roboguide.plan-validation/v0.3`；未配置时保留 v0.2。
 这些声明由 `core/node-service/src/preflight.rs` 读取并复用生产编译器，
 只检查显式提供的配置，不探测 Node/设备，不建立候选或资源承诺。
+私有检查在 Controller 读取当前权限与发布合同后、释放其锁再执行。来源摘要仅绑定原始
+TOML 字节，不覆盖外部 gRPC descriptor、相对路径解析结果或 live Node 的配置身份。
+Memory import 的执行身份位于 invocation 元数据内，没有顶层 `/attempt_id`；availability/use
+按实际原始 attempt 上下文检查。详细覆盖表与未证明边界见下述决策记录。
 详情及边界见 [ADR-0255](docs/decisions/0255-private-node-plan-preflight.md)。
 
 ```bash

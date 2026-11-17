@@ -2,6 +2,283 @@
 
 use super::*;
 
+/// Exhaustive reference search selects distinct IDs and checks mandatory IDs only at completion.
+fn reference_resource_match(
+    catalog: &CompiledLocalCatalog,
+    operation: &CompiledOperation,
+    demands: &[ResourceRequirement],
+    chosen: &mut std::collections::BTreeSet<String>,
+) -> bool {
+    let Some((demand, rest)) = demands.split_first() else {
+        return operation
+            .required_resources()
+            .iter()
+            .all(|id| chosen.contains(id));
+    };
+    for resource in catalog.resources().values() {
+        let kind = match demand.kind() {
+            domain::ResourceKind::Compute => "compute",
+            domain::ResourceKind::Space => "space",
+            domain::ResourceKind::Time => "time",
+        };
+        if resource.kind() == kind
+            && resource.capacity() >= demand.units()
+            && resource.allocation_mode() == demand.allocation_mode()
+            && resource.resource_class() == demand.resource_class()
+            && chosen.insert(resource.id().into())
+        {
+            let success = reference_resource_match(catalog, operation, rest, chosen);
+            chosen.remove(resource.id());
+            if success {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Small bounded cohorts independently compare matching to exhaustive complete assignments.
+#[test]
+fn private_resource_matching_agrees_with_exhaustive_reference() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original = NodeServiceConfig::load(&root.join("config/node.toml")).unwrap();
+    for mask in 0_u32..64 {
+        let mut config = original.clone();
+        config.resources = (0..3)
+            .map(|index| crate::ResourceConfig {
+                id: format!("resource-{index}"),
+                kind: if mask & (1 << index) == 0 {
+                    "compute"
+                } else {
+                    "space"
+                }
+                .into(),
+                capacity: 1 + ((mask >> (index + 3)) & 1),
+                owner: "local-runtime".into(),
+                metadata: Default::default(),
+                allocation_mode: None,
+                resource_class: None,
+            })
+            .collect();
+        for required in 0..8 {
+            config.operations[0].required_resources = (0..3)
+                .filter(|index| required & (1 << index) != 0)
+                .map(|index| format!("resource-{index}"))
+                .collect();
+            let catalog = CompiledLocalCatalog::compile(config.clone(), &root).unwrap();
+            let operation = catalog.operations().values().next().unwrap();
+            for demands in [
+                vec![],
+                vec![ResourceRequirement::new(domain::ResourceKind::Compute, 1).unwrap()],
+                vec![
+                    ResourceRequirement::new(domain::ResourceKind::Compute, 2).unwrap(),
+                    ResourceRequirement::new(domain::ResourceKind::Space, 1).unwrap(),
+                ],
+                vec![ResourceRequirement::new_divisible(1).unwrap()],
+            ] {
+                assert_eq!(
+                    resources_compatible(&catalog, operation, &demands),
+                    reference_resource_match(
+                        &catalog,
+                        operation,
+                        &demands,
+                        &mut Default::default()
+                    ),
+                    "mask={mask} required={required}"
+                );
+            }
+        }
+    }
+}
+
+/// TOML provenance remains explicit: external descriptor bytes and resolved paths are not v0.3 inputs.
+#[test]
+fn source_digest_scope_and_frozen_descriptor_catalog_are_explicit() {
+    use prost::Message;
+    let directory = tempfile::tempdir().unwrap();
+    let source = format!(
+        "{}\n[[connections]]\ndriver = \"grpc\"\nid = \"unused-descriptor\"\nlocal_system = \"local-runtime\"\nendpoint = \"http://127.0.0.1:8200\"\ndescriptor_set = \"local.pb\"\nreflection = false\n",
+        include_str!("../../../config/node.toml")
+    );
+    let mut preflights = Vec::new();
+    for name in ["a", "b"] {
+        let base = directory.path().join(name);
+        std::fs::create_dir(&base).unwrap();
+        let descriptor = prost_types::FileDescriptorSet {
+            file: vec![prost_types::FileDescriptorProto {
+                name: Some(format!("{name}.proto")),
+                syntax: Some("proto3".into()),
+                ..Default::default()
+            }],
+        }
+        .encode_to_vec();
+        std::fs::write(base.join("local.pb"), descriptor).unwrap();
+        let path = base.join("node.toml");
+        std::fs::write(&path, &source).unwrap();
+        preflights.push(NodePlanPreflight::load(std::slice::from_ref(&path)).unwrap());
+        std::fs::remove_file(base.join("local.pb")).unwrap();
+        assert!(NodePlanPreflight::load(&[path]).is_err());
+    }
+    assert_eq!(preflights[0].source_digest(), preflights[1].source_digest());
+    let mut document = plan_document();
+    document["tasks"][0]["roles"][0]["execution_intent"]["operation"] =
+        serde_json::json!({"namespace":"compute","name":"noop","version":"v1"});
+    document["tasks"][0]["roles"][0]["requirements"]["resources"] =
+        serde_json::json!([{"kind":"compute","units":1}]);
+    assert!(
+        preflights[0].issues(&plan(&document)).is_empty(),
+        "frozen checks must not reopen descriptor files"
+    );
+}
+
+/// The existing one-MiB boundary accepts exact valid source bytes and refuses the first extra byte.
+#[test]
+fn source_byte_boundary_is_exact_and_redacted() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = config(directory.path(), "bounded", "/invocation", 1);
+    let mut source = std::fs::read_to_string(&path).unwrap();
+    source.push_str("\n#");
+    source.extend(std::iter::repeat_n(
+        'x',
+        MAX_CONFIG_BYTES as usize - source.len(),
+    ));
+    std::fs::write(&path, &source).unwrap();
+    let preflight = NodePlanPreflight::load(std::slice::from_ref(&path)).unwrap();
+    source.push('x');
+    std::fs::write(&path, source).unwrap();
+    let error = NodePlanPreflight::load(std::slice::from_ref(&path)).unwrap_err();
+    assert!(!error.contains(&path.display().to_string()));
+    assert_eq!(preflight.catalogs.len(), 1);
+}
+
+/// Controller source loading deliberately preserves production compatibility, while CLI is stricter.
+#[test]
+fn conformance_specific_refusal_is_not_invented_as_a_plan_issue() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = config(directory.path(), "partial-state", "/invocation", 1);
+    let source = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("accepted = [\"ACCEPTED\"]", "accepted = []");
+    std::fs::write(&path, source).unwrap();
+    NodePlanPreflight::load(std::slice::from_ref(&path)).unwrap();
+    assert!(NodePlanPreflight::load_conformant(&[path]).is_err());
+}
+
+/// Runtime digest keeps its original byte recipe for ordinary and all four Artifact actions.
+#[test]
+fn workflow_digest_preserves_original_identity_recipe() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for path in [
+        "config/node.toml",
+        "scenarios/distributed-spatial-memory-v0.1/dog-a-node-v0.1.toml",
+    ] {
+        let catalog = NodeServiceConfig::load_compiled(&root.join(path)).unwrap();
+        for operation in catalog.operations().values() {
+            let mut invocation = serde_json::json!({"parameters":{}});
+            let mut suffix = String::new();
+            if let Some(action) = operation.artifact_operation() {
+                let service = catalog.artifact_service().unwrap();
+                let (slot, map, revision, anchor, binding) = match action {
+                    crate::ArtifactOperationConfig::Import
+                    | crate::ArtifactOperationConfig::Verify => {
+                        let binding = service.input_bindings().values().next().unwrap();
+                        (
+                            binding.id.as_str(),
+                            binding.map_id.as_str(),
+                            binding.revision_id.as_str(),
+                            "declared-anchor",
+                            format!("\nartifact-input:{binding:?}"),
+                        )
+                    }
+                    _ => {
+                        let binding = service.output_bindings().values().next().unwrap();
+                        (
+                            binding.id.as_str(),
+                            binding.map_id.as_str(),
+                            binding.revision_id.as_str(),
+                            binding.spatial_anchor_id.as_str(),
+                            format!("\nartifact-output:{binding:?}"),
+                        )
+                    }
+                };
+                invocation["parameters"] = serde_json::json!({"artifact_slot":slot,"artifact_operation":action.as_str(),"map_id":map,"revision_id":revision,"spatial_anchor_id":anchor});
+                suffix = format!(
+                    "\nartifact-service:{:?}:{}:{}:{}:{}:{}\nartifact-intent:{}:{}:{}:{}:{}{}",
+                    service.cache_directory(),
+                    service.endpoint(),
+                    service.max_artifact_bytes(),
+                    service.chunk_size_bytes(),
+                    service.connect_timeout_ms(),
+                    service.read_timeout_ms(),
+                    action.as_str(),
+                    slot,
+                    map,
+                    revision,
+                    anchor,
+                    binding
+                );
+            }
+            let mut original = format!("{operation:?}");
+            let workflow = operation.workflow();
+            let connections = workflow
+                .execute()
+                .iter()
+                .chain(workflow.status())
+                .chain(workflow.cancel())
+                .map(crate::CompiledWorkflowStep::connection)
+                .collect::<std::collections::BTreeSet<_>>();
+            for id in connections {
+                original.push_str(&format!("\n{:?}", catalog.connections()[id]));
+            }
+            original.push_str(&suffix);
+            let expected = format!("{:x}", Sha256::digest(original.as_bytes()));
+            assert_eq!(
+                crate::engine::workflow_digest(&catalog, operation, &invocation).unwrap(),
+                expected
+            );
+        }
+    }
+}
+
+/// Maximum admitted private cohort remains bounded and reuses one compatible catalog per Role.
+#[test]
+fn audit_maximum_private_cohort_cost() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = (0..64)
+        .map(|index| {
+            config(
+                directory.path(),
+                &format!("cohort-{index:02}"),
+                "/invocation",
+                1,
+            )
+        })
+        .collect::<Vec<_>>();
+    let start = std::time::Instant::now();
+    let preflight = NodePlanPreflight::load(&paths).unwrap();
+    let load_elapsed = start.elapsed();
+    let mut document = plan_document();
+    let mut template = document["tasks"][0].clone();
+    template["roles"][0]["requirements"]["resources"] =
+        serde_json::json!([{"kind":"compute","units":1}]);
+    document["tasks"] = serde_json::json!(
+        (0..256)
+            .map(|index| {
+                let mut task = template.clone();
+                task["id"] = format!("stress-{index}").into();
+                task
+            })
+            .collect::<Vec<_>>()
+    );
+    let plan = plan(&document);
+    let start = std::time::Instant::now();
+    assert!(preflight.issues(&plan).is_empty());
+    eprintln!(
+        "private-cohort configs=64 roles=256 load={load_elapsed:?} check={:?}",
+        start.elapsed()
+    );
+}
+
 /// Writes a complete modern configuration whose private resource is a Compute slot.
 fn config(directory: &std::path::Path, name: &str, pointer: &str, capacity: u32) -> PathBuf {
     let source = include_str!("../../../config/node.toml")

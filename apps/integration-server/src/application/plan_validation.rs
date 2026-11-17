@@ -77,18 +77,15 @@ pub(crate) fn issues(
     issues
 }
 
-/// Binds a bounded query result to exact bytes and startup-frozen source descriptors.
-#[allow(clippy::too_many_arguments)]
+/// Combines a scoped Controller read with private static checks after releasing its live lock.
 pub(crate) fn assess(
-    controller: &ControllerState,
+    mut issues: Vec<PlanIssue>,
     plan: &domain::MissionPlan,
-    tenant: &str,
     deployment: Option<&DeploymentFeasibility>,
     feed: Option<&TaskVerifierFeed>,
     node_preflight: Option<&node_service::NodePlanPreflight>,
     body: &[u8],
 ) -> serde_json::Value {
-    let mut issues = issues(controller, plan, tenant, deployment, feed);
     if let Some(preflight) = node_preflight {
         issues.extend(
             preflight
