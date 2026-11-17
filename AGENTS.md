@@ -1158,6 +1158,11 @@ test_workbench_live_agent.py and test_workbench_streaming.py own actual HTTP/MI/
 the installed chat process gate separately checks native fixture Requests, editable queues and
 operation without CPR. Preserve field report versus local software evidence. See
 docs/development/chat-real-use-remediation-20261116.md and ADR-0256.
+Its task_context.py retains complete pending user originals before Provider I/O and acknowledged
+assistant context across history bounds/resume; model source hints cannot erase limits. Local
+clarify_task consumes no HTTP slot. Same-turn validated identities permit explicit edits/cancellation,
+never new display ACK. Logical task correction preserves independent failures and original Unknown.
+test_workbench_task_flow.py owns continuous actual-MI/HTTP software cases; real-model evidence is separate.
 
 ADR-0254 adds installed chat v0.4 global and explicitly selected project model profiles, first-run setup, local status and
 scope-bound session navigation. Existing displayed-reference confirmation and original pending

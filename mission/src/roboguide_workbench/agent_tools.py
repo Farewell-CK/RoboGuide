@@ -262,6 +262,26 @@ class ReadToolAdapter:
             self._shadow.last_mission = self.session.last_mission
             self._update_references()
 
+    def task_missions(self, result: ReadResult) -> set[str]:
+        """Export exact successful Mission identities, excluding model text and failed cohorts."""
+        if not result.complete:
+            return set()
+        targets: set[str] = set()
+        for component in result.components:
+            if (
+                component.get("source") != _READ_SOURCE
+                or component.get("scope") != _READ_SCOPE
+                or component.get("tool")
+                not in {"read_active_missions", "list_missions", "read_mission", "read_explanation"}
+            ):
+                continue
+            for projection in self._projections:
+                if projection.read_id == component.get("read_id"):
+                    targets.update(projection.mission_ids)
+                    if projection.single_mission:
+                        targets.add(projection.single_mission)
+        return targets
+
     def _update_references(self) -> None:
         """Update the shared model-context object in place after a validated original read."""
         self.references.update(

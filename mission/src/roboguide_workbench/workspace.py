@@ -22,6 +22,7 @@ from roboguide_workbench.persistence import SessionStore
 from roboguide_workbench.routing import Query, Router
 from roboguide_workbench.session import HELP, Session
 from roboguide_workbench.state_queries import choices, discover, fields, read_state
+from roboguide_workbench.task_context import TaskDialogue
 from roboguide_workbench.views import inventory_view, render_mission, render_nodes, safe_text
 
 EXTRA_HELP = """可以直接提问：有哪些设备？dog2 还有多少电？它在哪里？当前有哪些任务？
@@ -51,7 +52,7 @@ Agent 会查能力、补问和调用 MI；原有权限、风险审批与执行�
 
 会话与诊断：
   /status、/sessions     查看当前连接与会话；/new [名称] 新建，/resume 名称 恢复
-  /history、/raw         查看历史；/reset 清除当前对象选择
+  /history、/raw         查看历史；/reset 清除对象选择和待补充目标
   /observe、/reconcile   核对原命令，不重发原操作
   /feedback [目录]       本地保存脱敏诊断包
   /queue、/dequeue 序号、/edit-queued 序号  查看、撤回或取回待发消息（交互终端）
@@ -213,7 +214,29 @@ class WorkbenchSession(Session):
         self.reference_checkpoint: JSONObject | None = None
         self.input_references: JSONObject | None = None
         self.input_history: list[JSONObject] | None = None
+        self.input_turn_id: str | None = None
         self.display_turn_id: str | None = None
+        if "task_dialogue" in context and context["task_dialogue"] is None:
+            raise WorkbenchError("待补充任务上下文损坏；未采用空值代替原始要求。")
+        self.task_dialogue = TaskDialogue.restore(context.get("task_dialogue"))
+        if "task_dialogue" not in context and not store.data.get("commands"):
+            messages = store.data.get("messages")
+            if isinstance(messages, list):
+                for row in messages:
+                    if not isinstance(row, dict) or row.get("role") != "user":
+                        continue
+                    text, turn_id = row.get("text"), row.get("turn_id")
+                    if (
+                        isinstance(text, str)
+                        and 0 < len(text) <= 4096
+                        and row.get("truncated") is not True
+                    ):
+                        self.task_dialogue.append(
+                            text, turn_id if isinstance(turn_id, str) else uuid.uuid4().hex
+                        )
+                    else:
+                        self.task_dialogue.incomplete = True
+                self.task_dialogue.sync_visible(messages)
         historical = context.get("raw_query")
         if historical is not None:
             if not isinstance(historical, dict) or set(historical) != {"value", "read_at"}:
@@ -250,6 +273,7 @@ class WorkbenchSession(Session):
             "previous_question": self.previous_question,
             "request_id": self.request_id,
             "draft": draft_reference(self.shown_draft),
+            "task_dialogue": self.task_dialogue.export(),
         }
         if self.input_references is not None:
             references.update(self.input_references)
@@ -287,6 +311,7 @@ class WorkbenchSession(Session):
             "request_id": self.request_id,
             "previous_question": self.previous_question,
             "raw_query": self.raw_query(),
+            "task_dialogue": self.task_dialogue.export(),
         }
         if self.reference_checkpoint is not None:
             for field in ("nodes", "missions", "last_node", "last_mission", "states", "last_state"):
@@ -304,13 +329,23 @@ class WorkbenchSession(Session):
         if question.startswith("/") and question.partition(" ")[0] != "/choose":
             self.suggestion = None
         self.query_status = "complete"
+        if not question.startswith("/"):
+            self.input_turn_id = self.display_turn_id or uuid.uuid4().hex
+            self.task_dialogue.sync_visible(self.store.data.get("messages"))
+            self.task_dialogue.append(question, self.input_turn_id)
+            # Original user limits must survive a process exit or a lost Provider response,
+            # including exits before the ordinary completed-turn history can be written.
+            self.checkpoint()
         try:
             result = self._turn(question)
         except (ValueError, OSError) as error:
             self.query_status = "failed"
             self._remember(question, "查询/操作未确定：" + str(error))
             raise
-        self._remember(question, result)
+        else:
+            self._remember(question, result)
+        finally:
+            self.input_turn_id = None
         return result
 
     def _remember(self, question: str, result: str) -> None:
@@ -318,7 +353,7 @@ class WorkbenchSession(Session):
         messages = self.store.data.get("messages")
         if not isinstance(messages, list):
             raise WorkbenchError("会话消息记录损坏。")
-        turn_id = self.display_turn_id or uuid.uuid4().hex
+        turn_id = self.display_turn_id or self.input_turn_id or uuid.uuid4().hex
         messages.extend(
             [
                 {
@@ -333,6 +368,7 @@ class WorkbenchSession(Session):
                     "at": datetime.now(UTC).isoformat(),
                     "turn_id": turn_id,
                     "displayed": False,
+                    "truncated": len(result) > 64000,
                 },
             ]
         )
@@ -361,7 +397,8 @@ class WorkbenchSession(Session):
             self.request_id = None
             self.shown_draft = None
             self.suggestion = None
-            return "已清除对象选择；命令回执和历史仍保留。"
+            self.task_dialogue.clear()
+            return "已清除对象选择和待补充目标；原任务、命令回执和历史仍保留。"
         if question.startswith("/"):
             return self._command(question)
         self.suggestion = None
@@ -682,18 +719,16 @@ class WorkbenchSession(Session):
             if not argument:
                 raise WorkbenchError("请提供任务目标。")
             self.shown_draft = None
-            return self._show_request(
-                self.actions.command(
-                    "create",
-                    {
-                        "schema_version": "roboguide.mission-request-create/v0.2",
-                        "instruction": argument,
-                        "submission_mode": "draft_only"
-                        if command == "/plan"
-                        else "submit_when_ready",
-                    },
-                )
+            raw = self.actions.command(
+                "create",
+                {
+                    "schema_version": "roboguide.mission-request-create/v0.2",
+                    "instruction": argument,
+                    "submission_mode": "draft_only" if command == "/plan" else "submit_when_ready",
+                },
             )
+            self.task_dialogue.clear()
+            return self._show_request(raw)
         if command == "/request":
             target = argument or self.request_id
             if target is None:
@@ -728,7 +763,9 @@ class WorkbenchSession(Session):
                 body = {"draft_revision": old.draft_revision, "draft_digest": old.draft_digest}
                 action = command[1:]
             self.shown_draft = None
-            return self._show_request(self.actions.command(action, body, self.request_id))
+            raw = self.actions.command(action, body, self.request_id)
+            self.task_dialogue.clear()
+            return self._show_request(raw)
         if command in {"/observe", "/reconcile"}:
             from roboguide_workbench.cancellation import CancellationActions
 

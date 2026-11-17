@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from typing import cast
@@ -80,6 +81,12 @@ class ConversationSession(WorkbenchSession):
         adapter = ReadToolAdapter(self, question, references)
         tasks = TaskTools(self, question)
 
+        def invoke_read(name: str, arguments: JSONObject, remaining: float) -> ReadResult:
+            """Share validated identities with task tools while keeping visible selection staged."""
+            returned = adapter.read(name, arguments, remaining)
+            tasks.learn_missions(adapter.task_missions(returned))
+            return returned
+
         def invoke_task(
             name: str,
             arguments: JSONObject,
@@ -99,14 +106,21 @@ class ConversationSession(WorkbenchSession):
             question,
             adapter.references,
             history,
-            adapter.read,
+            invoke_read,
             tool_definitions=adapter.definitions() + task_definitions(),
             progress=self.progress,
             act=invoke_task,
             task_read_context=tasks.cache_context,
+            task_work_key=tasks.work_key,
             on_delta=self.stream_output if self.stream_enabled else None,
         )
         self.query_status, self.evidence = result.status, result.evidence
+        if not tasks.owns_selection:
+            if not result.evidence and re.search(r"[?？]|请.+(?:提供|补充|告诉)", result.text):
+                # Compatibility with providers which answer a task clarification directly.
+                self.task_dialogue.pinned = True
+            elif result.evidence and not self.task_dialogue.pinned:
+                self.task_dialogue.clear()
         self._retain_agent_turn(question, result.items)
         if result.proposal is not None:
             if result.proposal_text is None:
@@ -144,8 +158,8 @@ class ConversationSession(WorkbenchSession):
             if summary:
                 text += "\n\n" + summary
             mission = self.last_mission
-            adapter.publish(result.evidence, publish_raw=task_answer is None)
-            if task_answer is not None:
+            adapter.publish(result.evidence, publish_raw=not tasks.owns_selection)
+            if tasks.owns_selection:
                 self.last_mission = mission
         return text
 

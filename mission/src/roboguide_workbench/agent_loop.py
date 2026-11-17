@@ -15,6 +15,7 @@ from mission.models import JSONObject, JSONValue
 from roboguide_workbench.client import ToolRefusal, WorkbenchError, decode_object
 from roboguide_workbench.evidence import READ_COSTS, QueryStatus, ReadResult
 from roboguide_workbench.routing import Query, ResponsesRouter
+from roboguide_workbench.task_context import TaskDialogue
 from roboguide_workbench.views import safe_text
 
 INSTRUCTIONS = """你是 RoboGuide，和用户自然对话，也帮助他们了解和操作机器人集群。
@@ -33,16 +34,19 @@ read_state 的最终数值由宿主重新检查有效期并展示；未知和过
 你是能推进任务的 Agent。用户明确要求“让设备做某事”时，先核对当前能力和必要参数，再用
 start_task(mode=run) 开始正常执行流程；明确只规划时用 mode=plan。不要要求 /choose。
 可以先读节点/目录，再执行对应工具，并根据工具实际结果继续处理；不能声称尚未发生的成功。
-缺少区域、目标或成功标准时自然追问。明确能力缺口时先解释，不能通过编造合同来完成任务。
+缺少区域、目标或成功标准时用 clarify_task 自然追问并保存任务上下文，不创建占位任务。
+明确能力缺口时先解释，不能通过编造合同来完成任务。
 answer_request 使用用户原始补充更新当前 Request；read_request 查询规划/审批/运行进度。
 多轮补充区域或参数不会撤销用户先前“只规划、不执行”的要求；只有后续明确改变意图才可执行。
 execute_plan/approve_plan 只用于用户明确授权的已完整显示版本；审批仍需服务端 approver 权限。
 工具错误或重复调用只影响对应部分，继续完成复合问题中的其它独立部分。成功结果不重复读取。
 设备名可直接使用用户原话如“狗2”，宿主会读取实际目录解析；object: 前缀明确选择目录对象。
 歧义时列出实际可选对象及来源并询问选择，不反复查询同一个含糊 Node ID。
-start_task.start_turn 选择 proposal_sources 中本次任务最早的用户原文 ID；宿主保留其后
-的完整原文与澄清上下文。必须包含原任务和全部限制；独立新任务用 current。无法找全原文时
-先请用户完整重述，不从摘要补写。execute/approve 只用 current，仍由独立命令检查原计划。
+pending_task 是宿主持久化的完整待补充任务，连续补充不能改成独立新任务或丢弃限制。
+start_task.start_turn 仅提供原文线索；选择 current 也不会裁掉 pending_task 原始要求。
+用户明确说开始新任务时可以另起目标。上下文不完整时请用户完整重述，不从摘要补写。
+execute/approve 只用 current，仍由独立命令检查原计划。本轮精确读取可用于修改或取消；
+读取未展示的新计划不授予执行或审批权限。任务模式纠正后继续推进，不重复创建已成功的任务。
 proposal_sources 的 input_index 从 0 计数，指向本次 input 中对应的用户消息。
 “好的”“谢谢”等普通回应不创建新任务；风险审批须由用户明确要求并由服务端核对权限。
 用户明确要求取消时，用 cancel_task 取消精确 Request 或 Mission；不声称设备已经物理停止。
@@ -67,6 +71,7 @@ _READ_LABELS = {
     "read_state": "正在读取设备状态",
 }
 _ACTION_LABELS = {
+    "clarify_task": "正在补充任务信息",
     "start_task": "正在准备任务",
     "answer_request": "正在补充任务要求",
     "read_request": "正在查看任务规划进度",
@@ -76,6 +81,7 @@ _ACTION_LABELS = {
     "observe_operation": "正在核对原操作回执",
 }
 _ACTION_COSTS = {
+    "clarify_task": 0,
     "start_task": 2,
     "answer_request": 1,
     "read_request": 1,
@@ -84,6 +90,9 @@ _ACTION_COSTS = {
     "cancel_task": 3,
     "observe_operation": 3,
 }
+_TASK_MUTATIONS = frozenset(
+    {"start_task", "answer_request", "execute_plan", "approve_plan", "cancel_task"}
+)
 
 
 @dataclass(frozen=True)
@@ -300,6 +309,9 @@ def _messages(
             row["id"] = f"u{len(sources) + 1}"
         sources.append({"id": row["id"], "input_index": index + 1, "complete": row["complete"]})
     context = dict(references)
+    task_dialogue = context.pop("task_dialogue", None)
+    if task_dialogue is not None:
+        context["pending_task"] = TaskDialogue.restore(task_dialogue).summary()
     context["proposal_sources"] = cast(JSONValue, sources)
     selected.insert(
         0,
@@ -353,7 +365,9 @@ def _evidence(name: str, returned: ReadResult, number: int) -> JSONObject:
     item: JSONObject = {
         "id": f"E{number}",
         "source": name,
-        "scope": "configured-controller/current-identity",
+        "scope": "local-chat/original-dialogue"
+        if name == "clarify_task"
+        else "configured-controller/current-identity",
         "received_at": datetime.now(UTC).isoformat(),
         "complete": returned.complete,
         "text": _bounded_text(returned.text),
@@ -439,6 +453,7 @@ class AgentConversation:
         progress: Callable[[str], None] | None = None,
         act: Callable[[str, JSONObject, str, tuple[str, ...], float], ReadResult] | None = None,
         task_read_context: Callable[[str, JSONObject], JSONObject] | None = None,
+        task_work_key: Callable[[str, JSONObject], str | None] | None = None,
         on_delta: Callable[[str], None] | None = None,
     ) -> AgentAnswer:
         """Continue native tool-call outputs until natural final text or a bounded failure."""
@@ -450,6 +465,7 @@ class AgentConversation:
         evidence: list[JSONObject] = []
         seen_ids: set[str] = set()
         seen_queries: dict[str, JSONObject] = {}
+        seen_work: dict[str, JSONObject] = {}
         pending: dict[str, tuple[str, str]] = {}
         mutated = False
         spent = 0
@@ -564,10 +580,12 @@ class AgentConversation:
                     }:
                         key_parts.append(task_read_context(call.name, call.arguments))
                     key = json.dumps(key_parts, ensure_ascii=False, sort_keys=True)
+                    work = task_work_key(call.name, call.arguments) if task_work_key else None
+                    pending_key = work or key
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise WorkbenchError("本轮等待时间已用完。")
-                    cached = seen_queries.get(key)
+                    cached = seen_work.get(work) if work else seen_queries.get(key)
                     if cached is not None:
                         output = {
                             "type": "function_call_output",
@@ -598,7 +616,7 @@ class AgentConversation:
                         if action:
                             if act is None:
                                 raise ToolRefusal("当前入口未开放任务工具。")
-                            if call.name not in {"read_request", "observe_operation"} and mutated:
+                            if call.name in _TASK_MUTATIONS and mutated:
                                 raise ToolRefusal(
                                     "本轮已有一次任务操作；请依据原回执跟踪，不重复提交。"
                                 )
@@ -611,14 +629,14 @@ class AgentConversation:
                             )
                             returned = act(call.name, call.arguments, source, user_turns, remaining)
                             spent += cost
-                            if call.name not in {"read_request", "observe_operation"}:
+                            if call.name in _TASK_MUTATIONS:
                                 mutated = True
                         else:
                             returned = read(call.name, call.arguments, remaining)
                             spent += cost
                     except ToolRefusal as error:
                         reason = (f"{safe_text(str(target))}：" if target else "") + str(error)
-                        pending[key] = (call.name, reason)
+                        pending[pending_key] = (call.name, reason)
                         output = {
                             "type": "function_call_output",
                             "call_id": call.call_id,
@@ -637,7 +655,7 @@ class AgentConversation:
                         continue
                     except (ValueError, OSError) as error:
                         spent += cost
-                        if action and call.name not in {"read_request", "observe_operation"}:
+                        if call.name in _TASK_MUTATIONS:
                             mutated = True
                         prefix = (
                             "任务操作未确定，保留原命令且不会自动重发："
@@ -648,9 +666,11 @@ class AgentConversation:
                     if not isinstance(returned, ReadResult):
                         raise WorkbenchError("读取工具未返回有效来源结果。")
                     item = _evidence(call.name, returned, len(evidence) + 1)
-                    pending.pop(key, None)
+                    pending.pop(pending_key, None)
                     evidence.append(item)
                     seen_queries[key] = item
+                    if work is not None:
+                        seen_work[work] = item
                     output = {
                         "type": "function_call_output",
                         "call_id": call.call_id,

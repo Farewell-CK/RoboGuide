@@ -12,6 +12,8 @@ from mission.models import JSONObject
 from roboguide_workbench.client import ToolRefusal, WorkbenchError
 from roboguide_workbench.device_context import context_nodes, mentioned, task_context
 from roboguide_workbench.evidence import ReadResult
+from roboguide_workbench.task_context import TaskDialogue, new_task_scope
+from roboguide_workbench.views import safe_text
 from roboguide_workbench.workspace import WorkbenchSession, draft_reference
 
 
@@ -20,8 +22,14 @@ def definitions() -> list[JSONObject]:
     source: JSONObject = {"type": "string", "minLength": 1, "maxLength": 16}
     shapes: tuple[tuple[str, str, JSONObject], ...] = (
         (
+            "clarify_task",
+            "任务缺少区域、目标或条件时自然追问；保存完整任务上下文，不创建或执行任务。",
+            {"question": {"type": "string", "minLength": 1, "maxLength": 2000}},
+        ),
+        (
             "start_task",
-            "开始用户任务；plan 只规划，run 进入执行流程。自动核对能力，无需 /choose。",
+            "开始用户任务；plan 只规划，run 进入执行流程。"
+            "宿主保留完整待补充任务，start_turn 仅作线索。",
             {"mode": {"type": "string", "enum": ["plan", "run"]}, "start_turn": source},
         ),
         (
@@ -71,24 +79,6 @@ def definitions() -> list[JSONObject]:
     ]
 
 
-def _check_start_intent(mode: str, user_turns: tuple[str, ...]) -> None:
-    """Retain explicit user limits through clarification until a later explicit change."""
-    restriction: str | None = None
-    for text in user_turns:
-        if re.search(r"只讨论|仅讨论|先讨论|不要创建|不用创建", text):
-            restriction = "discussion"
-        elif re.search(r"不(?:要|能|可以)?执行|别执行|勿执行|只规划|只出方案|仅规划", text):
-            restriction = "plan"
-        elif re.search(
-            r"现在(?:可以)?执行|开始执行|直接执行|确认执行|可以执行|执行吧|改为执行", text
-        ):
-            restriction = None
-        elif restriction == "discussion" and re.search(r"只规划|开始规划|生成计划|创建任务", text):
-            restriction = "plan"
-    if restriction == "discussion" or restriction == "plan" and mode == "run":
-        raise ToolRefusal("用户要求讨论或仅规划，不能开启执行流程。")
-
-
 class TaskTools:
     """Keep one foreground action owner, original command IDs and acknowledged-plan bindings."""
 
@@ -96,6 +86,11 @@ class TaskTools:
         """Capture the displayed plan before in-turn observations can change it."""
         self.session, self.question = session, question
         references = session.query_references()
+        self.dialogue = TaskDialogue.restore(references.get("task_dialogue"))
+        self.input_context_id = self.dialogue.context_id
+        self.input_context_pending = self.dialogue.pinned and bool(self.dialogue.turns)
+        self.started_context_id = session.task_dialogue.context_id
+        self.dialogue.append(question, session.input_turn_id or "current")
         self.input_request_id = references.get("request_id")
         self.input_draft = copy.deepcopy(references.get("draft"))
         self.started_request_id = session.request_id
@@ -105,19 +100,39 @@ class TaskTools:
         self.original_draft = copy.deepcopy(session.shown_draft)
         self.results: list[ReadResult] = []
         self.known_nodes: set[str] = set()
-        self.known_targets = [
-            *cast(list[str], references.get("displayed_missions", [])),
-            references.get("last_mission"),
-            self.input_request_id,
-        ]
+        self.known_targets = {
+            value
+            for value in [
+                *cast(list[str], references.get("displayed_missions", [])),
+                references.get("last_mission"),
+                self.input_request_id,
+            ]
+            if isinstance(value, str)
+        }
+        self.explicit_requests: set[str] = set()
+        self.owns_selection = False
 
-    def _require_input_request(self) -> None:
+    def _require_input_request(self, *, allow_named_edit: bool = False) -> None:
         """Refuse rebinding queued edits or grants to a Request selected after input."""
+        if (
+            allow_named_edit
+            and self.current_request_id in self.explicit_requests
+            and self.session.request_id == self.current_request_id
+        ):
+            return
         if (
             self.input_request_id != self.started_request_id
             or self.session.request_id != self.started_request_id
         ):
             raise ToolRefusal("输入时看到的任务已变化；请查看当前任务后再明确操作。")
+
+    def learn_missions(self, targets: set[str]) -> None:
+        """Admit only this turn's adapter-validated Mission identities for subsequent task tools."""
+        self.known_targets.update(targets)
+
+    def work_key(self, name: str, arguments: JSONObject) -> str | None:
+        """Bind corrections and duplicate starts to one host-owned pending task."""
+        return "start-task:" + self.dialogue.context_id if name == "start_task" else None
 
     def cache_context(self, name: str, arguments: JSONObject) -> JSONObject:
         """Resolve task reads against their actual target and original command generation."""
@@ -165,13 +180,28 @@ class TaskTools:
             ):
                 raise ToolRefusal("用户本轮没有明确要求执行或审批该版本，未发出操作。")
         if name == "start_task":
-            _check_start_intent(cast(str, arguments["mode"]), user_turns or (self.question,))
-        if name not in {"read_request", "observe_operation"} and re.fullmatch(
+            if (
+                self.input_context_pending
+                and self.input_context_id != self.started_context_id
+                and not new_task_scope(self.question)
+            ):
+                raise ToolRefusal("输入时的待补充任务已变化；请重新明确本次任务目标。")
+            limit = self.dialogue.limit
+            if limit == "discussion" or limit == "plan" and arguments["mode"] == "run":
+                raise ToolRefusal("用户要求讨论或仅规划，不能开启执行流程；可继续补充或仅规划。")
+            original = self.dialogue.instruction()
+        if name not in {"read_request", "observe_operation", "clarify_task"} and re.fullmatch(
             r"(?:你好|您好|谢谢|多谢|感谢|好的|好|收到|嗯|hello|hi|thanks|thank you)[。！!,.，\s]*",
             self.question,
             re.IGNORECASE,
         ):
             raise ToolRefusal("普通问候、感谢或应答不是创建、执行或审批任务的要求。")
+        if name == "clarify_task":
+            session.task_dialogue.pinned = True
+            session.checkpoint()
+            result = ReadResult("需要补充：" + safe_text(cast(str, arguments["question"])))
+            self.results.append(result)
+            return result
         try:
             if name == "start_task":
                 progress = getattr(session, "progress", None)
@@ -186,10 +216,10 @@ class TaskTools:
                     prefix = "当前设备能力未能核对：" + str(error) + "；执行条件保持未知。\n\n"
                 command = "/" + cast(str, arguments["mode"]) + " " + original
             elif name == "answer_request":
-                self._require_input_request()
+                self._require_input_request(allow_named_edit=True)
                 if session.request_id is None:
                     raise ToolRefusal("当前没有可补充的任务 Request；请先明确要开始的任务。")
-                command = "/answer " + original
+                command = "/answer " + self.question
             elif name == "read_request":
                 target = cast(str, arguments["request_id"]) or self.current_request_id
                 if target is None:
@@ -238,6 +268,16 @@ class TaskTools:
             session.controller.timeout = min(controller_timeout, budget / phases)
             text = session._command(command)
             self.current_request_id = session.request_id
+            self.owns_selection = True
+            if name == "read_request" and mentioned(
+                cast(str, self.current_request_id), self.question
+            ):
+                self.explicit_requests.add(cast(str, self.current_request_id))
+            self.known_targets.update(
+                value for value in (session.request_id, session.last_mission) if value is not None
+            )
+            if name not in {"read_request", "observe_operation"}:
+                session.task_dialogue.clear()
             text = text.replace(
                 "尚未提交执行。查看后可用 /execute，修改用 /answer。",
                 "尚未提交执行。可以说“执行这个计划”，或继续补充修改要求。",

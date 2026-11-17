@@ -10,7 +10,7 @@ and repeated directory call. Passing synthetic tests did not establish real-mode
 
 ## Decision
 
-The default native model receives closed task tools: `start_task`, `answer_request`, `read_request`,
+The default native model receives closed task tools: `clarify_task`, `start_task`, `answer_request`, `read_request`,
 `execute_plan`, `approve_plan`, `cancel_task` and `observe_operation`, alongside existing reads.
 `start_task` selects a complete host-owned original dialogue suffix, never model-authored task
 parameters or a MissionPlan. Explicit planning creates a normal draft-only Request; explicit task
@@ -46,6 +46,34 @@ Only public text deltas are previews; completed responses alone authorize tools.
 conflicting or changed completion evidence refuses. State and task lifecycle values retain host
 rendering; previews never create confirmation, selection or displayed-history authority.
 `--no-stream` provides explicit compatibility without automatic replay.
+
+### Host-owned pending tasks and in-turn references (2026-11-17)
+
+`task_context.py` owns a bounded, versioned local pending dialogue. Original user turns are
+persisted before Provider I/O; only acknowledged assistant context may join them. Clarification
+uses the zero-I/O `clarify_task` tool. Direct clarification replies remain compatible. The context
+survives normal history-window truncation and resume; model `start_turn` is a source hint and
+cannot shorten an existing task or discard its restrictions. A complete explicit new user goal
+opens a new context; successful task publication closes the pending dialogue. Incomplete,
+corrupt or oversized originals refuse task effects rather than become an empty goal.
+
+The model still interprets goals and chooses tools. The host separately retains submission
+limits over the entire original user chain, conservatively treating negated, conditional and
+question clauses as insufficient to release an earlier limit. This is a bounded defensive check,
+not a claim to solve every natural-language authorization expression. Unclear changes require
+natural clarification. Original server submission intent and acknowledged-plan gates remain.
+
+Successful read-adapter projections can supply exact Mission IDs to the same turn's task tools;
+partial cohorts and model-authored IDs cannot. An explicit user-named Request may be freshly read
+and amended in one turn. These paths do not manufacture execution/approval display ACK, change
+tenant scope or skip the normal cancellation preview and current permission checks.
+
+Logical work identity is separate from tool-parameter caching. Correcting a start from run to
+plan resolves only that pending task's refusal; unrelated failed queries remain unavailable.
+Repeated starts for the same original work reuse the first receipt even when model mode/source
+hints change. Actual network errors and original Unknown never gain a replacement command.
+Local clarification is not a task mutation and consumes no HTTP slot; all call/deadline bounds
+and the one actual task mutation per turn remain unchanged.
 
 ## Validation
 

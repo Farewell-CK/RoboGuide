@@ -45,12 +45,15 @@ Step = Callable[[], Awaitable[str]]
 
 @contextmanager
 def workbench(
-    tmp_path: Path, transport: ScriptedTransport | None = None
+    tmp_path: Path, transport: ScriptedTransport | None = None, *, assessments: int = 2
 ) -> Iterator[tuple[ConversationSession, FakeController]]:
     """Use production Mission HTTP and SQLite with deterministic software-only model fixtures."""
     controller = FakeController(_inventory(*_fixture_contracts()))
     engine = _engine(
-        tmp_path, FakeInterpreter([_assessment(), _assessment()]), FakePlanner(), controller
+        tmp_path,
+        FakeInterpreter([_assessment() for _ in range(assessments)]),
+        FakePlanner(),
+        controller,
     )
     with mission_server(engine) as endpoint:
         store = SessionStore(tmp_path / "sessions", "display", {}, False)

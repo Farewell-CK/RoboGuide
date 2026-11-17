@@ -423,7 +423,9 @@ def fixture_response(payload: dict[str, Any], number: int) -> dict[str, Any]:
             return final_message("第二个节点 node-beta 提供建图合同。")
         return final_message("当前可见两个节点：node-alpha 提供计算，node-beta 提供建图合同。")
     route: tuple[str, dict[str, Any]] | None = None
-    if "unavailable" in question:
+    if question == "先只规划一个巡检方案，不执行。":
+        route = "clarify_task", {"question": "要巡检哪个区域？"}
+    elif "unavailable" in question:
         route = "read_mission", {"mission_id": "mission-unavailable"}
     elif any(word in question for word in ("电", "位置", "姿态")):
         route = "read_state", {"target": "node-beta", "fields": ["battery", "position", "posture"]}
@@ -666,6 +668,17 @@ def question_step(chat: ChatProcess, trace: Trace, text: str) -> dict[str, Any]:
     return row
 
 
+def state_view_kind(text: str, age_seconds: float, *, real_model: bool) -> str:
+    """Check the five-second fixture at consumption without extending its original lifetime."""
+    if "已过期" in text:
+        assert real_model and age_seconds >= 4.5, "fresh fixture was refused before its deadline"
+        assert not any(value in text for value in ("82 %", "fixture-map", "站立")), text
+        return "expired-refused"
+    assert age_seconds <= 5.5, "expired fixture values were displayed as current"
+    assert all(value in text for value in ("82 %", "fixture-map", "站立")), text
+    return "current"
+
+
 def package_provenance(cli: Path, wheel: Path | None) -> dict[str, Any]:
     """Inspect the installed package in its own interpreter and match optional exact wheel bytes."""
     interpreter = cli.resolve().parent / "python"
@@ -782,8 +795,19 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
                 transcript.append(row)
             before = len(trace.reads)
             row = question_step(chat, trace, "node-beta 还有多少电，位置和姿态呢？")
-            assert len(trace.reads) == before + 3 and "82 %" in row["assistant"], row
-            assert "fixture-map" in row["assistant"] and "站立" in row["assistant"], row
+            assert len(trace.reads) == before + 3, row
+            reported = [
+                read
+                for read in trace.reads[before:]
+                if read["path"] == "/v1/state/records?semantic=reported"
+            ]
+            assert reported, "natural State question did not read current reports"
+            row["state_age_at_display_seconds"] = round(
+                time.time() - reported[-1]["received_at"], 3
+            )
+            row["state_view"] = state_view_kind(
+                row["assistant"], row["state_age_at_display_seconds"], real_model=remote is not None
+            )
             transcript.append(row)
             before = len(trace.reads)
             row = question_step(chat, trace, "/state-fields")
@@ -804,9 +828,16 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
                 for word in ("未知", "无法", "未能", "失败", "不可用", "unknown", "Unknown")
             ), row
             transcript.append(row)
-            row = question_step(chat, trace, "帮我制定一个巡检计划")
+            original_goal = "先只规划一个巡检方案，不执行。"
+            row = question_step(chat, trace, original_goal)
+            assert trace.writes == [] and trace.mi_writes == [], row
+            assert "区域" in row["assistant"] and "/choose" not in row["assistant"], row
+            transcript.append(row)
+            row = question_step(chat, trace, "巡检东区，只规划，不执行；能力缺口交给 MI 继续澄清。")
             assert trace.writes == [], trace.writes
             assert len(trace.mi_writes) == 1 and "/choose" not in row["assistant"], row
+            assert original_goal in trace.mi_writes[0]["body"]["instruction"]
+            assert "巡检东区" in trace.mi_writes[0]["body"]["instruction"]
             assert "fixture-request" in row["assistant"], row
             transcript.append(row)
             trace.entered.clear()
@@ -880,6 +911,8 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
                 generic_state_queries=True,
                 stale_state_refused=True,
                 native_task_request=True,
+                native_task_clarification=True,
+                original_task_constraints=True,
                 editable_queue=True,
                 mi_request_posts=len(trace.mi_writes),
                 responses_streaming=True,
