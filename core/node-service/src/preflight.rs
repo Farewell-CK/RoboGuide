@@ -39,6 +39,16 @@ pub struct NodePlanPreflight {
 impl NodePlanPreflight {
     /// Reads bounded exact sources and compiles them without opening journals, sockets or workers.
     pub fn load(paths: &[PathBuf]) -> Result<Self, String> {
+        Self::load_with_conformance(paths, false)
+    }
+
+    /// Retains every original `--validate` conformance gate when a CLI also supplies a plan.
+    pub fn load_conformant(paths: &[PathBuf]) -> Result<Self, String> {
+        Self::load_with_conformance(paths, true)
+    }
+
+    /// Compiles one exact source snapshot and optionally applies the existing conformance policy.
+    fn load_with_conformance(paths: &[PathBuf], conformant: bool) -> Result<Self, String> {
         if paths.is_empty() || paths.len() > MAX_CONFIGS {
             return Err("Node preflight requires 1..64 explicit configuration paths".into());
         }
@@ -60,6 +70,10 @@ impl NodePlanPreflight {
                 path.parent().unwrap_or_else(|| std::path::Path::new(".")),
             )
             .map_err(|_| "Node preflight configuration failed production compilation")?;
+            if conformant {
+                crate::conformance::validate_extension_catalog(&catalog)
+                    .map_err(|_| "Node preflight configuration failed extension conformance")?;
+            }
             let node_id = catalog.node_id().to_string();
             let digest = format!("sha256:{:x}", Sha256::digest(&bytes));
             if sources.insert(node_id, (digest, catalog)).is_some() {
@@ -142,7 +156,7 @@ impl NodePlanPreflight {
                     Some(NodePlanIssue {
                         code: "node_preflight.parameters_incompatible",
                         path: format!("{path}/execution_intent/parameters"),
-                        message: "The plan does not provide the invocation fields read by any supplied operation workflow.",
+                        message: "Invocation fields, pure conversions or Artifact directives are incompatible with every supplied operation workflow.",
                     })
                 } else if !parameters.iter().any(|(catalog, op)| {
                     resources_compatible(catalog, op, &role.resource_requirements())
@@ -192,6 +206,40 @@ fn operation_sources_exist(
     operation: &CompiledOperation,
     invocation: &Value,
 ) -> bool {
+    // The original runtime digest constructor performs pure action/slot/map/revision checks.
+    if crate::engine::workflow_digest(catalog, operation, invocation).is_err() {
+        return false;
+    }
+    if let Some(slot) = invocation
+        .pointer("/parameters/artifact_slot")
+        .and_then(Value::as_str)
+    {
+        if let Some(provider) = catalog
+            .artifact_service()
+            .and_then(|service| service.output_bindings().get(slot))
+            .and_then(|binding| binding.producer_provider_id.as_ref())
+            && catalog
+                .memory_providers()
+                .get(provider)
+                .is_none_or(|provider| provider.owner() != operation.owner())
+        {
+            return false;
+        }
+        for pointer in operation
+            .workflow()
+            .execute()
+            .iter()
+            .flat_map(crate::CompiledWorkflowStep::source_pointers)
+        {
+            if let Some(id) = pointer
+                .strip_prefix("/artifacts/inputs/")
+                .or_else(|| pointer.strip_prefix("/artifacts/outputs/"))
+                && id.replace("~1", "/").replace("~0", "~") != slot
+            {
+                return false;
+            }
+        }
+    }
     let mut invocation = invocation.clone();
     if catalog.node_contract_version() == integration::grpc::v0_4::LEGACY_NODE_CONTRACT_VERSION {
         invocation["capability_contract"] = invocation["operation"].clone();

@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(plan_path) = plan_path {
             let body = std::fs::read(plan_path)?;
             let plan = orchestration::decode_mission_plan(std::str::from_utf8(&body)?)?;
-            let preflight = NodePlanPreflight::load(&paths)?;
+            let preflight = NodePlanPreflight::load_conformant(&paths)?;
             let assessment = preflight.assess(&plan, &body);
             println!("{}", serde_json::to_string_pretty(&assessment)?);
             if assessment["decision"] == "blocked" {

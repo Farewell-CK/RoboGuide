@@ -22,7 +22,7 @@ v0.2 的全部必需字段、摘要、32 条诊断上限及 `issues_truncated` �
 | Code | 计划路径 | 含义 |
 |---|---|---|
 | `node_preflight.operation_unsupported` | `/tasks/i/roles/j/execution_intent/operation` | 所提供的配置没有 exact operation |
-| `node_preflight.parameters_incompatible` | `/tasks/i/roles/j/execution_intent/parameters` | 没有 workflow 可读取全部实际参数源 |
+| `node_preflight.parameters_incompatible` | `/tasks/i/roles/j/execution_intent/parameters` | 没有 workflow 可读取/转换全部实际参数源，或 Artifact action/slot/selector/producer owner 不匹配 |
 | `node_preflight.resources_incompatible` | `/tasks/i/roles/j/requirements/resources` | 同一个参数兼容的 operation 无法覆盖完整资源需求及其私有必需 ID |
 
 私有配置的来源摘要参与反馈 provenance，不替代原 deployment/verifier/plan digest。

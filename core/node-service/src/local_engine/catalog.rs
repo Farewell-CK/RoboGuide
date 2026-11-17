@@ -399,6 +399,7 @@ impl CompiledLocalCatalog {
             format!("requires schema `{CONFIG_SCHEMA_V0_3}`"),
         )?;
         let artifacts = compile_artifacts(config.artifacts, config_directory)?;
+        validate_operation_artifacts(&operations, artifacts.as_ref(), &memory_providers)?;
         if let Some(service) = &artifacts {
             for binding in service.output_bindings().values() {
                 let provenance = binding

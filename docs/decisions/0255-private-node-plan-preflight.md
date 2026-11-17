@@ -50,7 +50,7 @@ Controller 发布合同检查也不持有 Node 的私有 request mapping 与
 不成为新的提交授权或持久化权威，真实提交和 Node 执行仍经过全部原有门禁。
 
 透传整个 `/invocation` 不声明额外私有参数需求；未显式指定 execution intent 的历史 Role
-不会被推断出新 operation。具体本地响应值、转换函数的动态类型、Artifact 绑定可用性、
+不会被推断出新 operation。具体本地响应值、依赖未知值的转换、Artifact 实际字节/Prepared 状态、
 Control 生成的 grant 内容和 execution generation 仍由原运行时检查。
 来源冻结至进程结束；修改配置后须重启检查进程，摘要不宣称 live Node 已使用该配置。
 本项没有扩展 replica supervisor 的环境白名单或 HA 部署/恢复策略。
@@ -72,3 +72,32 @@ MI 测试检查闭合代际、来源摘要和负反馈保留；CLI 独立进程�
 attributes 为空，而原始场景已声明 `location-access`/`supports-floor-transition`。
 该失败在隔离的原始 HEAD `28156615` 上复现；排除此项后其余 147 项通过。
 未运行全仓 pytest、Provider、模拟器、硬件或 HA/recovery process 验收。
+
+## 相邻预检缺口复查（2026-11-17）
+
+反例回归确认并修复以下同类问题：
+
+- request target 只检查语法，没有检查其 `base` 和前序赋值的已知结构；已知标量父级、
+  越界数组和先转换成标量再写入子字段会在本地调用前拒绝。
+- 转换函数只检查名称/参数数目，没有执行纯常量或计划已知值的类型检查。
+  `ToInteger` 同时修复 `2^63` 边界被浮点舍入后饱和为 `i64::MAX` 的错误；超范围值拒绝。
+- Artifact path 未绑定本地 action、方向和实际静态 binding；声明 action 却没有对应
+  data plane/binding 也会通过。现在还要求一次 invocation 的显式路径指向同一 slot，
+  具体计划的 action/slot/map/revision/已知 output anchor 复用原 runtime digest 构造器
+  的纯元数据校验，并独立核对实际选定 producer 的 LocalSystem owner。
+- Memory 的 discover/export/原始 import outcome 可引用拼错或其他 workflow 的步骤。
+  现在对 `/steps/...` 校验精确 workflow，保留既有 invocation 投影及 response-relative
+  instance/query 指针，不猜测尚未返回的实际响应字段。
+- 上一实现的 CLI `--plan` 分支只用了生产编译器，漏掉 conformance 的额外完整性检查。
+  两种 CLI 模式现在对同一份已读取配置复用原 conformance 门禁，避免重新读源产生竞态。
+
+`local_engine/mapping_preflight.rs` 仅保留临时的已知 JSON/未知形状，不存入 compiled
+catalog，不修改原 Debug/identity/digest 表示，也不渲染真实 Control grant 或私有路径。
+未知 step 响应、生成的 resource ID/grant/Group 和 local handle 不被替换为虚构值；
+只从确定结构推导拒绝。合法的动态对象、按序覆盖、数组追加和转义名称保留原执行语义。
+所有检查仍是静态必要条件，不建立运行或物理成功证明。
+
+复查验证：六个新增反例在修复前全部失败，修复后与补充的正向/边界用例一起通过；
+Node 162 项、Integration Server 306 项、CLI 真实子进程回归及受影响三个包的
+all-targets/all-features Clippy、Rustfmt 和 diff 检查通过。上一节已在原始 HEAD 复现的
+1 项既有 Node 测试本轮显式跳过；未重复全仓 pytest 或运行模拟器、设备与 HA/recovery gate。

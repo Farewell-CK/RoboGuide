@@ -235,8 +235,8 @@ async fn private_node_preflight_rejects_mismatches_without_inventory_or_writes()
         .replace("generic-node", "private-node-identity")
         .replace("compute.noop@v1", "object.relocate@v1")
         .replace(
-            "pointer = \"/invocation\"",
-            "pointer = \"/invocation/parameters/destination\"",
+            "kind = \"pointer\"\npointer = \"/invocation\"",
+            "kind = \"function\"\nfunction = \"to_integer\"\narguments = [{ kind = \"pointer\", pointer = \"/invocation/parameters/destination\" }]",
         );
     std::fs::write(&path, source).unwrap();
     let preflight = node_service::NodePlanPreflight::load(&[path]).unwrap();
@@ -252,26 +252,32 @@ async fn private_node_preflight_rejects_mismatches_without_inventory_or_writes()
     for (resources, parameter, expected) in [
         (
             serde_json::json!([]),
-            true,
+            Some("5"),
             Some("node_preflight.resources_incompatible"),
         ),
         (
             serde_json::json!([{"kind":"compute","units":1}]),
-            false,
+            None,
             Some("node_preflight.parameters_incompatible"),
         ),
         (
             serde_json::json!([{"kind":"compute","units":1}]),
-            true,
+            Some("not-a-number"),
+            Some("node_preflight.parameters_incompatible"),
+        ),
+        (
+            serde_json::json!([{"kind":"compute","units":1}]),
+            Some("5"),
             None,
         ),
     ] {
         value["tasks"][0]["roles"][0]["requirements"]["resources"] = resources;
-        value["tasks"][0]["roles"][0]["execution_intent"]["parameters"] = if parameter {
-            serde_json::json!({"destination":"reception-1f"})
-        } else {
-            serde_json::json!({"destinaton":"reception-1f"})
-        };
+        value["tasks"][0]["roles"][0]["execution_intent"]["parameters"] =
+            if let Some(parameter) = parameter {
+                serde_json::json!({"destination":parameter})
+            } else {
+                serde_json::json!({"destinaton":"reception-1f"})
+            };
         let encoded = serde_json::to_vec(&value).unwrap();
         let reply = route_with_node_preflight(
             &live,

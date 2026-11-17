@@ -2,6 +2,71 @@
 
 use super::*;
 
+/// A result pointer cannot read an absent step or another phase's response.
+#[test]
+fn preflight_audit_rejects_memory_result_from_unconfigured_step() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = crate::NodeServiceConfig::load(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml"),
+    )
+    .unwrap();
+    config.memory_providers[0].discover = Some(MemoryWorkflowConfig {
+        steps: vec![WorkflowStepConfig {
+            id: "discover".into(),
+            connection: "local-http".into(),
+            operation: LocalOperationConfig::Http {
+                method: "GET".into(),
+                path: "/memory".into(),
+            },
+            request: RequestMappingConfig::default(),
+        }],
+        manifests_pointer: Some("/steps/misspelled/manifests".into()),
+        artifact_path_pointer: None,
+    });
+    assert!(CompiledLocalCatalog::compile(config, directory.path()).is_err());
+}
+
+/// Original import outcomes reference the exact import phase, including escaped step identities.
+#[test]
+fn memory_continuity_result_stays_in_original_import_workflow() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = NodeServiceConfig::load(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml"),
+    )
+    .unwrap();
+    config.schema = CONFIG_SCHEMA_V0_8.into();
+    let step = |id: &str, method: &str| WorkflowStepConfig {
+        id: id.into(),
+        connection: "local-http".into(),
+        operation: LocalOperationConfig::Http {
+            method: method.into(),
+            path: "/memory".into(),
+        },
+        request: RequestMappingConfig::default(),
+    };
+    config.memory_providers[0].import = Some(MemoryWorkflowConfig {
+        steps: vec![step("import/run~id", "POST")],
+        manifests_pointer: None,
+        artifact_path_pointer: None,
+    });
+    config.memory_providers[0].continuity = Some(MemoryContinuityConfig {
+        import_result_pointer: "/steps/import~1run~0id/result".into(),
+        instance: step("instance", "GET"),
+        instance_pointer: "/instance_id".into(),
+        query: step("query", "GET"),
+        result_pointer: "/result".into(),
+    });
+    CompiledLocalCatalog::compile(config.clone(), directory.path()).unwrap();
+    for pointer in ["/steps/query/result", "/steps/import/result"] {
+        config.memory_providers[0]
+            .continuity
+            .as_mut()
+            .unwrap()
+            .import_result_pointer = pointer.into();
+        assert!(CompiledLocalCatalog::compile(config.clone(), directory.path()).is_err());
+    }
+}
+
 /// Continuity requires explicit v0.8 negotiation and mechanically readonly fixed operations.
 #[test]
 fn memory_continuity_rejects_downgrade_and_mutating_identity_or_query() {

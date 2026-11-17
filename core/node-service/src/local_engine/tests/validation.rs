@@ -428,3 +428,68 @@ fn runtime_pointers_follow_negotiated_invocation_generation() {
         );
     }
 }
+
+/// Artifact paths require an actual configured operation and direction-specific binding.
+#[test]
+fn preflight_audit_rejects_artifact_path_without_matching_binding() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = valid_config(directory.path().join("unused.pb"));
+    config.capabilities[0].workflow.execute[0]
+        .request
+        .bindings
+        .push(RequestBindingConfig {
+            target: "/path".into(),
+            value: ValueExpressionConfig::Pointer {
+                pointer: "/artifacts/inputs/missing".into(),
+            },
+        });
+    assert!(CompiledLocalCatalog::compile(config, directory.path()).is_err());
+}
+
+/// Real bindings retain escaped names; opposite directions and two simultaneous slots refuse.
+#[test]
+fn artifact_pointer_checks_preserve_real_bindings_and_single_slot_scope() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = NodeServiceConfig::load(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml"),
+    )
+    .unwrap();
+    config.operations[0].artifact_operation = Some(crate::ArtifactOperationConfig::Import);
+    config.artifacts.as_mut().unwrap().input_bindings = ["map~input", "other"]
+        .into_iter()
+        .map(|id| crate::ArtifactInputBindingConfig {
+            id: id.into(),
+            map_id: "map".into(),
+            revision_id: "r1".into(),
+            content_digest: None,
+            target_path: PathBuf::from(if id == "other" {
+                "other.bin"
+            } else {
+                "map.bin"
+            }),
+        })
+        .collect();
+    config.operations[0].workflow.execute[0].request.bindings[0].value =
+        ValueExpressionConfig::Pointer {
+            pointer: "/artifacts/inputs/map~0input".into(),
+        };
+    CompiledLocalCatalog::compile(config.clone(), directory.path()).unwrap();
+    for pointer in ["/artifacts/outputs/map~0input", "/artifacts/inputs/missing"] {
+        let mut invalid = config.clone();
+        invalid.operations[0].workflow.execute[0].request.bindings[0].value =
+            ValueExpressionConfig::Pointer {
+                pointer: pointer.into(),
+            };
+        assert!(CompiledLocalCatalog::compile(invalid, directory.path()).is_err());
+    }
+    config.operations[0].workflow.execute[0]
+        .request
+        .bindings
+        .push(RequestBindingConfig {
+            target: "/second".into(),
+            value: ValueExpressionConfig::Pointer {
+                pointer: "/artifacts/inputs/other".into(),
+            },
+        });
+    assert!(CompiledLocalCatalog::compile(config, directory.path()).is_err());
+}

@@ -2082,6 +2082,11 @@ exact plan/source digests and bounded logical diagnostics; absent private inputs
 grant no private coverage. Parameters and mandatory resources must fit the same supplied catalog.
 No inventory, writer, Node worker, reservation, public Node/checkpoint generation or physical fact
 is created. Actual submission and runtime gates remain independent. See ADR-0255.
+`local_engine/mapping_preflight.rs` validates transient target shapes and pure known conversions;
+opaque responses and original generated IDs/grants remain unknown. Memory named-result steps and
+Artifact action/direction/slot/selectors/producer ownership are checked against original declarations.
+Compiled catalog representation and original workflow/Memory digests remain unchanged. CLI plan
+mode retains the same original conformance gates as plain `--validate`.
 
 ADR-0109 adds the inventory-free, read-only Controller `POST /v1/missions/validate-plan`
 query (`roboguide.plan-validation/v0.2`, with explicit v0.1 read compatibility). The digest-bound

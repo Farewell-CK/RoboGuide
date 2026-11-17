@@ -419,6 +419,16 @@ pub(super) fn compile_memory_providers(
             format!("memory_providers.{}.continuity", config.id),
             "requires an explicit Local EAIOS import workflow",
         )?;
+        if let (Some(continuity), Some(import)) = (&continuity, &import) {
+            validate_memory_result_source(
+                continuity.import_result_pointer(),
+                import.steps(),
+                &format!(
+                    "memory_providers.{}.continuity.import_result_pointer",
+                    config.id
+                ),
+            )?;
+        }
         let availability = compile_memory_availability(
             config.availability,
             &config.id,
@@ -566,12 +576,22 @@ pub(super) fn compile_memory_workflow(
             step: format!("memory_providers.{provider_id}.{operation}"),
             source,
         })?;
+        validate_memory_result_source(
+            pointer,
+            &steps,
+            &format!("memory_providers.{provider_id}.{operation}.manifests_pointer"),
+        )?;
     }
     if let Some(pointer) = &config.artifact_path_pointer {
         validate_pointer(pointer).map_err(|source| CatalogError::Mapping {
             step: format!("memory_providers.{provider_id}.{operation}"),
             source,
         })?;
+        validate_memory_result_source(
+            pointer,
+            &steps,
+            &format!("memory_providers.{provider_id}.{operation}.artifact_path_pointer"),
+        )?;
     }
     match operation {
         "discover" => {
@@ -608,6 +628,22 @@ pub(super) fn compile_memory_workflow(
         manifests_pointer: config.manifests_pointer,
         artifact_path_pointer: config.artifact_path_pointer,
     }))
+}
+
+/// Checks named step results against this workflow without narrowing existing invocation projections.
+fn validate_memory_result_source(
+    pointer: &str,
+    steps: &[CompiledWorkflowStep],
+    field: &str,
+) -> Result<(), CatalogError> {
+    require(
+        !pointer.starts_with("/steps/")
+            || steps
+                .iter()
+                .any(|step| pointer_targets_step(pointer, step.id())),
+        field,
+        "must reference a configured step response from this exact workflow",
+    )
 }
 
 /// Returns whether an expression reads dynamic invocation or prior workflow context.

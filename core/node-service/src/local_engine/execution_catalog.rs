@@ -240,6 +240,11 @@ impl CompiledWorkflow {
 }
 
 impl CompiledWorkflowStep {
+    /// Exposes only private configuration source paths to static catalog validation.
+    pub(crate) fn source_pointers(&self) -> Vec<&str> {
+        self.request.source_pointers()
+    }
+
     /// Checks concrete plan-owned sources without invoking this step or selecting resources.
     pub(crate) fn invocation_sources_exist(&self, invocation: &serde_json::Value) -> bool {
         self.request.invocation_sources_exist(invocation)

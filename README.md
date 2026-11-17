@@ -979,6 +979,10 @@ cargo run -p roboguide-node -- --validate config/node.toml --plan mission-plan.j
 ```
 
 异构计划可重复追加 `--node-config <另一份配置>`，检查范围是全部显式提供的配置集合。
+该模式保留普通 `--validate` 的完整 conformance 门禁。共享编译器还检查 request target
+与 `base`/前序赋值的结构、已知转换函数参数、Memory 结果的步骤引用和 Artifact 的
+action/方向/slot/selector/producer owner；临时结构分析由
+`core/node-service/src/local_engine/mapping_preflight.rs` 承担，未知运行时值仍留给实际门禁。
 
 Controller 启动前设置
 `ROBOGUIDE_NODE_PREFLIGHT_CONFIGS='["/absolute/node-a.toml","/absolute/node-b.toml"]'`，

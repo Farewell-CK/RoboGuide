@@ -54,6 +54,24 @@ fn offline_cli_reports_known_conflicts_and_leaves_runtime_storage_absent() {
 
     std::fs::write(
         &config_path,
+        source.replace("accepted = [\"ACCEPTED\"]", "accepted = []"),
+    )
+    .unwrap();
+    for with_plan in [false, true] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_roboguide-node"));
+        command.arg("--validate").arg(&config_path);
+        if with_plan {
+            command.arg("--plan").arg(&plan_path);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            !output.status.success(),
+            "a plan cannot bypass original conformance gates"
+        );
+    }
+
+    std::fs::write(
+        &config_path,
         source.replace(
             "/invocation/parameters/destination",
             "/invocation/intent/parameters/destination",

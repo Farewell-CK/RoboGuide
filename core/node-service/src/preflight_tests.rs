@@ -244,3 +244,180 @@ fn caps_private_diagnostics_without_erasing_truncation() {
     assert_eq!(report["issues_truncated"], true);
     assert_eq!(report["issues"].as_array().unwrap().len(), 32);
 }
+
+/// Existence of a scalar parameter cannot make an impossible pure conversion executable.
+#[test]
+fn preflight_audit_rejects_concrete_parameter_conversion() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = config(
+        directory.path(),
+        "private-conversion",
+        "/invocation/parameters/destination",
+        1,
+    );
+    let source = std::fs::read_to_string(&path).unwrap().replace(
+        "kind = \"pointer\"\npointer = \"/invocation/parameters/destination\"",
+        "kind = \"function\"\nfunction = \"to_integer\"\narguments = [{ kind = \"pointer\", pointer = \"/invocation/parameters/destination\" }]",
+    );
+    std::fs::write(&path, source).unwrap();
+    let preflight = NodePlanPreflight::load(&[path]).unwrap();
+    let mut document = plan_document();
+    document["tasks"][0]["roles"][0]["requirements"]["resources"] =
+        serde_json::json!([{"kind":"compute", "units":1}]);
+    assert!(!preflight.issues(&plan(&document)).is_empty());
+}
+
+/// Artifact-reserved parameters require a compatible explicitly declared local action.
+#[test]
+fn preflight_audit_rejects_undeclared_artifact_action() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = config(directory.path(), "private-artifact", "/invocation", 1);
+    let preflight = NodePlanPreflight::load(&[path]).unwrap();
+    let mut document = plan_document();
+    document["tasks"][0]["roles"][0]["requirements"]["resources"] =
+        serde_json::json!([{"kind":"compute", "units":1}]);
+    document["tasks"][0]["roles"][0]["execution_intent"]["parameters"]["artifact_slot"] =
+        "undeclared".into();
+    assert!(!preflight.issues(&plan(&document)).is_empty());
+}
+
+/// Existing Control-generated resource identities remain unknown rather than converted from null.
+#[test]
+fn generated_resource_values_are_not_fabricated_for_pure_conversion() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = config(
+        directory.path(),
+        "private-generated",
+        "/invocation/resource_ids/0",
+        1,
+    );
+    let source = std::fs::read_to_string(&path).unwrap().replace(
+        "kind = \"pointer\"\npointer = \"/invocation/resource_ids/0\"",
+        "kind = \"function\"\nfunction = \"to_string\"\narguments = [{ kind = \"pointer\", pointer = \"/invocation/resource_ids/0\" }]",
+    );
+    std::fs::write(&path, source).unwrap();
+    let preflight = NodePlanPreflight::load(&[path]).unwrap();
+    let mut document = plan_document();
+    document["tasks"][0]["roles"][0]["requirements"]["resources"] =
+        serde_json::json!([{"kind":"compute", "units":1}]);
+    assert!(preflight.issues(&plan(&document)).is_empty());
+}
+
+/// Declared and selected Artifact slots must agree before any CAS, journal or local call.
+#[test]
+fn artifact_plan_preflight_checks_binding_selectors_and_selected_path() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = config(
+        directory.path(),
+        "private-map",
+        "/artifacts/inputs/map~0input",
+        1,
+    );
+    let mut source = std::fs::read_to_string(&path).unwrap().replace(
+        "required_resources = [\"compute-slot\"]",
+        "artifact_operation = \"import\"\nrequired_resources = [\"compute-slot\"]",
+    );
+    for (id, target) in [("map~input", "map.bin"), ("other", "other.bin")] {
+        source.push_str(&format!("\n[[artifacts.input_bindings]]\nid = \"{id}\"\nmap_id = \"lab-map\"\nrevision_id = \"r1\"\ntarget_path = \"{target}\"\n"));
+    }
+    std::fs::write(&path, source).unwrap();
+    let preflight = NodePlanPreflight::load(&[path]).unwrap();
+    let mut document = plan_document();
+    document["tasks"][0]["roles"][0]["requirements"]["resources"] =
+        serde_json::json!([{"kind":"compute", "units":1}]);
+    let parameters = serde_json::json!({"artifact_operation": "import", "artifact_slot": "map~input",
+        "map_id": "lab-map", "revision_id": "r1", "spatial_anchor_id": "anchor"});
+    document["tasks"][0]["roles"][0]["execution_intent"]["parameters"] = parameters.clone();
+    assert!(preflight.issues(&plan(&document)).is_empty());
+    for (field, value) in [
+        ("artifact_slot", "other"),
+        ("map_id", "different-map"),
+        ("revision_id", "other-revision"),
+        ("artifact_operation", "verify"),
+    ] {
+        document["tasks"][0]["roles"][0]["execution_intent"]["parameters"] = parameters.clone();
+        document["tasks"][0]["roles"][0]["execution_intent"]["parameters"][field] = value.into();
+        assert!(!preflight.issues(&plan(&document)).is_empty(), "{field}");
+    }
+    assert!(!directory.path().join("node-state").exists());
+    assert!(!directory.path().join("artifact-cache").exists());
+}
+
+/// A compatible output on one provider cannot supply the selected foreign provider's ownership.
+#[test]
+fn artifact_output_preflight_retains_exact_producer_owner() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = config(directory.path(), "private-producer", "/invocation", 1);
+    let mut source = std::fs::read_to_string(&path)
+        .unwrap()
+        .replacen(
+            "roboguide.node-config/v0.7",
+            "roboguide.node-config/v0.9",
+            1,
+        )
+        .replace("kind = \"artifact\"", "kind = \"spatial\"")
+        .replace("scope = \"local\"", "scope = \"global\"")
+        .replace(
+            "visibility = \"discoverable\"",
+            "visibility = \"exchangeable\"",
+        )
+        .replace("roboguide.example.local-artifact/v0.1", "example.map/v1")
+        .replace(
+            "required_resources = [\"compute-slot\"]",
+            "artifact_operation = \"prepare-output\"\nrequired_resources = [\"compute-slot\"]",
+        );
+    source.push_str(
+        r#"
+[[memory_providers]]
+id = "foreign-provider"
+owner = "local-sensors"
+kind = "spatial"
+scope = "global"
+visibility = "exchangeable"
+payload_schema = "example.map/v1"
+media_type = "application/octet-stream"
+"#,
+    );
+    for (slot, provider) in [
+        ("out-local", "local-artifacts"),
+        ("out-foreign", "foreign-provider"),
+    ] {
+        source.push_str(&format!(
+            r#"
+[[artifacts.output_bindings]]
+id = "{slot}"
+map_id = "lab-map"
+revision_id = "r1"
+source_path = "{slot}.bin"
+producer_provider_id = "{provider}"
+payload_schema = "example.map/v1"
+media_type = "application/octet-stream"
+format_name = "bundle"
+format_version = "v1"
+root_frame = "map"
+coordinate_convention = "enu"
+spatial_anchor_id = "anchor"
+"#
+        ));
+    }
+    std::fs::write(&path, &source).unwrap();
+    let preflight = NodePlanPreflight::load(std::slice::from_ref(&path)).unwrap();
+    let mut document = plan_document();
+    document["tasks"][0]["roles"][0]["requirements"]["resources"] =
+        serde_json::json!([{"kind":"compute", "units":1}]);
+    document["tasks"][0]["roles"][0]["execution_intent"]["parameters"] = serde_json::json!({
+        "artifact_operation": "prepare-output", "artifact_slot": "out-local", "map_id": "lab-map",
+        "revision_id": "r1", "spatial_anchor_id": "anchor"
+    });
+    assert!(preflight.issues(&plan(&document)).is_empty());
+    document["tasks"][0]["roles"][0]["execution_intent"]["parameters"]["artifact_slot"] =
+        "out-foreign".into();
+    assert!(!preflight.issues(&plan(&document)).is_empty());
+    source = source.replacen(
+        "owner = \"local-runtime\"\nkind = \"spatial\"",
+        "owner = \"local-sensors\"\nkind = \"spatial\"",
+        1,
+    );
+    std::fs::write(&path, source).unwrap();
+    assert!(NodePlanPreflight::load(&[path]).is_err());
+}
