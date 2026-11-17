@@ -3,6 +3,89 @@
 use super::*;
 use std::io::Write;
 
+/// Map replica reports identify the receiver's accepted session, independently of the map producer.
+#[tokio::test]
+async fn map_replica_requests_carry_receiver_node_and_session() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let directory = tempfile::tempdir().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let stager = client_at(
+        directory.path(),
+        &format!("http://{}", listener.local_addr().unwrap()),
+    );
+    let manifest = manifest(&format!("sha256:{}", "a".repeat(64)));
+    let receiver = NodeId::new("dog-b").unwrap();
+    let mission = MissionId::new("mission-import").unwrap();
+    let server = tokio::spawn(async move {
+        let mut requests = Vec::new();
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 4096];
+            loop {
+                let count = stream.read(&mut buffer).await.unwrap();
+                assert!(count > 0, "incomplete replica request");
+                request.extend_from_slice(&buffer[..count]);
+                if let Some(end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&request[..end]).to_ascii_lowercase();
+                    let length: usize = headers
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length: "))
+                        .unwrap()
+                        .parse()
+                        .unwrap();
+                    if request.len() == end + 4 + length {
+                        break;
+                    }
+                }
+            }
+            requests.push(String::from_utf8(request).unwrap());
+            stream
+                .write_all(
+                    b"HTTP/1.1 202 Accepted\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                )
+                .await
+                .unwrap();
+        }
+        requests
+    });
+    for status in [
+        ReplicaEvidenceStatus::Staged,
+        ReplicaEvidenceStatus::Imported,
+        ReplicaEvidenceStatus::Verified,
+    ] {
+        stager
+            .record_replica(&manifest, &receiver, "receiver-session", &mission, status)
+            .await
+            .unwrap();
+    }
+    let requests = tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap();
+    for (request, status) in requests.iter().zip(["staged", "imported", "verified"]) {
+        let (headers, body) = request.split_once("\r\n\r\n").unwrap();
+        assert!(headers.starts_with("POST /v1/maps/lab/revisions/r1/replicas HTTP/1.1"));
+        let headers = headers.to_ascii_lowercase();
+        assert!(
+            headers
+                .lines()
+                .any(|line| line == "x-roboguide-node-id: dog-b"),
+            "{headers}"
+        );
+        assert!(
+            headers
+                .lines()
+                .any(|line| line == "x-roboguide-session-id: receiver-session"),
+            "{headers}"
+        );
+        let body: Value = serde_json::from_str(body).unwrap();
+        assert_eq!(body["node_id"], "dog-b");
+        assert_eq!(body["manifest"]["producer_node_id"], "dog-a");
+        assert_eq!(body["status"], status);
+    }
+}
+
 /// Builds one typed manifest for transport-envelope unit tests.
 fn manifest(digest: &str) -> MapArtifactManifest {
     manifest_at(digest, 1)

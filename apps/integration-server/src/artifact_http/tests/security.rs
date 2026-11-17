@@ -3,6 +3,125 @@
 use super::super::server::{load_artifact_tls, load_certificates, load_private_key};
 use super::*;
 
+/// Non-admin Node certificates may report their own map replicas, never another Node or map.
+#[tokio::test]
+async fn map_replica_mtls_binds_certificate_headers_and_body_for_every_status() {
+    let directory = tempfile::tempdir().unwrap();
+    let pki = testkit::TestPki::new(
+        &directory.path().join("pki"),
+        &["server", "receiver", "ungranted", "viewer"],
+    )
+    .unwrap();
+    let fingerprint = |name: &str| {
+        format!(
+            "sha256:{:x}",
+            Sha256::digest(load_certificates(&pki.identities[name].cert_path).unwrap()[0].as_ref())
+        )
+    };
+    let roles = serde_json::json!({
+        fingerprint("receiver"): {"role":"writer","node_id":"dog-b","provider_ids":["receiver-maps"],"map_ids":["map-a"]},
+        fingerprint("ungranted"): {"role":"writer","node_id":"dog-b","provider_ids":["receiver-maps"],"map_ids":["other-map"]},
+        fingerprint("viewer"): {"role":"viewer","node_id":"dog-b","map_ids":["map-a"]}
+    });
+    let roles_path = directory.path().join("roles.json");
+    std::fs::write(&roles_path, serde_json::to_vec(&roles).unwrap()).unwrap();
+    let leaf = &pki.identities["server"];
+    let profile = load_artifact_tls(
+        &leaf.cert_path,
+        &leaf.key_path,
+        &pki.ca_cert_path,
+        &roles_path,
+    )
+    .unwrap();
+    let log = SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    seed_controller_checkpoint(&log);
+    let gate = Arc::new(crate::application::ApplicationWriter::default());
+    let catalog = ArtifactCatalog::replay_with_gate(&log, gate.clone()).unwrap();
+    let manifest = fixture_manifest(&digest_bytes(b"map"), 3);
+    catalog
+        .append(EventPayload::MapArtifactPublished {
+            manifest: manifest.clone(),
+        })
+        .unwrap();
+    let mut rejected = serde_json::to_value(&manifest).unwrap();
+    rejected["revision_id"] = serde_json::json!("r2");
+    let rejected: MapArtifactManifest = serde_json::from_value(rejected).unwrap();
+    catalog
+        .append(EventPayload::MapArtifactPublished {
+            manifest: rejected.clone(),
+        })
+        .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(serve_artifact_http(
+        listener,
+        FileSystemArtifactStore::new(directory.path().join("cas")).unwrap(),
+        catalog.clone(),
+        Arc::new(AllowTestMemoryAdmission),
+        Arc::new(IgnoreTestLocalizationEvidence),
+        Some(profile),
+        crate::listener_capacity::Connections::new(
+            crate::listener_capacity::Listener::Artifact,
+            128,
+            ports::DiagnosticHandle::default(),
+        )
+        .unwrap(),
+    ));
+    let result = timeout(Duration::from_secs(30), async {
+        for (index, status) in ["staged", "imported", "verified", "rejected"].into_iter().enumerate() {
+            let current = if status == "rejected" { &rejected } else { &manifest };
+            let path = format!("/v1/maps/map-a/revisions/{}/replicas", current.selector().revision_id().as_str());
+            let mut payload = serde_json::json!({
+                "manifest":current,"node_id":"dog-b","mission_id":"mission-import","status":status,
+                "anchor_id":"anchor-lab","reason":"fixture local rejection"
+            });
+            for (case, identity, headers, expected) in [
+                ("missing", "receiver", "", "403"),
+                ("missing-session", "receiver", "X-RoboGuide-Node-Id: dog-b\r\n", "400"),
+                ("missing-node", "receiver", "X-RoboGuide-Session-Id: receiver-session\r\n", "400"),
+                ("foreign-header", "receiver", "X-RoboGuide-Node-Id: dog-a\r\nX-RoboGuide-Session-Id: receiver-session\r\n", "403"),
+                ("foreign-body", "receiver", "X-RoboGuide-Node-Id: dog-b\r\nX-RoboGuide-Session-Id: receiver-session\r\n", "403"),
+                ("map-grant", "ungranted", "X-RoboGuide-Node-Id: dog-b\r\nX-RoboGuide-Session-Id: receiver-session\r\n", "403"),
+                ("viewer", "viewer", "X-RoboGuide-Node-Id: dog-b\r\nX-RoboGuide-Session-Id: receiver-session\r\n", "403"),
+            ] {
+                payload["node_id"] = serde_json::json!(if case == "foreign-body" { "dog-a" } else { "dog-b" });
+                let before = log.decoded_events().unwrap().len();
+                let body = payload.to_string();
+                let response = call(address, &pki, identity, &format!("POST {path} HTTP/1.1\r\nHost: localhost\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())).await;
+                assert!(response.starts_with(&format!("HTTP/1.1 {expected}")), "{status}/{case}: {response}");
+                assert_eq!(log.decoded_events().unwrap().len(), before, "{status}/{case}");
+            }
+            payload["node_id"] = serde_json::json!("dog-b");
+            let body = payload.to_string();
+            let response = call(address, &pki, "receiver", &format!("POST {path} HTTP/1.1\r\nHost: localhost\r\nX-RoboGuide-Node-Id: dog-b\r\nX-RoboGuide-Session-Id: receiver-session\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())).await;
+            assert!(response.starts_with("HTTP/1.1 202"), "{status}: {response}");
+            assert_eq!(log.decoded_events().unwrap().len(), index + 3);
+        }
+    }).await;
+    task.abort();
+    let _ = task.await;
+    result.unwrap();
+    let restored = ArtifactCatalog::replay_with_gate(&log, gate).unwrap();
+    assert_eq!(
+        restored
+            .projection
+            .lock()
+            .unwrap()
+            .replicas(manifest.selector())[0]
+            .status(),
+        MapReplicaStatus::Verified
+    );
+    assert_eq!(
+        restored
+            .projection
+            .lock()
+            .unwrap()
+            .replicas(rejected.selector())[0]
+            .status(),
+        MapReplicaStatus::Rejected
+    );
+}
+
 /// Sends one framed request over a distinct certificate, accepting a rejected unmapped identity.
 async fn call(
     address: std::net::SocketAddr,

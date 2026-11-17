@@ -653,18 +653,28 @@ impl LocalIntegrationEngine {
         let node_id =
             NodeId::new(self.inner.catalog.node_id().to_string()).map_err(ArtifactError::Domain)?;
         let mission_id = invocation_mission_id(invocation)?;
+        let session_id = self
+            .inner
+            .publication_session
+            .lock()
+            .map_err(|_| EngineError::LockState)?
+            .clone()
+            .ok_or_else(|| {
+                EngineError::Configuration("current accepted replica session is unavailable".into())
+            })?;
         if status == ReplicaEvidenceStatus::Imported {
             stager
                 .record_replica(
                     manifest,
                     &node_id,
+                    &session_id,
                     &mission_id,
                     ReplicaEvidenceStatus::Staged,
                 )
                 .await?;
         }
         stager
-            .record_replica(manifest, &node_id, &mission_id, status)
+            .record_replica(manifest, &node_id, &session_id, &mission_id, status)
             .await?;
         Ok(())
     }
