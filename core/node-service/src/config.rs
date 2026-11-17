@@ -737,18 +737,30 @@ pub struct SensorConfig {
 }
 
 impl NodeServiceConfig {
-    /// Loads one strict versioned TOML document without performing filesystem validation.
+    /// Loads one strict versioned TOML document through bounded regular-file source admission.
     pub fn load(path: &Path) -> Result<Self, std::io::Error> {
-        let source = std::fs::read_to_string(path)?;
-        toml::from_str(&source)
+        let bytes =
+            crate::source_io::SourceBudget::new().read(path, crate::MAX_CONFIG_SOURCE_BYTES)?;
+        let source = std::str::from_utf8(&bytes)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        toml::from_str(source)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
     }
 
     /// Loads and compiles one immutable catalog relative to the configuration file.
     pub fn load_compiled(path: &Path) -> Result<CompiledLocalCatalog, CatalogError> {
-        let config = Self::load(path).map_err(CatalogError::Load)?;
+        let mut budget = crate::source_io::SourceBudget::new();
+        let bytes = budget
+            .read(path, crate::MAX_CONFIG_SOURCE_BYTES)
+            .map_err(CatalogError::Load)?;
+        let source = std::str::from_utf8(&bytes).map_err(|error| {
+            CatalogError::Load(std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+        })?;
+        let config = toml::from_str(source).map_err(|error| {
+            CatalogError::Load(std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+        })?;
         let directory = path.parent().unwrap_or_else(|| Path::new("."));
-        CompiledLocalCatalog::compile(config, directory)
+        CompiledLocalCatalog::compile_sources(config, directory, &mut budget, &mut BTreeMap::new())
     }
 }
 

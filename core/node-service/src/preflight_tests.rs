@@ -140,7 +140,7 @@ fn source_byte_boundary_is_exact_and_redacted() {
     source.push_str("\n#");
     source.extend(std::iter::repeat_n(
         'x',
-        MAX_CONFIG_BYTES as usize - source.len(),
+        crate::MAX_CONFIG_SOURCE_BYTES - source.len(),
     ));
     std::fs::write(&path, &source).unwrap();
     let preflight = NodePlanPreflight::load(std::slice::from_ref(&path)).unwrap();
@@ -494,7 +494,7 @@ fn refuses_unavailable_or_ambiguous_configuration_sources() {
     let missing = directory.path().join("missing.toml");
     assert!(NodePlanPreflight::load(&[missing]).is_err());
     let oversized = directory.path().join("oversized.toml");
-    std::fs::write(&oversized, vec![b' '; MAX_CONFIG_BYTES as usize + 1]).unwrap();
+    std::fs::write(&oversized, vec![b' '; crate::MAX_CONFIG_SOURCE_BYTES + 1]).unwrap();
     assert!(NodePlanPreflight::load(&[oversized]).is_err());
 }
 
@@ -697,4 +697,56 @@ spatial_anchor_id = "anchor"
     );
     std::fs::write(&path, source).unwrap();
     assert!(NodePlanPreflight::load(&[path]).is_err());
+}
+
+/// Complete receipts distinguish external bytes and directory resolution while remaining frozen.
+#[test]
+fn complete_source_receipts_bind_descriptors_and_resolution_base() {
+    use prost::Message;
+    let directory = tempfile::tempdir().unwrap();
+    let source = format!(
+        "{}\n[[connections]]\ndriver = \"grpc\"\nid = \"descriptor\"\nlocal_system = \"local-runtime\"\nendpoint = \"http://127.0.0.1:8200\"\ndescriptor_set = \"local.pb\"\nreflection = false\n",
+        include_str!("../../../config/node.toml")
+    );
+    let mut digests = Vec::new();
+    for base in ["a", "b"] {
+        let base = directory.path().join(base);
+        std::fs::create_dir(&base).unwrap();
+        let path = base.join("node.toml");
+        std::fs::write(&path, &source).unwrap();
+        for name in ["original.proto", "changed.proto"] {
+            let bytes = prost_types::FileDescriptorSet {
+                file: vec![prost_types::FileDescriptorProto {
+                    name: Some(name.into()),
+                    syntax: Some("proto3".into()),
+                    ..Default::default()
+                }],
+            }
+            .encode_to_vec();
+            std::fs::write(base.join("local.pb"), &bytes).unwrap();
+            let complete =
+                NodePlanPreflight::load_complete(std::slice::from_ref(&path), true).unwrap();
+            assert_eq!(complete.source_scope(), "declared-node-complete-sources");
+            let repeated =
+                NodePlanPreflight::load_complete(std::slice::from_ref(&path), false).unwrap();
+            assert_eq!(complete.source_digest(), repeated.source_digest());
+            assert_ne!(
+                complete.source_digest(),
+                NodePlanPreflight::load(std::slice::from_ref(&path))
+                    .unwrap()
+                    .source_digest()
+            );
+            digests.push(complete.source_digest().to_owned());
+            std::fs::remove_file(base.join("local.pb")).unwrap();
+            assert!(NodePlanPreflight::load_complete(std::slice::from_ref(&path), false).is_err());
+            assert_eq!(complete.source_digest(), repeated.source_digest());
+        }
+    }
+    assert_eq!(
+        digests
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        4
+    );
 }

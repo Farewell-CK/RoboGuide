@@ -208,11 +208,15 @@ async fn load_method(
     method_name: &str,
     configured_server_streaming: bool,
 ) -> Result<MethodDescriptor, DriverError> {
-    let bytes = tokio::fs::read(descriptor_path).await.map_err(|error| {
-        DriverError::InvalidResponse(format!(
-            "cannot read gRPC descriptor set `{}`: {error}",
-            descriptor_path.display()
-        ))
+    let descriptor_path = descriptor_path.to_path_buf();
+    let bytes = tokio::task::spawn_blocking(move || {
+        crate::source_io::SourceBudget::new()
+            .read(&descriptor_path, crate::MAX_DESCRIPTOR_SOURCE_BYTES)
+    })
+    .await
+    .map_err(|error| DriverError::InvalidResponse(error.to_string()))?
+    .map_err(|error| {
+        DriverError::InvalidResponse(format!("cannot read bounded gRPC descriptor set: {error}"))
     })?;
     let pool = DescriptorPool::decode(bytes.as_slice()).map_err(|error| {
         DriverError::InvalidResponse(format!("cannot decode gRPC descriptor set: {error}"))

@@ -14,6 +14,7 @@ from mission.deployment_assessment import plan_body_digest
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.plan_assessment import (
+    COMPLETE_NODE_PREFLIGHT_SCHEMA,
     LEGACY_SCHEMA,
     NODE_PREFLIGHT_SCHEMA,
     SCHEMA,
@@ -486,3 +487,36 @@ def test_prompts_share_lifetime_rule_and_keep_generic_semantics() -> None:
         assert "Adding a DAG edge" in text and "do not downgrade verification" in text
         assert "only for simultaneous Role demand within one Task" not in text
         assert "Episode98" not in text and "Episode64" not in text
+
+
+def test_complete_node_sources_require_explicit_version_and_scope() -> None:
+    """Old receipts cannot claim descriptor coverage by relabeling only their scope."""
+    plan = MissionPlan.from_json(_raw())
+    report = _report(plan)
+    report["schema_version"] = COMPLETE_NODE_PREFLIGHT_SCHEMA
+    source: JSONObject = {
+        "scope": "declared-node-complete-sources",
+        "source_digest": "sha256:" + "e" * 64,
+    }
+    report["node_preflight"] = source
+    validate_assessment(report, plan)
+    report["issues"] = [
+        {
+            "code": "node_preflight.operation_unsupported",
+            "path": "/tasks/0/roles/0/execution_intent/operation",
+            "message": "No supplied operation.",
+        }
+    ]
+    report["decision"] = "blocked"
+    with pytest.raises(PlanValidationError) as caught:
+        validate_assessment(report, plan)
+    assert caught.value.validation_errors[0]["node_preflight"] == source
+    for schema, scope in (
+        (NODE_PREFLIGHT_SCHEMA, "declared-node-complete-sources"),
+        (COMPLETE_NODE_PREFLIGHT_SCHEMA, "declared-node-configs"),
+    ):
+        invalid = copy.deepcopy(report)
+        invalid["schema_version"] = schema
+        invalid["node_preflight"] = {**source, "scope": scope}
+        with pytest.raises(ValueError, match="Node preflight source"):
+            validate_assessment(invalid, plan)

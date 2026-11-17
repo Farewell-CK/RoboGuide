@@ -7,8 +7,11 @@ pub(super) fn compile_connections(
     configs: Vec<ConnectionConfig>,
     systems: &BTreeMap<String, CompiledLocalSystem>,
     config_directory: &Path,
-) -> Result<BTreeMap<String, CompiledConnection>, CatalogError> {
+    budget: &mut crate::source_io::SourceBudget,
+    descriptor_sources: &mut BTreeMap<PathBuf, Vec<u8>>,
+) -> Result<CompilationConnections, CatalogError> {
     let mut connections = BTreeMap::new();
+    let mut descriptors = BTreeMap::new();
     for config in configs {
         validate_identity(config.id(), "connections.id")?;
         require(
@@ -65,21 +68,36 @@ pub(super) fn compile_connections(
                     format!("connections.{id}.descriptor_set"),
                     "configure exactly one descriptor_set or reflection=true",
                 )?;
-                let descriptor_set = descriptor_set
-                    .map(|path| resolve_path(config_directory, &path))
-                    .map(|path| {
-                        require(
-                            path.is_file(),
-                            format!("connections.{id}.descriptor_set"),
-                            format!("file `{}` does not exist", path.display()),
-                        )?;
-                        validate_descriptor_set(
-                            &path,
-                            &format!("connections.{id}.descriptor_set"),
-                        )?;
-                        Ok::<_, CatalogError>(path)
-                    })
-                    .transpose()?;
+                let descriptor_set =
+                    descriptor_set
+                        .map(|path| resolve_path(config_directory, &path))
+                        .map(|path| {
+                            if !descriptors.contains_key(&path) {
+                                let bytes =
+                                    if let Some(bytes) = descriptor_sources.get(&path) {
+                                        bytes.clone()
+                                    } else {
+                                        let bytes = budget
+                                    .read(&path, crate::MAX_DESCRIPTOR_SOURCE_BYTES)
+                                    .map_err(|error| validation(
+                                        format!("connections.{id}.descriptor_set"),
+                                        format!("cannot read bounded descriptor source: {error}"),
+                                    ))?;
+                                        descriptor_sources.insert(path.clone(), bytes.clone());
+                                        bytes
+                                    };
+                                let pool =
+                                    DescriptorPool::decode(bytes.as_slice()).map_err(|error| {
+                                        validation(
+                                            format!("connections.{id}.descriptor_set"),
+                                            format!("cannot decode gRPC descriptor set: {error}"),
+                                        )
+                                    })?;
+                                descriptors.insert(path.clone(), pool);
+                            }
+                            Ok::<_, CatalogError>(path)
+                        })
+                        .transpose()?;
                 let metadata =
                     compile_credentials(metadata, &format!("connections.{id}.metadata"))?;
                 let key = id.clone();
@@ -124,7 +142,10 @@ pub(super) fn compile_connections(
         };
         insert_unique(&mut connections, id, connection, "connections.id")?;
     }
-    Ok(connections)
+    Ok(CompilationConnections {
+        entries: connections,
+        descriptors,
+    })
 }
 
 /// Compiles unique resources and validates ownership and capacity.
@@ -212,7 +233,7 @@ pub(super) fn compile_capability_readiness(
     config: CapabilityReadinessConfig,
     contract: &str,
     owner: &str,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
 ) -> Result<CompiledCapabilityReadiness, CatalogError> {
     let field = format!("capabilities.{contract}.readiness");
     validate_step_sources(std::slice::from_ref(&config.step), false, &field)?;

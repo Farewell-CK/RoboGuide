@@ -29,7 +29,7 @@ pub(super) fn compile_local_systems(
 pub(super) fn compile_health_checks(
     configs: BTreeMap<String, HealthCheckConfig>,
     systems: &BTreeMap<String, CompiledLocalSystem>,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
 ) -> Result<BTreeMap<String, CompiledHealthCheck>, CatalogError> {
     let mut checks = BTreeMap::new();
     for (owner, config) in configs {
@@ -115,7 +115,7 @@ pub(super) fn compile_health_checks(
 pub(super) fn compile_state_exports(
     configs: Vec<StateExportConfig>,
     systems: &BTreeMap<String, CompiledLocalSystem>,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
 ) -> Result<BTreeMap<String, CompiledStateExport>, CatalogError> {
     let mut exports = BTreeMap::new();
     for config in configs {
@@ -206,7 +206,7 @@ pub(super) fn compile_state_exports(
 pub(super) fn compile_peer_channel_observers(
     configs: Vec<PeerChannelObserverConfig>,
     systems: &BTreeMap<String, CompiledLocalSystem>,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
 ) -> Result<BTreeMap<String, CompiledPeerChannelObserver>, CatalogError> {
     let mut observers = BTreeMap::new();
     let mut owners = BTreeSet::new();
@@ -309,7 +309,7 @@ pub(super) fn validate_read_only_observation_operation(
 pub(super) fn compile_memory_providers(
     configs: Vec<MemoryProviderConfig>,
     systems: &BTreeMap<String, CompiledLocalSystem>,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
     state_directory: &Path,
     supports_workflows: bool,
 ) -> Result<BTreeMap<String, CompiledMemoryProvider>, CatalogError> {
@@ -500,7 +500,7 @@ fn compile_memory_continuity(
     config: Option<MemoryContinuityConfig>,
     provider_id: &str,
     owner: &str,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
 ) -> Result<Option<CompiledMemoryContinuity>, CatalogError> {
     let Some(config) = config else {
         return Ok(None);
@@ -555,7 +555,7 @@ pub(super) fn compile_memory_workflow(
     config: Option<MemoryWorkflowConfig>,
     provider_id: &str,
     owner: &str,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
     operation: &str,
 ) -> Result<Option<CompiledMemoryWorkflow>, CatalogError> {
     let Some(config) = config else {
@@ -711,7 +711,7 @@ fn compile_memory_availability(
     config: Option<MemoryAvailabilityConfig>,
     provider_id: &str,
     owner: &str,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
 ) -> Result<Option<CompiledMemoryAvailability>, CatalogError> {
     let Some(config) = config else {
         return Ok(None);
@@ -757,7 +757,7 @@ fn compile_memory_availability(
 /// Resolves only a fixed HTTP-over-Unix connection, never a caller-selected or cross-host route.
 fn memory_use_endpoint(
     step: &CompiledWorkflowStep,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
 ) -> Result<String, CatalogError> {
     match connections.get(step.connection()) {
         Some(CompiledConnection::Http { endpoint, .. }) if endpoint.starts_with("unix://") => {
@@ -775,7 +775,7 @@ fn compile_memory_use(
     config: Option<MemoryUseConfig>,
     provider_id: &str,
     owner: &str,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
 ) -> Result<Option<CompiledMemoryUse>, CatalogError> {
     let Some(config) = config else {
         return Ok(None);

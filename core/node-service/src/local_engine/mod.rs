@@ -85,6 +85,23 @@ type CompiledLocalSystems = (
     BTreeMap<String, HealthCheckConfig>,
 );
 
+/// Transient compiler inputs; never included in catalog Debug or persisted workflow hashes.
+struct CompilationConnections {
+    /// Original fixed connection declarations.
+    entries: BTreeMap<String, CompiledConnection>,
+    /// One decoded snapshot per resolved descriptor path for this compilation.
+    descriptors: BTreeMap<PathBuf, DescriptorPool>,
+}
+
+impl std::ops::Deref for CompilationConnections {
+    type Target = BTreeMap<String, CompiledConnection>;
+
+    /// Retains ordinary connection lookup while keeping snapshot evidence transient.
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
 /// Immutable startup-validated local integration catalog.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledLocalCatalog {

@@ -14,6 +14,7 @@ from mission.models import JSONObject, MissionPlan
 from mission.plan_validation import MAX_PLAN_ISSUES, PlanValidationError
 
 SCHEMA = "roboguide.plan-validation/v0.2"
+COMPLETE_NODE_PREFLIGHT_SCHEMA = "roboguide.plan-validation/v0.4"
 NODE_PREFLIGHT_SCHEMA = "roboguide.plan-validation/v0.3"
 LEGACY_SCHEMA = "roboguide.plan-validation/v0.1"
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -73,12 +74,17 @@ def validate_assessment(
         "world_identity",
         "issues",
         "issues_truncated",
-    } | ({"execution_topology"} if schema in {SCHEMA, NODE_PREFLIGHT_SCHEMA} else set())
-    if schema == NODE_PREFLIGHT_SCHEMA:
+    } | (
+        {"execution_topology"}
+        if schema in {SCHEMA, NODE_PREFLIGHT_SCHEMA, COMPLETE_NODE_PREFLIGHT_SCHEMA}
+        else set()
+    )
+    if schema in {NODE_PREFLIGHT_SCHEMA, COMPLETE_NODE_PREFLIGHT_SCHEMA}:
         fields.add("node_preflight")
     if (
         set(value) != fields
-        or schema not in {SCHEMA, LEGACY_SCHEMA, NODE_PREFLIGHT_SCHEMA}
+        or schema
+        not in {SCHEMA, LEGACY_SCHEMA, NODE_PREFLIGHT_SCHEMA, COMPLETE_NODE_PREFLIGHT_SCHEMA}
         or value["scope"] != "published-contracts"
         or value["mission_id"] != plan.mission.mission_id
         or value["plan_body_sha256"] != plan_body_digest(plan)
@@ -86,10 +92,15 @@ def validate_assessment(
     ):
         raise ValueError("Controller plan assessment is invalid or detached")
     node_source = value.get("node_preflight")
-    if schema == NODE_PREFLIGHT_SCHEMA and (
+    if schema in {NODE_PREFLIGHT_SCHEMA, COMPLETE_NODE_PREFLIGHT_SCHEMA} and (
         not isinstance(node_source, dict)
         or set(node_source) != {"scope", "source_digest"}
-        or node_source["scope"] != "declared-node-configs"
+        or node_source["scope"]
+        != (
+            "declared-node-complete-sources"
+            if schema == COMPLETE_NODE_PREFLIGHT_SCHEMA
+            else "declared-node-configs"
+        )
         or not isinstance(node_source["source_digest"], str)
         or not _DIGEST.fullmatch(node_source["source_digest"])
     ):

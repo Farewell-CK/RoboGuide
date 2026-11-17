@@ -362,3 +362,44 @@ async fn private_node_preflight_rejects_mismatches_without_inventory_or_writes()
     );
     assert!(body(&legacy).get("node_preflight").is_none());
 }
+
+/// Complete source negotiation uses v0.4 and never changes the original checkpoint or event log.
+#[tokio::test]
+async fn complete_private_source_profile_has_distinct_http_receipt() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("node.toml");
+    std::fs::write(&path, include_str!("../../../../config/node.toml")).unwrap();
+    let preflight = node_service::NodePlanPreflight::load_complete(&[path], false).unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let live = controller(&log);
+    let before = server_checkpoint_json(&live.lock().unwrap()).unwrap();
+    let sequence = log.latest_sequence().unwrap();
+    let encoded = serde_json::to_vec(&plan(&[], false, 1, 1)).unwrap();
+    let reply = route_with_node_preflight(
+        &live,
+        &log,
+        &OperatorPrincipal::default(),
+        &request("POST", "/v1/missions/validate-plan", &encoded, None),
+        None,
+        None,
+        Some(&preflight),
+    )
+    .await;
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+    let report = body(&reply);
+    assert_eq!(report["schema_version"], "roboguide.plan-validation/v0.4");
+    assert_eq!(
+        report["node_preflight"]["scope"],
+        "declared-node-complete-sources"
+    );
+    assert_eq!(
+        report["node_preflight"]["source_digest"],
+        preflight.source_digest()
+    );
+    assert_eq!(
+        server_checkpoint_json(&live.lock().unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(log.latest_sequence().unwrap(), sequence);
+    assert_eq!(log.control_command_count().unwrap(), 0);
+}

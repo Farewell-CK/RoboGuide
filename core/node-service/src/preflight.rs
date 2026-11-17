@@ -6,13 +6,10 @@ use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::io::Read;
 use std::path::PathBuf;
 
 /// Maximum explicitly supplied Node configurations; this is not a discovered inventory.
 const MAX_CONFIGS: usize = 64;
-/// Maximum source bytes admitted from one private configuration.
-const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 /// Maximum diagnostics plus one sentinel for the caller's truncation projection.
 const MAX_ISSUES: usize = 33;
 
@@ -34,40 +31,67 @@ pub struct NodePlanPreflight {
     catalogs: Vec<CompiledLocalCatalog>,
     /// Hash of exact authored source bytes qualified by unique configured Node identity.
     digest: String,
+    /// Explicit source coverage; legacy TOML-only receipts never acquire broader meaning.
+    complete_sources: bool,
 }
 
 impl NodePlanPreflight {
     /// Reads bounded exact sources and compiles them without opening journals, sockets or workers.
     pub fn load(paths: &[PathBuf]) -> Result<Self, String> {
-        Self::load_with_conformance(paths, false)
+        Self::load_with_conformance(paths, false, false)
     }
 
     /// Retains every original `--validate` conformance gate when a CLI also supplies a plan.
     pub fn load_conformant(paths: &[PathBuf]) -> Result<Self, String> {
-        Self::load_with_conformance(paths, true)
+        Self::load_with_conformance(paths, true, false)
+    }
+
+    /// Explicit complete-source profile binding raw TOML, descriptor snapshots and resolution base.
+    pub fn load_complete(paths: &[PathBuf], conformant: bool) -> Result<Self, String> {
+        Self::load_with_conformance(paths, conformant, true)
     }
 
     /// Compiles one exact source snapshot and optionally applies the existing conformance policy.
-    fn load_with_conformance(paths: &[PathBuf], conformant: bool) -> Result<Self, String> {
+    fn load_with_conformance(
+        paths: &[PathBuf],
+        conformant: bool,
+        complete_sources: bool,
+    ) -> Result<Self, String> {
         if paths.is_empty() || paths.len() > MAX_CONFIGS {
             return Err("Node preflight requires 1..64 explicit configuration paths".into());
         }
         let mut sources = BTreeMap::new();
+        let mut complete_identity = BTreeMap::new();
+        let mut descriptors = BTreeMap::new();
+        let mut budget = crate::source_io::SourceBudget::new();
         for path in paths {
-            let mut bytes = Vec::new();
-            std::fs::File::open(path)
-                .and_then(|file| file.take(MAX_CONFIG_BYTES + 1).read_to_end(&mut bytes))
-                .map_err(|_| "Node preflight configuration cannot be read")?;
-            if bytes.len() as u64 > MAX_CONFIG_BYTES {
-                return Err("Node preflight configuration exceeds its byte bound".into());
-            }
+            let bytes = budget
+                .read(path, crate::MAX_CONFIG_SOURCE_BYTES)
+                .map_err(|_| "Node preflight configuration cannot be read within source bounds")?;
             let source = std::str::from_utf8(&bytes)
                 .map_err(|_| "Node preflight configuration must be UTF-8")?;
             let config: NodeServiceConfig = toml::from_str(source)
                 .map_err(|_| "Node preflight configuration cannot be decoded")?;
-            let catalog = CompiledLocalCatalog::compile(
+            let directory = path
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+                .unwrap_or_else(|| std::path::Path::new("."));
+            let directory = if complete_sources {
+                directory
+                    .canonicalize()
+                    .map_err(|_| "Node preflight resolution base cannot be resolved")?
+            } else {
+                directory.to_path_buf()
+            };
+            if directory.to_str().is_none() {
+                return Err("Node preflight resolution base must be UTF-8".into());
+            }
+            // A shared exact-path snapshot prevents catalogs from compiling different bytes.
+            let catalog = CompiledLocalCatalog::compile_sources(
                 config,
-                path.parent().unwrap_or_else(|| std::path::Path::new(".")),
+                &directory,
+                &mut budget,
+                &mut descriptors,
             )
             .map_err(|_| "Node preflight configuration failed production compilation")?;
             if conformant {
@@ -76,6 +100,37 @@ impl NodePlanPreflight {
             }
             let node_id = catalog.node_id().to_string();
             let digest = format!("sha256:{:x}", Sha256::digest(&bytes));
+            if complete_sources {
+                let descriptor_identity = catalog
+                    .connections()
+                    .values()
+                    .filter_map(|connection| {
+                        if let crate::CompiledConnection::Grpc {
+                            id,
+                            descriptor_set: Some(path),
+                            ..
+                        } = connection
+                        {
+                            let bytes = &descriptors[path];
+                            Some((
+                                id,
+                                path,
+                                bytes.len(),
+                                format!("sha256:{:x}", Sha256::digest(bytes)),
+                            ))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                complete_identity.insert(
+                    node_id.clone(),
+                    serde_json::json!({
+                        "toml": digest, "resolution_base": directory,
+                        "descriptors": descriptor_identity,
+                    }),
+                );
+            }
             if sources.insert(node_id, (digest, catalog)).is_some() {
                 return Err("Node preflight configuration identities must be unique".into());
             }
@@ -86,9 +141,18 @@ impl NodePlanPreflight {
             .collect::<Vec<_>>();
         let digest = format!(
             "sha256:{:x}",
-            Sha256::digest(serde_json::to_vec(&identity).expect("source identities serialize"))
+            Sha256::digest(if complete_sources {
+                serde_json::to_vec(&("complete-sources/v0.1", &complete_identity))
+                    .expect("complete identities serialize")
+            } else {
+                serde_json::to_vec(&identity).expect("source identities serialize")
+            })
         );
+        budget
+            .check()
+            .map_err(|_| "Node preflight compilation budget expired")?;
         Ok(Self {
+            complete_sources,
             catalogs: sources.into_values().map(|(_, catalog)| catalog).collect(),
             digest,
         })
@@ -97,6 +161,20 @@ impl NodePlanPreflight {
     /// Returns exact source provenance, without exposing source files or their private contents.
     pub fn source_digest(&self) -> &str {
         &self.digest
+    }
+
+    /// Returns the explicitly negotiated source scope, never a live Node attestation.
+    pub fn source_scope(&self) -> &'static str {
+        if self.complete_sources {
+            "declared-node-complete-sources"
+        } else {
+            "declared-node-configs"
+        }
+    }
+
+    /// Identifies the explicit complete snapshot profile without changing legacy receipt semantics.
+    pub fn complete_sources(&self) -> bool {
+        self.complete_sources
     }
 
     /// Checks each operation, concrete parameter source and resource contract on the same catalog.
@@ -186,8 +264,8 @@ impl NodePlanPreflight {
         let truncated = issues.len() > 32;
         issues.truncate(32);
         serde_json::json!({
-            "schema_version": "roboguide.node-plan-preflight/v0.1",
-            "scope": "declared-node-configs",
+            "schema_version": if self.complete_sources { "roboguide.node-plan-preflight/v0.2" } else { "roboguide.node-plan-preflight/v0.1" },
+            "scope": self.source_scope(),
             "source_digest": self.source_digest(),
             "plan_body_sha256": format!("sha256:{:x}", Sha256::digest(body)),
             "decision": if issues.is_empty() { "not_blocked" } else { "blocked" },

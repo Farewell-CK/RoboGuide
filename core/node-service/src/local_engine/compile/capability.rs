@@ -12,7 +12,7 @@ type CompiledCapabilityDeclarations = (
 pub(super) fn compile_legacy_capabilities(
     configs: Vec<CapabilityBindingConfig>,
     systems: &BTreeMap<String, CompiledLocalSystem>,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
     resources: &BTreeMap<String, CompiledResource>,
     supports_artifacts: bool,
     requires_readiness: bool,
@@ -126,7 +126,7 @@ pub(super) fn compile_legacy_capabilities(
 pub(super) fn compile_capability_profiles(
     configs: Vec<CapabilityProfileConfig>,
     systems: &BTreeMap<String, CompiledLocalSystem>,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
 ) -> Result<BTreeMap<String, CompiledCapabilityProfile>, CatalogError> {
     let mut profiles = BTreeMap::new();
     for config in configs {
@@ -207,7 +207,7 @@ pub(super) fn compile_capability_profiles(
 pub(super) fn compile_operations(
     configs: Vec<OperationBindingConfig>,
     systems: &BTreeMap<String, CompiledLocalSystem>,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
     resources: &BTreeMap<String, CompiledResource>,
     supports_artifacts: bool,
     supports_capacity: bool,

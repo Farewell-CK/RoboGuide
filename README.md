@@ -996,6 +996,18 @@ Memory import 的执行身份位于 invocation 元数据内，没有顶层 `/att
 按实际原始 attempt 上下文检查。详细覆盖表与未证明边界见下述决策记录。
 详情及边界见 [ADR-0255](docs/decisions/0255-private-node-plan-preflight.md)。
 
+如需同时绑定外部 descriptor 与配置相对路径的解析基目录，显式设置
+`ROBOGUIDE_NODE_PREFLIGHT_PROFILE=complete-sources/v0.1`，Controller 返回 v0.4；
+CLI 使用 `roboguide-node --validate <config> --plan <plan> --source-profile complete-sources/v0.1`。
+未指定 profile 时仍采用原 v0.3／CLI v0.1，未知 profile 拒绝降级。
+`core/node-service/src/source_io.rs` 统一限制配置／计划 1 MiB、descriptor 16 MiB，
+单次编译总量 256 MiB，使用原始 30 秒结果接纳预算并拒绝非普通文件；它不承诺内核 I/O 硬超时。
+编译器对同一路径只读取一次 descriptor，方法检查与摘要共用快照。
+`tools/quality/check_node_preflight_processes.py` 负责真实 CLI、mTLS Controller 与 SQL 无写入验收。
+这仍是显式声明的来源证明，不代表 live Node 配置身份或物理运行结果。
+详见 [ADR-0256](docs/decisions/0256-complete-node-preflight-sources.md)。
+
+
 ```bash
 cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:50051
 cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:50051 \

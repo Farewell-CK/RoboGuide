@@ -111,9 +111,14 @@ pub(crate) fn assess(
         "issues_truncated": truncated,
     });
     if let Some(preflight) = node_preflight {
-        result["schema_version"] = "roboguide.plan-validation/v0.3".into();
+        result["schema_version"] = if preflight.complete_sources() {
+            "roboguide.plan-validation/v0.4"
+        } else {
+            "roboguide.plan-validation/v0.3"
+        }
+        .into();
         result["node_preflight"] = serde_json::json!({
-            "scope": "declared-node-configs",
+            "scope": preflight.source_scope(),
             "source_digest": preflight.source_digest(),
         });
     }
@@ -123,13 +128,26 @@ pub(crate) fn assess(
 /// Loads only explicitly configured local declarations before the HTTP listener accepts requests.
 pub(crate) fn configured_node_preflight() -> Result<Option<node_service::NodePlanPreflight>, String>
 {
+    let complete = match std::env::var("ROBOGUIDE_NODE_PREFLIGHT_PROFILE") {
+        Ok(value) if value == "complete-sources/v0.1" => true,
+        Err(std::env::VarError::NotPresent) => false,
+        _ => return Err("unsupported ROBOGUIDE_NODE_PREFLIGHT_PROFILE".into()),
+    };
     match std::env::var("ROBOGUIDE_NODE_PREFLIGHT_CONFIGS") {
         Ok(value) => {
             let paths: Vec<PathBuf> = serde_json::from_str(&value)
                 .map_err(|_| "ROBOGUIDE_NODE_PREFLIGHT_CONFIGS must be a JSON array of paths")?;
-            node_service::NodePlanPreflight::load(&paths).map(Some)
+            if complete {
+                node_service::NodePlanPreflight::load_complete(&paths, false)
+            } else {
+                node_service::NodePlanPreflight::load(&paths)
+            }
+            .map(Some)
         }
-        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotPresent) if !complete => Ok(None),
+        Err(std::env::VarError::NotPresent) => {
+            Err("complete source profile requires explicit configuration paths".into())
+        }
         Err(_) => Err("ROBOGUIDE_NODE_PREFLIGHT_CONFIGS must be UTF-8".into()),
     }
 }

@@ -6,7 +6,7 @@ use super::*;
 pub(super) fn compile_workflow(
     config: WorkflowConfig,
     owner: &str,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
     semantic_invocation: bool,
     resource_grants: bool,
 ) -> Result<CompiledWorkflow, CatalogError> {
@@ -330,7 +330,7 @@ pub(super) fn escape_pointer_segment(value: &str) -> String {
 pub(super) fn compile_steps(
     configs: Vec<WorkflowStepConfig>,
     owner: &str,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
     step_ids: &mut BTreeSet<String>,
 ) -> Result<Vec<CompiledWorkflowStep>, CatalogError> {
     let mut steps = Vec::with_capacity(configs.len());
@@ -356,7 +356,12 @@ pub(super) fn compile_steps(
                 connection.owner()
             ),
         )?;
-        validate_operation(&config.operation, connection, &config.id)?;
+        validate_operation(
+            &config.operation,
+            connection,
+            &config.id,
+            &connections.descriptors,
+        )?;
         let request = CompiledRequestMapping::compile(config.request).map_err(|source| {
             CatalogError::Mapping {
                 step: config.id.clone(),
@@ -378,6 +383,7 @@ pub(super) fn validate_operation(
     operation: &LocalOperationConfig,
     connection: &CompiledConnection,
     step_id: &str,
+    descriptors: &BTreeMap<PathBuf, DescriptorPool>,
 ) -> Result<(), CatalogError> {
     let field = format!("workflow.{step_id}.operation");
     match (connection.driver_kind(), operation) {
@@ -408,7 +414,9 @@ pub(super) fn validate_operation(
             } = connection
             {
                 validate_grpc_method_descriptor(
-                    path,
+                    descriptors
+                        .get(path)
+                        .ok_or_else(|| validation(&field, "descriptor snapshot missing"))?,
                     service,
                     method,
                     matches!(operation, LocalOperationConfig::GrpcServerStream { .. }),
@@ -427,41 +435,14 @@ pub(super) fn validate_operation(
     }
 }
 
-/// Decodes one configured descriptor set before the node opens any local connection.
-pub(super) fn validate_descriptor_set(path: &Path, field: &str) -> Result<(), CatalogError> {
-    let bytes = std::fs::read(path)
-        .map_err(|error| validation(field, format!("cannot read `{}`: {error}", path.display())))?;
-    DescriptorPool::decode(bytes.as_slice()).map_err(|error| {
-        validation(
-            field,
-            format!(
-                "cannot decode gRPC descriptor set `{}`: {error}",
-                path.display()
-            ),
-        )
-    })?;
-    Ok(())
-}
-
 /// Confirms that one descriptor-backed gRPC workflow step names an exact method shape.
 pub(super) fn validate_grpc_method_descriptor(
-    path: &Path,
+    pool: &DescriptorPool,
     service_name: &str,
     method_name: &str,
     configured_server_streaming: bool,
     field: &str,
 ) -> Result<(), CatalogError> {
-    let bytes = std::fs::read(path)
-        .map_err(|error| validation(field, format!("cannot read `{}`: {error}", path.display())))?;
-    let pool = DescriptorPool::decode(bytes.as_slice()).map_err(|error| {
-        validation(
-            field,
-            format!(
-                "cannot decode gRPC descriptor set `{}`: {error}",
-                path.display()
-            ),
-        )
-    })?;
     let service = pool.get_service_by_name(service_name).ok_or_else(|| {
         validation(
             field,

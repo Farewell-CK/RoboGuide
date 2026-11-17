@@ -22,8 +22,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_or_else(|| PathBuf::from("config/node.toml"), PathBuf::from);
         let mut paths = vec![path.clone()];
         let mut plan_path = None;
+        let mut complete_sources = false;
         while let Some(flag) = arguments.next() {
             match flag.as_str() {
+                "--source-profile" if !complete_sources => {
+                    if arguments.next().as_deref() != Some("complete-sources/v0.1") {
+                        return Err("unsupported Node preflight source profile".into());
+                    }
+                    complete_sources = true;
+                }
                 "--plan" if plan_path.is_none() => {
                     plan_path = Some(arguments.next().ok_or("--plan requires a plan path")?);
                 }
@@ -36,16 +43,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         if let Some(plan_path) = plan_path {
-            let body = std::fs::read(plan_path)?;
+            let body = node_service::read_plan_source(std::path::Path::new(&plan_path))?;
             let plan = orchestration::decode_mission_plan(std::str::from_utf8(&body)?)?;
-            let preflight = NodePlanPreflight::load_conformant(&paths)?;
+            let preflight = if complete_sources {
+                NodePlanPreflight::load_complete(&paths, true)?
+            } else {
+                NodePlanPreflight::load_conformant(&paths)?
+            };
             let assessment = preflight.assess(&plan, &body);
             println!("{}", serde_json::to_string_pretty(&assessment)?);
             if assessment["decision"] == "blocked" {
                 return Err("Node plan preflight found incompatible plan fields".into());
             }
         } else {
-            if paths.len() > 1 {
+            if paths.len() > 1 || complete_sources {
                 return Err("additional --node-config inputs require --plan".into());
             }
             println!("{}", compile_extension_config_json(&path)?);
