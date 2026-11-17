@@ -2,6 +2,87 @@
 
 use super::*;
 
+/// Requires each operation's artifact paths to name one actual binding in its allowed direction.
+pub(super) fn validate_operation_artifacts(
+    operations: &BTreeMap<String, CompiledOperation>,
+    artifacts: Option<&CompiledArtifactService>,
+    providers: &BTreeMap<String, CompiledMemoryProvider>,
+) -> Result<(), CatalogError> {
+    for operation in operations.values() {
+        let field = format!("operations.{}.artifact_operation", operation.operation());
+        let owned_output = |binding: &ArtifactOutputBindingConfig| {
+            binding.producer_provider_id.as_ref().is_none_or(|id| {
+                providers
+                    .get(id)
+                    .is_some_and(|provider| provider.owner() == operation.owner())
+            })
+        };
+        if let Some(action) = operation.artifact_operation() {
+            require(
+                artifacts.is_some_and(|service| match action {
+                    crate::ArtifactOperationConfig::Import
+                    | crate::ArtifactOperationConfig::Verify => {
+                        !service.input_bindings().is_empty()
+                    }
+                    crate::ArtifactOperationConfig::PrepareOutput
+                    | crate::ArtifactOperationConfig::Publish => {
+                        service.output_bindings().values().any(owned_output)
+                    }
+                }),
+                &field,
+                "requires an Artifact service with bindings for the declared action",
+            )?;
+        }
+        let mut slots = BTreeSet::new();
+        for pointer in operation
+            .workflow()
+            .execute()
+            .iter()
+            .flat_map(CompiledWorkflowStep::source_pointers)
+        {
+            let (direction, id) = if let Some(id) = pointer.strip_prefix("/artifacts/inputs/") {
+                ("inputs", id)
+            } else if let Some(id) = pointer.strip_prefix("/artifacts/outputs/") {
+                ("outputs", id)
+            } else {
+                continue;
+            };
+            let id = id.replace("~1", "/").replace("~0", "~");
+            let valid = artifacts.is_some_and(|service| {
+                match (direction, operation.artifact_operation()) {
+                    (
+                        "inputs",
+                        Some(
+                            crate::ArtifactOperationConfig::Import
+                            | crate::ArtifactOperationConfig::Verify,
+                        ),
+                    ) => service.input_bindings().contains_key(&id),
+                    (
+                        "outputs",
+                        Some(
+                            crate::ArtifactOperationConfig::PrepareOutput
+                            | crate::ArtifactOperationConfig::Publish,
+                        ),
+                    ) => service.output_bindings().get(&id).is_some_and(owned_output),
+                    _ => false,
+                }
+            });
+            require(
+                valid,
+                &field,
+                format!("artifact mapping `{pointer}` has no matching action/binding"),
+            )?;
+            slots.insert(id);
+        }
+        require(
+            slots.len() <= 1,
+            field,
+            "one invocation can stage only one artifact slot",
+        )?;
+    }
+    Ok(())
+}
+
 /// Compiles optional artifact settings and rejects unsafe or ambiguous static bindings.
 pub(super) fn compile_artifacts(
     config: Option<ArtifactServiceConfig>,

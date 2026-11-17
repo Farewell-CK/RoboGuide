@@ -225,3 +225,181 @@ async fn published_plan_queries_keep_unknown_and_diagnostic_bounds_explicit() {
     assert_eq!(result["issues_truncated"], true);
     assert!(live.lock().unwrap().orchestrator.mission_ids().is_empty());
 }
+
+/// Private declarations add only source-bound diagnostics; queries never create live Node facts.
+#[tokio::test]
+async fn private_node_preflight_rejects_mismatches_without_inventory_or_writes() {
+    let directory = tempfile::tempdir().unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let path = directory.path().join("private-node.toml");
+    let source = include_str!("../../../../config/node.toml")
+        .replace("http://127.0.0.1:8081", &format!("http://{}",listener.local_addr().unwrap()))
+        .replace("generic-node", "private-node-identity")
+        .replace("compute.noop@v1", "object.relocate@v1")
+        .replace(
+            "kind = \"pointer\"\npointer = \"/invocation\"",
+            "kind = \"function\"\nfunction = \"to_integer\"\narguments = [{ kind = \"pointer\", pointer = \"/invocation/parameters/destination\" }]",
+        );
+    std::fs::write(&path, source).unwrap();
+    let preflight = node_service::NodePlanPreflight::load(std::slice::from_ref(&path)).unwrap();
+    let cli_preflight =
+        node_service::NodePlanPreflight::load_conformant(std::slice::from_ref(&path)).unwrap();
+    std::fs::remove_file(&path).unwrap(); // Every subsequent request must use the frozen catalog.
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let live = controller(&log);
+    let before = server_checkpoint_json(&live.lock().unwrap()).unwrap();
+    let sequence = log.latest_sequence().unwrap();
+    let viewer = OperatorPrincipal {
+        role: Some("viewer".into()),
+        ..Default::default()
+    };
+    let mut value = plan(&[], false, 1, 1);
+    for (resources, parameter, expected) in [
+        (
+            serde_json::json!([]),
+            Some("5"),
+            Some("node_preflight.resources_incompatible"),
+        ),
+        (
+            serde_json::json!([{"kind":"compute","units":1}]),
+            None,
+            Some("node_preflight.parameters_incompatible"),
+        ),
+        (
+            serde_json::json!([{"kind":"compute","units":1}]),
+            Some("not-a-number"),
+            Some("node_preflight.parameters_incompatible"),
+        ),
+        (
+            serde_json::json!([{"kind":"compute","units":1}]),
+            Some("5"),
+            None,
+        ),
+    ] {
+        value["tasks"][0]["roles"][0]["requirements"]["resources"] = resources;
+        value["tasks"][0]["roles"][0]["execution_intent"]["parameters"] =
+            if let Some(parameter) = parameter {
+                serde_json::json!({"destination":parameter})
+            } else {
+                serde_json::json!({"destinaton":"reception-1f"})
+            };
+        let encoded = serde_json::to_vec(&value).unwrap();
+        let reply = route_with_node_preflight(
+            &live,
+            &log,
+            &viewer,
+            &request("POST", "/v1/missions/validate-plan", &encoded, None),
+            None,
+            None,
+            Some(&preflight),
+        )
+        .await;
+        assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+        let result = body(&reply);
+        let decoded =
+            orchestration::decode_mission_plan(std::str::from_utf8(&encoded).unwrap()).unwrap();
+        let offline = cli_preflight.assess(&decoded, &encoded);
+        assert_eq!(result["decision"], offline["decision"]);
+        assert_eq!(result["issues"], offline["issues"]);
+        assert_eq!(result["plan_body_sha256"], offline["plan_body_sha256"]);
+        assert_eq!(
+            result["node_preflight"]["source_digest"],
+            offline["source_digest"]
+        );
+        assert_eq!(result["schema_version"], "roboguide.plan-validation/v0.3");
+        assert_eq!(
+            result["node_preflight"]["source_digest"],
+            preflight.source_digest()
+        );
+        assert_eq!(
+            result["decision"],
+            if expected.is_some() {
+                "blocked"
+            } else {
+                "not_blocked"
+            }
+        );
+        if let Some(code) = expected {
+            assert_eq!(result["issues"][0]["code"], code);
+        }
+        for private in [
+            "private-node-identity",
+            "compute-slot",
+            "local-runtime",
+            "127.0.0.1:8081",
+        ] {
+            assert!(!reply.contains(private), "{reply}");
+        }
+    }
+    assert_eq!(
+        server_checkpoint_json(&live.lock().unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(log.latest_sequence().unwrap(), sequence);
+    assert_eq!(log.control_command_count().unwrap(), 0);
+    assert!(!directory.path().join("node-state").exists());
+    assert!(!directory.path().join("artifact-cache").exists());
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    let legacy = route(
+        &live,
+        &log,
+        &viewer,
+        &request(
+            "POST",
+            "/v1/missions/validate-plan",
+            &serde_json::to_vec(&value).unwrap(),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        body(&legacy)["schema_version"],
+        "roboguide.plan-validation/v0.2"
+    );
+    assert!(body(&legacy).get("node_preflight").is_none());
+}
+
+/// Complete source negotiation uses v0.4 and never changes the original checkpoint or event log.
+#[tokio::test]
+async fn complete_private_source_profile_has_distinct_http_receipt() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("node.toml");
+    std::fs::write(&path, include_str!("../../../../config/node.toml")).unwrap();
+    let preflight = node_service::NodePlanPreflight::load_complete(&[path], false).unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let live = controller(&log);
+    let before = server_checkpoint_json(&live.lock().unwrap()).unwrap();
+    let sequence = log.latest_sequence().unwrap();
+    let encoded = serde_json::to_vec(&plan(&[], false, 1, 1)).unwrap();
+    let reply = route_with_node_preflight(
+        &live,
+        &log,
+        &OperatorPrincipal::default(),
+        &request("POST", "/v1/missions/validate-plan", &encoded, None),
+        None,
+        None,
+        Some(&preflight),
+    )
+    .await;
+    assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+    let report = body(&reply);
+    assert_eq!(report["schema_version"], "roboguide.plan-validation/v0.4");
+    assert_eq!(
+        report["node_preflight"]["scope"],
+        "declared-node-complete-sources"
+    );
+    assert_eq!(
+        report["node_preflight"]["source_digest"],
+        preflight.source_digest()
+    );
+    assert_eq!(
+        server_checkpoint_json(&live.lock().unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(log.latest_sequence().unwrap(), sequence);
+    assert_eq!(log.control_command_count().unwrap(), 0);
+}

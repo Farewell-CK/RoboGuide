@@ -77,19 +77,26 @@ pub(crate) fn issues(
     issues
 }
 
-/// Binds a bounded query result to exact bytes and startup-frozen source descriptors.
+/// Combines a scoped Controller read with private static checks after releasing its live lock.
 pub(crate) fn assess(
-    controller: &ControllerState,
+    mut issues: Vec<PlanIssue>,
     plan: &domain::MissionPlan,
-    tenant: &str,
     deployment: Option<&DeploymentFeasibility>,
     feed: Option<&TaskVerifierFeed>,
+    node_preflight: Option<&node_service::NodePlanPreflight>,
     body: &[u8],
 ) -> serde_json::Value {
-    let mut issues = issues(controller, plan, tenant, deployment, feed);
+    if let Some(preflight) = node_preflight {
+        issues.extend(
+            preflight
+                .issues(plan)
+                .into_iter()
+                .map(|issue| PlanIssue::new(issue.code, issue.path, issue.message)),
+        );
+    }
     let truncated = issues.len() > MAX_PLAN_ISSUES;
     issues.truncate(MAX_PLAN_ISSUES);
-    serde_json::json!({
+    let mut result = serde_json::json!({
         "schema_version": "roboguide.plan-validation/v0.2",
         "scope": "published-contracts",
         "mission_id": plan.goal().mission_id().as_str(),
@@ -102,5 +109,45 @@ pub(crate) fn assess(
         "execution_topology": deployment.and_then(DeploymentFeasibility::published_topology),
         "issues": issues,
         "issues_truncated": truncated,
-    })
+    });
+    if let Some(preflight) = node_preflight {
+        result["schema_version"] = if preflight.complete_sources() {
+            "roboguide.plan-validation/v0.4"
+        } else {
+            "roboguide.plan-validation/v0.3"
+        }
+        .into();
+        result["node_preflight"] = serde_json::json!({
+            "scope": preflight.source_scope(),
+            "source_digest": preflight.source_digest(),
+        });
+    }
+    result
+}
+
+/// Loads only explicitly configured local declarations before the HTTP listener accepts requests.
+pub(crate) fn configured_node_preflight() -> Result<Option<node_service::NodePlanPreflight>, String>
+{
+    let complete = match std::env::var("ROBOGUIDE_NODE_PREFLIGHT_PROFILE") {
+        Ok(value) if value == "complete-sources/v0.1" => true,
+        Err(std::env::VarError::NotPresent) => false,
+        _ => return Err("unsupported ROBOGUIDE_NODE_PREFLIGHT_PROFILE".into()),
+    };
+    match std::env::var("ROBOGUIDE_NODE_PREFLIGHT_CONFIGS") {
+        Ok(value) => {
+            let paths: Vec<PathBuf> = serde_json::from_str(&value)
+                .map_err(|_| "ROBOGUIDE_NODE_PREFLIGHT_CONFIGS must be a JSON array of paths")?;
+            if complete {
+                node_service::NodePlanPreflight::load_complete(&paths, false)
+            } else {
+                node_service::NodePlanPreflight::load(&paths)
+            }
+            .map(Some)
+        }
+        Err(std::env::VarError::NotPresent) if !complete => Ok(None),
+        Err(std::env::VarError::NotPresent) => {
+            Err("complete source profile requires explicit configuration paths".into())
+        }
+        Err(_) => Err("ROBOGUIDE_NODE_PREFLIGHT_CONFIGS must be UTF-8".into()),
+    }
 }

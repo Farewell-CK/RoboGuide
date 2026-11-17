@@ -13,7 +13,13 @@ from mission.controller import MissionControllerError
 from mission.deployment_assessment import plan_body_digest
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
-from mission.plan_assessment import LEGACY_SCHEMA, SCHEMA, validate_assessment
+from mission.plan_assessment import (
+    COMPLETE_NODE_PREFLIGHT_SCHEMA,
+    LEGACY_SCHEMA,
+    NODE_PREFLIGHT_SCHEMA,
+    SCHEMA,
+    validate_assessment,
+)
 from mission.plan_validation import MAX_PLAN_ISSUES, PlanValidationError, reference_issues
 from mission.provider_errors import MissionProviderError
 from mission.rejected_draft import (
@@ -98,11 +104,50 @@ def test_readonly_feedback_requires_exact_plan_and_frozen_sources() -> None:
         ("scope", "initial_static_world"),
         ("issues_truncated", True),
         ("unknown", "inventory"),
+        ("schema_version", {"invalid": "schema"}),
     ):
         raw = _report(plan)
-        raw[field] = value
+        raw[field] = cast(JSONValue, value)
         with pytest.raises(ValueError):
             validate_assessment(raw, plan, evidence)
+
+
+def test_private_node_assessment_keeps_versioned_source_and_diagnostics() -> None:
+    """Bind private checks to explicit sources without implying coverage in older replies."""
+    plan = MissionPlan.from_json(_raw())
+    report = _report(plan)
+    report["schema_version"] = NODE_PREFLIGHT_SCHEMA
+    source: JSONObject = {
+        "scope": "declared-node-configs",
+        "source_digest": "sha256:" + "e" * 64,
+    }
+    report["node_preflight"] = source
+    validate_assessment(report, plan)
+    report["issues"] = [
+        {
+            "code": "node_preflight.resources_incompatible",
+            "path": "/tasks/0/roles/0/requirements/resources",
+            "message": "The exact operation requires a resource demand absent from this plan.",
+        }
+    ]
+    report["decision"] = "blocked"
+    with pytest.raises(PlanValidationError) as caught:
+        validate_assessment(report, plan)
+    assert caught.value.validation_errors[0]["node_preflight"] == source
+    for invalid_source in (
+        None,
+        {},
+        {**source, "source_digest": "invalid"},
+        {**source, "node_id": "private"},
+    ):
+        invalid = copy.deepcopy(report)
+        invalid["node_preflight"] = cast(JSONValue, invalid_source)
+        with pytest.raises(ValueError, match="Node preflight source"):
+            validate_assessment(invalid, plan)
+    report["schema_version"] = SCHEMA
+    report.pop("node_preflight")
+    with pytest.raises(ValueError, match="issue is invalid"):
+        validate_assessment(report, plan)
 
 
 def test_legacy_assessment_cannot_erase_new_topology_requirements() -> None:
@@ -442,3 +487,36 @@ def test_prompts_share_lifetime_rule_and_keep_generic_semantics() -> None:
         assert "Adding a DAG edge" in text and "do not downgrade verification" in text
         assert "only for simultaneous Role demand within one Task" not in text
         assert "Episode98" not in text and "Episode64" not in text
+
+
+def test_complete_node_sources_require_explicit_version_and_scope() -> None:
+    """Old receipts cannot claim descriptor coverage by relabeling only their scope."""
+    plan = MissionPlan.from_json(_raw())
+    report = _report(plan)
+    report["schema_version"] = COMPLETE_NODE_PREFLIGHT_SCHEMA
+    source: JSONObject = {
+        "scope": "declared-node-complete-sources",
+        "source_digest": "sha256:" + "e" * 64,
+    }
+    report["node_preflight"] = source
+    validate_assessment(report, plan)
+    report["issues"] = [
+        {
+            "code": "node_preflight.operation_unsupported",
+            "path": "/tasks/0/roles/0/execution_intent/operation",
+            "message": "No supplied operation.",
+        }
+    ]
+    report["decision"] = "blocked"
+    with pytest.raises(PlanValidationError) as caught:
+        validate_assessment(report, plan)
+    assert caught.value.validation_errors[0]["node_preflight"] == source
+    for schema, scope in (
+        (NODE_PREFLIGHT_SCHEMA, "declared-node-complete-sources"),
+        (COMPLETE_NODE_PREFLIGHT_SCHEMA, "declared-node-configs"),
+    ):
+        invalid = copy.deepcopy(report)
+        invalid["schema_version"] = schema
+        invalid["node_preflight"] = {**source, "scope": scope}
+        with pytest.raises(ValueError, match="Node preflight source"):
+            validate_assessment(invalid, plan)

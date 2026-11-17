@@ -8,6 +8,17 @@ impl CompiledLocalCatalog {
         config: NodeServiceConfig,
         config_directory: &Path,
     ) -> Result<Self, CatalogError> {
+        let mut budget = crate::source_io::SourceBudget::new();
+        Self::compile_sources(config, config_directory, &mut budget, &mut BTreeMap::new())
+    }
+
+    /// Compiles from exactly acquired descriptor snapshots under the caller's original budget.
+    pub(crate) fn compile_sources(
+        config: NodeServiceConfig,
+        config_directory: &Path,
+        budget: &mut crate::source_io::SourceBudget,
+        descriptor_sources: &mut BTreeMap<PathBuf, Vec<u8>>,
+    ) -> Result<Self, CatalogError> {
         require(
             matches!(
                 config.schema.as_str(),
@@ -206,8 +217,13 @@ impl CompiledLocalCatalog {
             "local_systems.execution-safety",
             "generation-bound safety declarations require explicit node-config/v0.13",
         )?;
-        let connections =
-            compile_connections(config.connections, &local_systems, config_directory)?;
+        let connections = compile_connections(
+            config.connections,
+            &local_systems,
+            config_directory,
+            budget,
+            descriptor_sources,
+        )?;
         require(
             !connections.is_empty(),
             "connections",
@@ -298,6 +314,10 @@ impl CompiledLocalCatalog {
                 &connections,
                 &resources,
                 supports_artifacts,
+                matches!(
+                    config.schema.as_str(),
+                    CONFIG_SCHEMA_V0_14 | CONFIG_SCHEMA_V0_15
+                ),
             )?;
             (profiles, operations)
         } else {
@@ -399,6 +419,7 @@ impl CompiledLocalCatalog {
             format!("requires schema `{CONFIG_SCHEMA_V0_3}`"),
         )?;
         let artifacts = compile_artifacts(config.artifacts, config_directory)?;
+        validate_operation_artifacts(&operations, artifacts.as_ref(), &memory_providers)?;
         if let Some(service) = &artifacts {
             for binding in service.output_bindings().values() {
                 let provenance = binding
@@ -443,6 +464,7 @@ impl CompiledLocalCatalog {
             }
         }
 
+        budget.check().map_err(CatalogError::Load)?;
         Ok(Self {
             schema: config.schema,
             node_id: config.node_id,
@@ -451,7 +473,7 @@ impl CompiledLocalCatalog {
             state_directory,
             reconnect_delay_ms: config.reconnect_delay_ms,
             local_systems,
-            connections,
+            connections: connections.entries,
             health_checks,
             operations,
             capability_profiles,

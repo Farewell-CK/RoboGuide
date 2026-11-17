@@ -1956,6 +1956,9 @@ name = "roboguide-node"
 version = "0.1.0"
 dependencies = [
  "node-service",
+ "orchestration",
+ "serde_json",
+ "tempfile",
  "tokio",
 ]
 

@@ -34,6 +34,8 @@ mod observation;
 mod publication;
 mod validation;
 
+pub(crate) use validation::validate_artifact_invocation;
+#[cfg(test)]
 pub(crate) use validation::workflow_digest;
 use validation::*;
 

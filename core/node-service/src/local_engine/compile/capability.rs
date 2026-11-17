@@ -12,7 +12,7 @@ type CompiledCapabilityDeclarations = (
 pub(super) fn compile_legacy_capabilities(
     configs: Vec<CapabilityBindingConfig>,
     systems: &BTreeMap<String, CompiledLocalSystem>,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
     resources: &BTreeMap<String, CompiledResource>,
     supports_artifacts: bool,
     requires_readiness: bool,
@@ -85,7 +85,7 @@ pub(super) fn compile_legacy_capabilities(
                 )
             })
             .transpose()?;
-        let workflow = compile_workflow(config.workflow, &config.owner, connections)?;
+        let workflow = compile_workflow(config.workflow, &config.owner, connections, false, false)?;
         let contract = config.contract.clone();
         let operation = CompiledOperation {
             contract: config.contract,
@@ -126,7 +126,7 @@ pub(super) fn compile_legacy_capabilities(
 pub(super) fn compile_capability_profiles(
     configs: Vec<CapabilityProfileConfig>,
     systems: &BTreeMap<String, CompiledLocalSystem>,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
 ) -> Result<BTreeMap<String, CompiledCapabilityProfile>, CatalogError> {
     let mut profiles = BTreeMap::new();
     for config in configs {
@@ -207,9 +207,10 @@ pub(super) fn compile_capability_profiles(
 pub(super) fn compile_operations(
     configs: Vec<OperationBindingConfig>,
     systems: &BTreeMap<String, CompiledLocalSystem>,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
     resources: &BTreeMap<String, CompiledResource>,
     supports_artifacts: bool,
+    supports_capacity: bool,
 ) -> Result<BTreeMap<String, CompiledOperation>, CatalogError> {
     let mut operations = BTreeMap::new();
     for config in configs {
@@ -245,7 +246,13 @@ pub(super) fn compile_operations(
             format!("operations.{}.artifact_operation", config.operation),
             format!("requires schema `{CONFIG_SCHEMA_V0_3}`"),
         )?;
-        let workflow = compile_workflow(config.workflow, &config.owner, connections)?;
+        let workflow = compile_workflow(
+            config.workflow,
+            &config.owner,
+            connections,
+            true,
+            supports_capacity,
+        )?;
         let operation = config.operation.clone();
         insert_unique(
             &mut operations,

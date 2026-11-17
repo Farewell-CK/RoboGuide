@@ -383,6 +383,16 @@ fn gates_typed_capability_artifact_operations_by_schema() {
         ));
 
         config.schema = CONFIG_SCHEMA_V0_3.to_string();
+        assert!(
+            CompiledLocalCatalog::compile(config.clone(), directory.path()).is_err(),
+            "an Artifact action requires its actual configured data plane and binding"
+        );
+        config.artifacts = NodeServiceConfig::load(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../scenarios/distributed-spatial-memory-v0.1/dog-a-node-v0.1.toml"),
+        )
+        .unwrap()
+        .artifacts;
         let catalog = CompiledLocalCatalog::compile(config, directory.path())
             .expect("v0.3 artifact operation compiles");
         assert_eq!(

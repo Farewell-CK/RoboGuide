@@ -5,6 +5,9 @@ use serde_json::{Map, Number, Value};
 use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
 
+#[path = "mapping_preflight.rs"]
+mod preflight;
+
 /// Immutable, validated request mapping compiled at Node Service startup.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledRequestMapping {
@@ -90,10 +93,12 @@ impl CompiledRequestMapping {
                 value: binding.value,
             });
         }
-        Ok(Self {
+        let compiled = Self {
             base: config.base,
             bindings,
-        })
+        };
+        preflight::validate(&compiled, None)?;
+        Ok(compiled)
     }
 
     /// Renders a fresh request without allowing context to alter transport routing.
@@ -104,6 +109,67 @@ impl CompiledRequestMapping {
             set_pointer(&mut request, &binding.target, value)?;
         }
         Ok(request)
+    }
+
+    /// Checks known sources, pure conversions and target shapes without reading local responses.
+    pub(crate) fn invocation_sources_exist(&self, invocation: &Value) -> bool {
+        self.bindings
+            .iter()
+            .all(|binding| invocation_source_exists(&binding.value, invocation))
+            && preflight::validate(self, Some(invocation)).is_ok()
+    }
+
+    /// Returns only configured source paths, preserving nested function reads without values.
+    pub(crate) fn source_pointers(&self) -> Vec<&str> {
+        let mut pointers = Vec::new();
+        for binding in &self.bindings {
+            collect_source_pointers(&binding.value, &mut pointers);
+        }
+        pointers
+    }
+}
+
+/// Collects recursive source paths without exposing constants or modifying the expression tree.
+fn collect_source_pointers<'a>(expression: &'a ValueExpressionConfig, pointers: &mut Vec<&'a str>) {
+    match expression {
+        ValueExpressionConfig::Pointer { pointer } => pointers.push(pointer),
+        ValueExpressionConfig::Function { arguments, .. } => {
+            for argument in arguments {
+                collect_source_pointers(argument, pointers);
+            }
+        }
+        ValueExpressionConfig::Constant { .. } => {}
+    }
+}
+
+/// Recurses through mappings while keeping Control-generated bindings outside offline evidence.
+fn invocation_source_exists(expression: &ValueExpressionConfig, invocation: &Value) -> bool {
+    match expression {
+        ValueExpressionConfig::Pointer { pointer } => {
+            let Some(relative) = pointer.strip_prefix("/invocation/") else {
+                return true;
+            };
+            let field = relative.split('/').next().unwrap_or_default();
+            if field == "execution_generation" {
+                return true;
+            }
+            if field == "resource_grants" {
+                // The plan determines array length; Control alone supplies the actual grants.
+                let mut parts = relative.split('/');
+                parts.next();
+                return match parts.next() {
+                    Some(index) => invocation
+                        .pointer(&format!("/resource_grants/{index}"))
+                        .is_some(),
+                    None => invocation.get("resource_grants").is_some(),
+                };
+            }
+            invocation.pointer(&format!("/{relative}")).is_some()
+        }
+        ValueExpressionConfig::Function { arguments, .. } => arguments
+            .iter()
+            .all(|argument| invocation_source_exists(argument, invocation)),
+        ValueExpressionConfig::Constant { .. } => true,
     }
 }
 
@@ -239,18 +305,20 @@ fn apply_function(function: ValueFunction, value: Value) -> Result<Value, Mappin
         },
         ValueFunction::ToInteger => {
             let integer = match value {
-                Value::Number(number) => number
-                    .as_i64()
-                    .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok()))
-                    .or_else(|| {
+                Value::Number(number) => {
+                    if number.is_u64() || number.is_i64() {
+                        number.as_i64()
+                    } else {
                         number.as_f64().and_then(|value| {
                             (value.is_finite()
                                 && value.fract() == 0.0
                                 && value >= i64::MIN as f64
-                                && value <= i64::MAX as f64)
+                                // i64::MAX rounds up to 2^63 as f64; that endpoint is invalid.
+                                && value < -(i64::MIN as f64))
                                 .then_some(value as i64)
                         })
-                    }),
+                    }
+                }
                 Value::String(value) => value.parse::<i64>().ok(),
                 _ => None,
             }
@@ -418,6 +486,147 @@ mod tests {
     use super::*;
     use crate::{RequestBindingConfig, RequestMappingConfig};
 
+    /// Numeric target spellings alias on arrays, so opaque parents cannot retain conflicting facts.
+    #[test]
+    fn audit_numeric_aliases_do_not_reject_valid_dynamic_array() {
+        let config = RequestMappingConfig {
+            base: serde_json::json!({}),
+            bindings: vec![
+                RequestBindingConfig {
+                    target: "".into(),
+                    value: ValueExpressionConfig::Pointer {
+                        pointer: "/steps/source".into(),
+                    },
+                },
+                RequestBindingConfig {
+                    target: "/0".into(),
+                    value: ValueExpressionConfig::Constant {
+                        value: Value::Bool(true),
+                    },
+                },
+                RequestBindingConfig {
+                    target: "/00".into(),
+                    value: ValueExpressionConfig::Constant {
+                        value: serde_json::json!({}),
+                    },
+                },
+                RequestBindingConfig {
+                    target: "/0/child".into(),
+                    value: ValueExpressionConfig::Constant {
+                        value: Value::Bool(true),
+                    },
+                },
+            ],
+        };
+        let mapping =
+            CompiledRequestMapping::compile(config).expect("actual array completion is valid");
+        let mut context = WorkflowContext::new(serde_json::json!({}));
+        context
+            .record_step("source", serde_json::json!([null]))
+            .unwrap();
+        assert_eq!(
+            mapping.render(&context).unwrap(),
+            serde_json::json!([{"child":true}])
+        );
+    }
+
+    /// Fixed-seed concrete completions detect unsound rejections without treating samples as proof.
+    #[test]
+    fn bounded_partial_evaluation_agrees_with_concrete_completions() {
+        let targets = [
+            "",
+            "/a",
+            "/a/b",
+            "/0",
+            "/00",
+            "/+0",
+            "/-",
+            "/0/child",
+            "/00/child",
+            "/a~1b/~0",
+        ];
+        let values = [
+            serde_json::json!({}),
+            serde_json::json!([]),
+            serde_json::json!([{}, {}]),
+            serde_json::json!({"a":{}, "0":true, "00":{}}),
+            serde_json::json!(true),
+            serde_json::json!(null),
+        ];
+        let expressions = [
+            ValueExpressionConfig::Pointer {
+                pointer: "/steps/source".into(),
+            },
+            ValueExpressionConfig::Constant {
+                value: serde_json::json!({}),
+            },
+            ValueExpressionConfig::Constant {
+                value: serde_json::json!([{}, {}]),
+            },
+            ValueExpressionConfig::Constant {
+                value: Value::Bool(true),
+            },
+            ValueExpressionConfig::Function {
+                function: ValueFunction::ToString,
+                arguments: vec![ValueExpressionConfig::Pointer {
+                    pointer: "/steps/source".into(),
+                }],
+            },
+        ];
+        let mut seed = 0x0255_f00d_u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (seed >> 32) as usize
+        };
+        let mut rejected = 0;
+        let mut successful = 0;
+        for _ in 0..4096 {
+            let mut config = RequestMappingConfig {
+                base: values[next() % values.len()].clone(),
+                bindings: vec![],
+            };
+            let mut used = BTreeSet::new();
+            for _ in 0..(2 + next() % 4) {
+                let target = targets[next() % targets.len()];
+                if used.insert(target) {
+                    config.bindings.push(RequestBindingConfig {
+                        target: target.into(),
+                        value: expressions[next() % expressions.len()].clone(),
+                    });
+                }
+            }
+            let result = CompiledRequestMapping::compile(config.clone());
+            rejected += usize::from(result.is_err());
+            // Execute the original runtime renderer even for a statically rejected configuration.
+            let raw = CompiledRequestMapping {
+                base: config.base,
+                bindings: config
+                    .bindings
+                    .into_iter()
+                    .map(|binding| CompiledBinding {
+                        target: binding.target,
+                        value: binding.value,
+                    })
+                    .collect(),
+            };
+            for completion in &values {
+                let mut context = WorkflowContext::new(serde_json::json!({}));
+                context.record_step("source", completion.clone()).unwrap();
+                if raw.render(&context).is_ok() {
+                    successful += 1;
+                    assert!(
+                        result.is_ok(),
+                        "false rejection {result:?}, mapping={raw:?}, completion={completion}"
+                    );
+                }
+            }
+        }
+        assert!(rejected > 100 && successful > 100);
+        eprintln!(
+            "partial-evaluation configs=4096 completions=24576 rejected={rejected} successful-renders={successful}"
+        );
+    }
+
     /// Mapping supports prior step output and deterministic quaternion conversion.
     #[test]
     fn renders_multistep_pointer_and_quaternion() {
@@ -554,5 +763,186 @@ mod tests {
             arguments = []
         "#;
         assert!(toml::from_str::<RequestMappingConfig>(source).is_err());
+    }
+
+    /// Deterministically impossible targets must fail before any driver is invoked.
+    #[test]
+    fn preflight_audit_rejects_known_target_shape_conflicts() {
+        for (base, target) in [
+            (serde_json::json!({"items": []}), "/items/2"),
+            (serde_json::json!({"value": "scalar"}), "/value/child"),
+            (serde_json::json!(null), "/child"),
+        ] {
+            assert!(
+                CompiledRequestMapping::compile(RequestMappingConfig {
+                    base,
+                    bindings: vec![RequestBindingConfig {
+                        target: target.into(),
+                        value: ValueExpressionConfig::Constant {
+                            value: Value::Bool(true)
+                        },
+                    }],
+                })
+                .is_err(),
+                "{target}"
+            );
+        }
+    }
+
+    /// Pure conversions of constants are fully known at compilation, including integer overflow.
+    #[test]
+    fn preflight_audit_rejects_known_conversion_failures() {
+        for (function, value) in [
+            (ValueFunction::ToFloat, serde_json::json!("not-a-number")),
+            (ValueFunction::ToBoolean, serde_json::json!({"flag": true})),
+            (
+                ValueFunction::ToInteger,
+                serde_json::json!(9223372036854775808_u64),
+            ),
+        ] {
+            let mapping = CompiledRequestMapping::compile(RequestMappingConfig {
+                base: serde_json::json!({}),
+                bindings: vec![RequestBindingConfig {
+                    target: "/value".into(),
+                    value: ValueExpressionConfig::Function {
+                        function,
+                        arguments: vec![ValueExpressionConfig::Constant { value }],
+                    },
+                }],
+            });
+            assert!(mapping.is_err(), "{function:?}");
+        }
+    }
+
+    /// Ordered replacement, append, escaping and opaque response objects retain runtime behavior.
+    #[test]
+    fn partial_preflight_preserves_valid_ordered_and_dynamic_targets() {
+        let mapping = CompiledRequestMapping::compile(RequestMappingConfig {
+            base: serde_json::json!({"old": "scalar"}),
+            bindings: vec![
+                RequestBindingConfig {
+                    target: "".into(),
+                    value: ValueExpressionConfig::Constant {
+                        value: serde_json::json!({"items": [], "a/b": {}}),
+                    },
+                },
+                RequestBindingConfig {
+                    target: "/items/-".into(),
+                    value: ValueExpressionConfig::Constant {
+                        value: serde_json::json!({"value": 0}),
+                    },
+                },
+                RequestBindingConfig {
+                    target: "/items/0/value".into(),
+                    value: ValueExpressionConfig::Constant {
+                        value: serde_json::json!(5),
+                    },
+                },
+                RequestBindingConfig {
+                    target: "/a~1b/~0key".into(),
+                    value: ValueExpressionConfig::Pointer {
+                        pointer: "/steps/reply/object".into(),
+                    },
+                },
+                RequestBindingConfig {
+                    target: "/a~1b/~0key/child".into(),
+                    value: ValueExpressionConfig::Constant {
+                        value: serde_json::json!(true),
+                    },
+                },
+            ],
+        })
+        .unwrap();
+        let mut context = WorkflowContext::new(serde_json::json!({}));
+        context
+            .record_step("reply", serde_json::json!({"object": {"existing": 1}}))
+            .unwrap();
+        let rendered = mapping.render(&context).unwrap();
+        assert_eq!(
+            rendered.pointer("/items/0/value"),
+            Some(&serde_json::json!(5))
+        );
+        assert_eq!(
+            rendered.pointer("/a~1b/~0key/child"),
+            Some(&serde_json::json!(true))
+        );
+    }
+
+    /// Scalar-producing conversions cannot supply a parent for a later nested target.
+    #[test]
+    fn rejects_certain_late_target_conflict_after_unknown_conversion() {
+        assert!(
+            CompiledRequestMapping::compile(RequestMappingConfig {
+                base: serde_json::json!({}),
+                bindings: vec![
+                    RequestBindingConfig {
+                        target: "/parent".into(),
+                        value: ValueExpressionConfig::Function {
+                            function: ValueFunction::ToString,
+                            arguments: vec![ValueExpressionConfig::Pointer {
+                                pointer: "/steps/reply/value".into()
+                            }],
+                        }
+                    },
+                    RequestBindingConfig {
+                        target: "/parent/child".into(),
+                        value: ValueExpressionConfig::Constant {
+                            value: Value::Bool(true)
+                        }
+                    },
+                ],
+            })
+            .is_err()
+        );
+    }
+
+    /// Prior writes retain child shapes even when the original request is opaque.
+    #[test]
+    fn opaque_request_cannot_hide_later_certain_target_conflict() {
+        assert!(
+            CompiledRequestMapping::compile(RequestMappingConfig {
+                base: serde_json::json!({}),
+                bindings: vec![
+                    RequestBindingConfig {
+                        target: "".into(),
+                        value: ValueExpressionConfig::Pointer {
+                            pointer: "/steps/reply".into()
+                        }
+                    },
+                    RequestBindingConfig {
+                        target: "/parent".into(),
+                        value: ValueExpressionConfig::Constant {
+                            value: Value::Bool(true)
+                        }
+                    },
+                    RequestBindingConfig {
+                        target: "/parent/child".into(),
+                        value: ValueExpressionConfig::Constant {
+                            value: Value::Bool(true)
+                        }
+                    },
+                ],
+            })
+            .is_err()
+        );
+    }
+
+    /// Integer conversion refuses overflow instead of rounding or saturating to another integer.
+    #[test]
+    fn integer_conversion_keeps_exact_bounds() {
+        for value in [
+            serde_json::json!(9223372036854775808_u64),
+            serde_json::json!(9223372036854775808.0),
+            serde_json::json!(-9223372036854777856.0),
+        ] {
+            assert!(apply_function(ValueFunction::ToInteger, value).is_err());
+        }
+        for value in [
+            serde_json::json!(i64::MAX),
+            serde_json::json!(i64::MIN),
+            serde_json::json!(0.0),
+        ] {
+            assert!(apply_function(ValueFunction::ToInteger, value).is_ok());
+        }
     }
 }

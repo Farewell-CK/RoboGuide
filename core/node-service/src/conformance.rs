@@ -348,6 +348,14 @@ pub fn compile_extension_config(
     path: &Path,
 ) -> Result<ExtensionConformanceReport, ConformanceError> {
     let config = NodeServiceConfig::load_compiled(path).map_err(catalog_error)?;
+    validate_extension_catalog(&config)?;
+    Ok(report_for_catalog(path, &config))
+}
+
+/// Applies the CLI's original conformance gates to the same already compiled source bytes.
+pub(crate) fn validate_extension_catalog(
+    config: &CompiledLocalCatalog,
+) -> Result<(), ConformanceError> {
     if !matches!(
         config.schema(),
         crate::CONFIG_SCHEMA_V0_6 | crate::CONFIG_SCHEMA_V0_7
@@ -389,7 +397,7 @@ pub fn compile_extension_config(
                     .to_string(),
         }));
     }
-    Ok(report_for_catalog(path, &config))
+    Ok(())
 }
 
 /// Compiles one authored Node configuration and returns pretty JSON for CI or deployment tooling.

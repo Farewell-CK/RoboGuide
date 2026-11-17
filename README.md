@@ -1061,6 +1061,47 @@ cargo run -p roboguide-node -- --validate \
   scenarios/extension-conformance-v0.1/node.toml
 ```
 
+`--validate` 同时拒绝与 runtime 实际结构不符的 Pointer（例如
+`/invocation/intent/parameters/destination`；正确路径为
+`/invocation/parameters/destination`），并检查执行阶段、标量层级和旧/新 invocation 字段。
+提供具体计划后，还可离线检查参数名及 Node 私有必需资源与计划需求的兼容性：
+
+```bash
+cargo run -p roboguide-node -- --validate config/node.toml --plan mission-plan.json
+```
+
+异构计划可重复追加 `--node-config <另一份配置>`，检查范围是全部显式提供的配置集合。
+该模式保留普通 `--validate` 的完整 conformance 门禁。共享编译器还检查 request target
+与 `base`/前序赋值的结构、已知转换函数参数、Memory 流程上下文及结果的步骤引用和 Artifact 的
+action/方向/slot/selector/producer owner；临时结构分析由
+`core/node-service/src/local_engine/mapping_preflight.rs` 承担，未知运行时值仍留给实际门禁。
+
+Controller 启动前设置
+`ROBOGUIDE_NODE_PREFLIGHT_CONFIGS='["/absolute/node-a.toml","/absolute/node-b.toml"]'`，
+`/v1/missions/validate-plan` 将增加同一套检查，返回带私有来源摘要的
+`roboguide.plan-validation/v0.3`；未配置时保留 v0.2。
+这些声明由 `core/node-service/src/preflight.rs` 读取并复用生产编译器，
+只检查显式提供的配置，不探测 Node/设备，不建立候选或资源承诺。
+私有检查在 Controller 读取当前权限与发布合同后、释放其锁再执行。来源摘要仅绑定原始
+TOML 字节，不覆盖外部 gRPC descriptor、相对路径解析结果或 live Node 的配置身份。
+Memory import 的执行身份位于 invocation 元数据内，没有顶层 `/attempt_id`；availability/use
+按实际原始 attempt 上下文检查。详细覆盖表与未证明边界见下述决策记录。
+详情及边界见 [ADR-0255](docs/decisions/0255-private-node-plan-preflight.md)。
+
+如需同时绑定外部 descriptor 与配置相对路径的解析基目录，显式设置
+`ROBOGUIDE_NODE_PREFLIGHT_PROFILE=complete-sources/v0.1`，Controller 返回 v0.4；
+CLI 使用 `roboguide-node --validate <config> --plan <plan> --source-profile complete-sources/v0.1`。
+未指定 profile 时仍采用原 v0.3／CLI v0.1，未知 profile 拒绝降级。
+`core/node-service/src/source_io.rs` 统一限制配置／计划 1 MiB、descriptor 16 MiB，
+单次编译总量 256 MiB，使用原始 30 秒结果接纳预算并拒绝非普通文件；它不承诺内核 I/O 硬超时。
+编译器对同一路径只读取一次 descriptor，方法检查与摘要共用快照。
+运行时 descriptor 排队、读取、解码及后续 gRPC 等待保留原请求截止时间，过期时拒绝派发。
+旧 profile 和 CLI 保留 Unix 原生路径支持；完整来源 profile 才要求摘要中的路径可用 UTF-8 表示。
+`tools/quality/check_node_preflight_processes.py` 负责真实 CLI、mTLS Controller 与 SQL 无写入验收。
+这仍是显式声明的来源证明，不代表 live Node 配置身份或物理运行结果。
+详见 [ADR-0256](docs/decisions/0256-complete-node-preflight-sources.md)。
+
+
 ```bash
 cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:50051
 cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:50051 \

@@ -2356,6 +2356,29 @@ empty placeholders or a top-level `src/`.
 
 ## Build, Test, and Development Commands
 
+ADR-0256 adds opt-in `complete-sources/v0.1` private preflight evidence: Controller v0.4 and
+CLI node-plan-preflight v0.2 bind exact TOML, once-acquired descriptor bytes and the canonical
+resolution base. Legacy v0.3 retains TOML-only meaning. `core/node-service/src/source_io.rs`
+owns byte/type/original admission-time bounds; transient compiler descriptor pools never change
+catalog Debug or persistent workflow/Memory identities. `tools/quality/check_node_preflight_processes.py`
+owns actual CLI/mTLS/SQL software acceptance. These receipts do not attest live Node deployment,
+pin later runtime files, promise hard kernel-I/O cancellation or establish physical/cross-host facts.
+See `docs/decisions/0256-complete-node-preflight-sources.md`.
+
+ADR-0255 adds static canonical runtime-pointer shape/phase/generation checks to the production
+Node compiler. `core/node-service/src/preflight.rs` owns explicit private-config plan compatibility;
+`roboguide-node --validate <config> --plan <plan>` and Controller's optional startup
+`ROBOGUIDE_NODE_PREFLIGHT_CONFIGS` JSON path array share it. Opt-in plan-validation v0.3 retains
+exact plan/source digests and bounded logical diagnostics; absent private inputs retain v0.2 and
+grant no private coverage. Parameters and mandatory resources must fit the same supplied catalog.
+No inventory, writer, Node worker, reservation, public Node/checkpoint generation or physical fact
+is created. Actual submission and runtime gates remain independent. See ADR-0255.
+`local_engine/mapping_preflight.rs` validates transient target shapes and pure known conversions;
+opaque responses and original generated IDs/grants remain unknown. Memory named-result steps and
+Artifact action/direction/slot/selectors/producer ownership are checked against original declarations.
+Compiled catalog representation and original workflow/Memory digests remain unchanged. CLI plan
+mode retains the same original conformance gates as plain `--validate`.
+
 ADR-0109 adds the inventory-free, read-only Controller `POST /v1/missions/validate-plan`
 query (`roboguide.plan-validation/v0.2`, with explicit v0.1 read compatibility). The digest-bound
 execution-planning evidence v0.2 publishes supported modes, DAG/Context-relation support and

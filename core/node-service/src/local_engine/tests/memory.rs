@@ -2,6 +2,246 @@
 
 use super::*;
 
+/// Prepared import still uses `new`, so no configuration generation creates a top-level attempt.
+#[test]
+fn audit_prepared_import_cannot_read_absent_top_level_attempt() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = NodeServiceConfig::load(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml"),
+    )
+    .unwrap();
+    config.schema = CONFIG_SCHEMA_V0_10.into();
+    config.memory_providers[0].import = Some(MemoryWorkflowConfig {
+        steps: vec![WorkflowStepConfig {
+            id: "import".into(),
+            connection: "local-http".into(),
+            operation: LocalOperationConfig::Http {
+                method: "POST".into(),
+                path: "/memory/import".into(),
+            },
+            request: RequestMappingConfig {
+                base: serde_json::json!({}),
+                bindings: vec![RequestBindingConfig {
+                    target: "/attempt".into(),
+                    value: ValueExpressionConfig::Pointer {
+                        pointer: "/attempt_id".into(),
+                    },
+                }],
+            },
+        }],
+        manifests_pointer: None,
+        artifact_path_pointer: None,
+    });
+    assert!(CompiledLocalCatalog::compile(config, directory.path()).is_err());
+}
+
+/// Result pointers into unavailable root namespaces cannot be deferred to a backend response.
+#[test]
+fn audit_memory_results_refuse_unavailable_context_namespaces() {
+    let directory = tempfile::tempdir().unwrap();
+    for pointer in [
+        "/step/discover/result",
+        "/local_handle",
+        "/attempt_id",
+        "/artifacts/inputs/missing",
+    ] {
+        let mut config = NodeServiceConfig::load(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml"),
+        )
+        .unwrap();
+        config.memory_providers[0].discover = Some(MemoryWorkflowConfig {
+            steps: vec![WorkflowStepConfig {
+                id: "discover".into(),
+                connection: "local-http".into(),
+                operation: LocalOperationConfig::Http {
+                    method: "GET".into(),
+                    path: "/memory".into(),
+                },
+                request: RequestMappingConfig::default(),
+            }],
+            manifests_pointer: Some(pointer.into()),
+            artifact_path_pointer: None,
+        });
+        assert!(
+            CompiledLocalCatalog::compile(config, directory.path()).is_err(),
+            "{pointer}"
+        );
+    }
+}
+
+/// A result pointer cannot read an absent step or another phase's response.
+#[test]
+fn preflight_audit_rejects_memory_result_from_unconfigured_step() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = crate::NodeServiceConfig::load(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml"),
+    )
+    .unwrap();
+    config.memory_providers[0].discover = Some(MemoryWorkflowConfig {
+        steps: vec![WorkflowStepConfig {
+            id: "discover".into(),
+            connection: "local-http".into(),
+            operation: LocalOperationConfig::Http {
+                method: "GET".into(),
+                path: "/memory".into(),
+            },
+            request: RequestMappingConfig::default(),
+        }],
+        manifests_pointer: Some("/steps/misspelled/manifests".into()),
+        artifact_path_pointer: None,
+    });
+    assert!(CompiledLocalCatalog::compile(config, directory.path()).is_err());
+}
+
+/// Original import outcomes reference the exact import phase, including escaped step identities.
+#[test]
+fn memory_continuity_result_stays_in_original_import_workflow() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = NodeServiceConfig::load(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml"),
+    )
+    .unwrap();
+    config.schema = CONFIG_SCHEMA_V0_8.into();
+    let step = |id: &str, method: &str| WorkflowStepConfig {
+        id: id.into(),
+        connection: "local-http".into(),
+        operation: LocalOperationConfig::Http {
+            method: method.into(),
+            path: "/memory".into(),
+        },
+        request: RequestMappingConfig::default(),
+    };
+    config.memory_providers[0].import = Some(MemoryWorkflowConfig {
+        steps: vec![step("import/run~id", "POST")],
+        manifests_pointer: None,
+        artifact_path_pointer: None,
+    });
+    config.memory_providers[0].continuity = Some(MemoryContinuityConfig {
+        import_result_pointer: "/steps/import~1run~0id/result".into(),
+        instance: step("instance", "GET"),
+        instance_pointer: "/instance_id".into(),
+        query: step("query", "GET"),
+        result_pointer: "/result".into(),
+    });
+    CompiledLocalCatalog::compile(config.clone(), directory.path()).unwrap();
+    let mut invalid_query = config.clone();
+    invalid_query.memory_providers[0]
+        .continuity
+        .as_mut()
+        .unwrap()
+        .query
+        .request
+        .bindings
+        .push(RequestBindingConfig {
+            target: "/attempt".into(),
+            value: ValueExpressionConfig::Pointer {
+                pointer: "/attempt_id".into(),
+            },
+        });
+    let error = CompiledLocalCatalog::compile(invalid_query, directory.path()).unwrap_err();
+    assert!(error.to_string().contains("/attempt_id"));
+    for pointer in ["/steps/query/result", "/steps/import/result"] {
+        config.memory_providers[0]
+            .continuity
+            .as_mut()
+            .unwrap()
+            .import_result_pointer = pointer.into();
+        assert!(CompiledLocalCatalog::compile(config.clone(), directory.path()).is_err());
+    }
+}
+
+/// Discover/export/import carry invocation metadata but no top-level execution attempt.
+#[test]
+fn memory_workflow_sources_follow_actual_context() {
+    let directory = tempfile::tempdir().unwrap();
+    for (operation, pointer, allowed) in [
+        ("discover", "/attempt_id", false),
+        ("export", "/attempt_id", false),
+        ("import", "/attempt_id", false),
+        ("import", "/attempt_id/value", false),
+        ("import", "/artifacts/inputs/map", false),
+        ("discover", "/invocation/memory_query", true),
+        ("export", "/invocation/memory_manifest", true),
+        ("import", "/invocation/staged_artifact", true),
+    ] {
+        let mut config = NodeServiceConfig::load(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml"),
+        )
+        .unwrap();
+        let source = ValueExpressionConfig::Pointer {
+            pointer: pointer.into(),
+        };
+        let workflow = MemoryWorkflowConfig {
+            steps: vec![WorkflowStepConfig {
+                id: "memory-step".into(),
+                connection: "local-http".into(),
+                operation: LocalOperationConfig::Http {
+                    method: "POST".into(),
+                    path: "/memory".into(),
+                },
+                request: RequestMappingConfig {
+                    base: serde_json::json!({}),
+                    bindings: vec![RequestBindingConfig {
+                        target: "/value".into(),
+                        value: if matches!(
+                            pointer,
+                            "/invocation/memory_query" | "/invocation/memory_manifest"
+                        ) {
+                            source
+                        } else {
+                            ValueExpressionConfig::Function {
+                                function: crate::ValueFunction::ToString,
+                                arguments: vec![source],
+                            }
+                        },
+                    }],
+                },
+            }],
+            manifests_pointer: (operation == "discover")
+                .then(|| "/steps/memory-step/manifests".into()),
+            artifact_path_pointer: (operation == "export")
+                .then(|| "/steps/memory-step/path".into()),
+        };
+        match operation {
+            "discover" => config.memory_providers[0].discover = Some(workflow),
+            "export" => config.memory_providers[0].export = Some(workflow),
+            _ => config.memory_providers[0].import = Some(workflow),
+        }
+        assert_eq!(
+            CompiledLocalCatalog::compile(config, directory.path()).is_ok(),
+            allowed,
+            "{operation}: {pointer}"
+        );
+    }
+    let mut config = NodeServiceConfig::load(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml"),
+    )
+    .unwrap();
+    config.schema = CONFIG_SCHEMA_V0_10.into();
+    config.memory_providers[0].import = Some(MemoryWorkflowConfig {
+        steps: vec![WorkflowStepConfig {
+            id: "prepared-import".into(),
+            connection: "local-http".into(),
+            operation: LocalOperationConfig::Http {
+                method: "POST".into(),
+                path: "/memory/import".into(),
+            },
+            request: RequestMappingConfig {
+                base: serde_json::json!({}),
+                bindings: vec![RequestBindingConfig {
+                    target: "/attempt".into(),
+                    value: ValueExpressionConfig::Pointer {
+                        pointer: "/invocation/execution_id".into(),
+                    },
+                }],
+            },
+        }],
+        manifests_pointer: None,
+        artifact_path_pointer: None,
+    });
+    CompiledLocalCatalog::compile(config, directory.path()).unwrap();
+}
+
 /// Continuity requires explicit v0.8 negotiation and mechanically readonly fixed operations.
 #[test]
 fn memory_continuity_rejects_downgrade_and_mutating_identity_or_query() {

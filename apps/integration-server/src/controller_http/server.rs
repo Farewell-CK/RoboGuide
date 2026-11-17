@@ -589,6 +589,10 @@ pub(crate) async fn serve_http(
     deployment_feasibility: Option<Arc<DeploymentFeasibility>>,
     verifier_feed: Option<Arc<TaskVerifierFeed>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let node_preflight = application::run_synchronous_transaction(
+        application::plan_validation::configured_node_preflight,
+    )?
+    .map(Arc::new);
     let limit = super::network::parse_connection_limit(
         std::env::var("ROBOGUIDE_OPERATOR_CONNECTION_LIMIT")
             .ok()
@@ -635,6 +639,7 @@ pub(crate) async fn serve_http(
         let shared_clock = clock.clone();
         let shared_feasibility = deployment_feasibility.clone();
         let shared_verifier_feed = verifier_feed.clone();
+        let shared_node_preflight = node_preflight.clone();
         let operator_tls = operator_tls.clone();
         let local_principal = local_principal.clone();
         tokio::spawn(async move {
@@ -665,6 +670,7 @@ pub(crate) async fn serve_http(
                             shared_feasibility.as_deref(),
                             shared_verifier_feed.as_deref(),
                             &principal,
+                            shared_node_preflight.as_deref(),
                         )
                         .await
                     }
@@ -683,6 +689,7 @@ pub(crate) async fn serve_http(
                     shared_feasibility.as_deref(),
                     shared_verifier_feed.as_deref(),
                     &local_principal,
+                    shared_node_preflight.as_deref(),
                 )
                 .await
             };
@@ -715,6 +722,7 @@ pub(crate) async fn handle_http_connection<
         deployment_feasibility,
         verifier_feed,
         &OperatorPrincipal::default(),
+        None,
     )
     .await
 }
@@ -747,6 +755,7 @@ pub(crate) async fn handle_recovery_admin_test_connection<
             role: Some(RECOVERY_ADMIN_ROLE.into()),
             mtls: false,
         },
+        None,
     )
     .await
 }
@@ -762,6 +771,7 @@ async fn handle_http_connection_with_principal<S>(
     deployment_feasibility: Option<&DeploymentFeasibility>,
     verifier_feed: Option<&TaskVerifierFeed>,
     principal: &OperatorPrincipal,
+    node_preflight: Option<&node_service::NodePlanPreflight>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -775,6 +785,7 @@ where
         deployment_feasibility,
         verifier_feed,
         principal,
+        node_preflight,
     ))
     .await
 }
@@ -790,6 +801,7 @@ async fn apply_http_request<S>(
     deployment_feasibility: Option<&DeploymentFeasibility>,
     verifier_feed: Option<&TaskVerifierFeed>,
     principal: &OperatorPrincipal,
+    node_preflight: Option<&node_service::NodePlanPreflight>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -2509,18 +2521,27 @@ where
                         tenant.as_deref().unwrap_or("local"),
                     )
                     .map(|_| {
-                        application::plan_validation::assess(
+                        application::plan_validation::issues(
                             &live,
                             &plan,
                             tenant.as_deref().unwrap_or("local"),
                             current_deployment.as_deref(),
                             verifier_feed,
-                            &request.body,
                         )
                     })
             };
             match result {
-                Ok(result) => ("200 OK", result),
+                Ok(issues) => (
+                    "200 OK",
+                    application::plan_validation::assess(
+                        issues,
+                        &plan,
+                        deployment_feasibility,
+                        verifier_feed,
+                        node_preflight,
+                        &request.body,
+                    ),
+                ),
                 Err(error) => (
                     "403 Forbidden",
                     serde_json::json!({"error":error.to_string()}),

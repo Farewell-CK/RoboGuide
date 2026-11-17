@@ -196,6 +196,19 @@ async fn route_with_sources(
     deployment: Option<&DeploymentFeasibility>,
     feed: Option<&TaskVerifierFeed>,
 ) -> String {
+    route_with_node_preflight(controller, log, principal, bytes, deployment, feed, None).await
+}
+
+/// Runs the production handler with an explicitly compiled private declaration source.
+async fn route_with_node_preflight(
+    controller: &Arc<Mutex<ControllerState>>,
+    log: &state::SqliteEventLog,
+    principal: &OperatorPrincipal,
+    bytes: &[u8],
+    deployment: Option<&DeploymentFeasibility>,
+    feed: Option<&TaskVerifierFeed>,
+    node_preflight: Option<&node_service::NodePlanPreflight>,
+) -> String {
     let (mut client, mut server) = tokio::io::duplex(128 * 1024);
     let gate = Arc::new(crate::application::ApplicationWriter::default());
     let clock = runtime::SystemMonotonicClock::new();
@@ -209,6 +222,7 @@ async fn route_with_sources(
             deployment,
             feed,
             principal,
+            node_preflight,
         )
         .await
         .unwrap();
@@ -808,6 +822,7 @@ async fn actual_mtls_viewer_and_unmapped_certificate_cannot_submit() {
                         None,
                         None,
                         &principal,
+                        None,
                     )
                     .await
                     .unwrap();

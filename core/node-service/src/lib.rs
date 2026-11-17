@@ -15,7 +15,15 @@ mod engine;
 mod journal;
 mod local_engine;
 mod memory;
+mod preflight;
 mod service;
+mod source_io;
+
+pub use source_io::{
+    MAX_CONFIG_SOURCE_BYTES, MAX_DESCRIPTOR_SOURCE_BYTES, MAX_PLAN_SOURCE_BYTES, read_plan_source,
+};
+
+pub use preflight::{NodePlanIssue, NodePlanPreflight};
 
 pub use artifact::{
     ArtifactClient, ArtifactError, ArtifactManifestEnvelope, ArtifactOutput, ArtifactProvenance,

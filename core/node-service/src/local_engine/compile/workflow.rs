@@ -6,8 +6,13 @@ use super::*;
 pub(super) fn compile_workflow(
     config: WorkflowConfig,
     owner: &str,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
+    semantic_invocation: bool,
+    resource_grants: bool,
 ) -> Result<CompiledWorkflow, CatalogError> {
+    validate_runtime_sources(&config.execute, true, semantic_invocation, resource_grants)?;
+    validate_runtime_sources(&config.status, false, semantic_invocation, resource_grants)?;
+    validate_runtime_sources(&config.cancel, false, semantic_invocation, resource_grants)?;
     validate_expression(&config.local_handle).map_err(|source| CatalogError::Mapping {
         step: "local_handle".to_string(),
         source,
@@ -67,6 +72,134 @@ pub(super) fn compile_workflow(
         poll_interval_ms: config.poll_interval_ms,
         execution_state,
     })
+}
+
+/// Checks canonical runtime fields, leaving response contents and parameter names to their sources.
+fn validate_runtime_sources(
+    steps: &[WorkflowStepConfig],
+    execute: bool,
+    semantic_invocation: bool,
+    resource_grants: bool,
+) -> Result<(), CatalogError> {
+    for step in steps {
+        for binding in &step.request.bindings {
+            validate_runtime_expression(
+                &binding.value,
+                execute,
+                semantic_invocation,
+                resource_grants,
+            )
+            .map_err(|source| CatalogError::Mapping {
+                step: step.id.clone(),
+                source,
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// Rejects impossible canonical paths recursively, including pointers inside conversion functions.
+fn validate_runtime_expression(
+    expression: &crate::ValueExpressionConfig,
+    execute: bool,
+    semantic_invocation: bool,
+    resource_grants: bool,
+) -> Result<(), MappingError> {
+    match expression {
+        crate::ValueExpressionConfig::Pointer { pointer } => {
+            validate_pointer(pointer)?;
+            let tokens = pointer
+                .split('/')
+                .skip(1)
+                .map(|token| token.replace("~1", "/").replace("~0", "~"))
+                .collect::<Vec<_>>();
+            let parts = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+            let valid = match parts.as_slice() {
+                ["invocation"] => true,
+                ["invocation", "parameters", rest @ ..] => rest.len() <= 1,
+                ["invocation", "resource_ids", rest @ ..] => {
+                    rest.is_empty() || (rest.len() == 1 && runtime_array_index(rest[0]))
+                }
+                ["invocation", "resource_grants", rest @ ..] => {
+                    resource_grants
+                        && (rest.is_empty()
+                            || (runtime_array_index(rest[0]) && runtime_grant_path(&rest[1..])))
+                }
+                ["invocation", "operation" | "objective"] => semantic_invocation,
+                ["invocation", "capability_contract"] => !semantic_invocation,
+                ["invocation", field] => matches!(
+                    *field,
+                    "mission_id" | "task_id" | "group_id" | "role_id" | "execution_generation"
+                ),
+                ["invocation", ..] => false,
+                ["attempt_id"] => execute,
+                ["attempt_id", ..] => false,
+                ["local_handle"] => !execute,
+                ["local_handle", ..] => false,
+                ["artifacts"] | ["artifacts", "inputs" | "outputs"] => true,
+                ["artifacts", "inputs" | "outputs", _] => execute,
+                ["artifacts", ..] => false,
+                _ => true, // Ordered step availability is checked separately.
+            };
+            if !valid {
+                return Err(MappingError::MissingSource(format!(
+                    "{pointer} (not part of this phase's canonical runtime context)"
+                )));
+            }
+            Ok(())
+        }
+        crate::ValueExpressionConfig::Function { arguments, .. } => {
+            for argument in arguments {
+                validate_runtime_expression(
+                    argument,
+                    execute,
+                    semantic_invocation,
+                    resource_grants,
+                )?;
+            }
+            Ok(())
+        }
+        crate::ValueExpressionConfig::Constant { .. } => Ok(()),
+    }
+}
+
+/// Accepts the same nonnegative, non-padded array indices as serde_json source pointers.
+fn runtime_array_index(token: &str) -> bool {
+    !token.is_empty()
+        && !token.starts_with('+')
+        && (token == "0" || !token.starts_with('0'))
+        && token.parse::<usize>().is_ok()
+}
+
+/// Checks closed grant fields while leaving the original tagged owner variant to actual grants.
+fn runtime_grant_path(parts: &[&str]) -> bool {
+    match parts {
+        [] | ["owner"] | ["task_ref"] => true,
+        ["owner", "Task" | "Context"] => true,
+        ["owner", "Task", "mission_id" | "task_id"] => true,
+        [
+            "owner",
+            "Context",
+            "mission_id" | "context_id" | "context_role_id",
+        ] => true,
+        ["task_ref", "mission_id" | "task_id"] => true,
+        [field] => matches!(
+            *field,
+            "schema"
+                | "allocation_id"
+                | "generation"
+                | "resource_id"
+                | "resource_class"
+                | "node_id"
+                | "group_id"
+                | "tenant_id"
+                | "role_id"
+                | "units"
+                | "allocation_units"
+                | "admitted_capacity"
+        ),
+        _ => false,
+    }
 }
 
 /// Requires the durable local handle to derive from a completed execute response.
@@ -197,7 +330,7 @@ pub(super) fn escape_pointer_segment(value: &str) -> String {
 pub(super) fn compile_steps(
     configs: Vec<WorkflowStepConfig>,
     owner: &str,
-    connections: &BTreeMap<String, CompiledConnection>,
+    connections: &CompilationConnections,
     step_ids: &mut BTreeSet<String>,
 ) -> Result<Vec<CompiledWorkflowStep>, CatalogError> {
     let mut steps = Vec::with_capacity(configs.len());
@@ -223,7 +356,12 @@ pub(super) fn compile_steps(
                 connection.owner()
             ),
         )?;
-        validate_operation(&config.operation, connection, &config.id)?;
+        validate_operation(
+            &config.operation,
+            connection,
+            &config.id,
+            &connections.descriptors,
+        )?;
         let request = CompiledRequestMapping::compile(config.request).map_err(|source| {
             CatalogError::Mapping {
                 step: config.id.clone(),
@@ -245,6 +383,7 @@ pub(super) fn validate_operation(
     operation: &LocalOperationConfig,
     connection: &CompiledConnection,
     step_id: &str,
+    descriptors: &BTreeMap<PathBuf, DescriptorPool>,
 ) -> Result<(), CatalogError> {
     let field = format!("workflow.{step_id}.operation");
     match (connection.driver_kind(), operation) {
@@ -275,7 +414,9 @@ pub(super) fn validate_operation(
             } = connection
             {
                 validate_grpc_method_descriptor(
-                    path,
+                    descriptors
+                        .get(path)
+                        .ok_or_else(|| validation(&field, "descriptor snapshot missing"))?,
                     service,
                     method,
                     matches!(operation, LocalOperationConfig::GrpcServerStream { .. }),
@@ -294,41 +435,14 @@ pub(super) fn validate_operation(
     }
 }
 
-/// Decodes one configured descriptor set before the node opens any local connection.
-pub(super) fn validate_descriptor_set(path: &Path, field: &str) -> Result<(), CatalogError> {
-    let bytes = std::fs::read(path)
-        .map_err(|error| validation(field, format!("cannot read `{}`: {error}", path.display())))?;
-    DescriptorPool::decode(bytes.as_slice()).map_err(|error| {
-        validation(
-            field,
-            format!(
-                "cannot decode gRPC descriptor set `{}`: {error}",
-                path.display()
-            ),
-        )
-    })?;
-    Ok(())
-}
-
 /// Confirms that one descriptor-backed gRPC workflow step names an exact method shape.
 pub(super) fn validate_grpc_method_descriptor(
-    path: &Path,
+    pool: &DescriptorPool,
     service_name: &str,
     method_name: &str,
     configured_server_streaming: bool,
     field: &str,
 ) -> Result<(), CatalogError> {
-    let bytes = std::fs::read(path)
-        .map_err(|error| validation(field, format!("cannot read `{}`: {error}", path.display())))?;
-    let pool = DescriptorPool::decode(bytes.as_slice()).map_err(|error| {
-        validation(
-            field,
-            format!(
-                "cannot decode gRPC descriptor set `{}`: {error}",
-                path.display()
-            ),
-        )
-    })?;
     let service = pool.get_service_by_name(service_name).ok_or_else(|| {
         validation(
             field,
