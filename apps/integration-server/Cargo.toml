@@ -7,6 +7,7 @@ rust-version.workspace = true
 [dependencies]
 controller-replication = { path = "../../core/controller-replication" }
 integration = { path = "../../core/integration" }
+node-service = { path = "../../core/node-service" }
 artifact-store = { path = "../../core/artifact-store" }
 orchestration = { path = "../../core/orchestration" }
 control = { path = "../../core/control" }
@@ -29,5 +30,4 @@ tokio-stream = { version = "0.1", features = ["net"] }
 [dev-dependencies]
 testkit = { path = "../../core/testkit" }
 rusqlite = { version = "0.37", features = ["bundled"] }
-node-service = { path = "../../core/node-service" }
 tempfile = "3"

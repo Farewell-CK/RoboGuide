@@ -306,3 +306,125 @@ fn rejects_unavailable_workflow_sources() {
         Err(CatalogError::Validation { field, .. }) if field.contains("workflow.execute")
     ));
 }
+
+/// Canonical normalization is flat; wire intent objects and nested scalar fields do not exist.
+#[test]
+fn rejects_impossible_runtime_pointers_before_dispatch() {
+    let directory = tempfile::tempdir().unwrap();
+    for pointer in [
+        "/invocation/intent/parameters/destination",
+        "/invocation/execution_intent/parameters/destination",
+        "/invocation/paramaters/destination",
+        "/invocation/parameters/destination/x",
+        "/invocation/mission_id/value",
+        "/invocation/resource_ids/01",
+        "/invocation/resource_ids/-",
+        "/invocation/resource_grants/0/resorce_id",
+        "/invocation/resource_grants/0/units/value",
+        "/artifacts/input/map",
+    ] {
+        let mut config = valid_config(directory.path().join("unused.pb"));
+        config.capabilities[0].workflow.execute[0]
+            .request
+            .bindings
+            .push(RequestBindingConfig {
+                target: "/value".into(),
+                value: ValueExpressionConfig::Function {
+                    function: crate::ValueFunction::ToString,
+                    arguments: vec![ValueExpressionConfig::Pointer {
+                        pointer: pointer.into(),
+                    }],
+                },
+            });
+        let error = CompiledLocalCatalog::compile(config, directory.path()).unwrap_err();
+        assert!(error.to_string().contains(pointer), "{pointer}: {error}");
+    }
+}
+
+/// Status/cancel restore only a scalar handle, while attempt identity exists only during execute.
+#[test]
+fn runtime_sources_respect_phase_and_scalar_parameter_shape() {
+    let directory = tempfile::tempdir().unwrap();
+    for (phase, pointer, allowed) in [
+        (
+            "execute",
+            "/invocation/parameters/destination~1frame~0name",
+            true,
+        ),
+        ("execute", "/invocation/resource_ids/0", true),
+        (
+            "execute",
+            "/invocation/resource_grants/0/resource_class",
+            false,
+        ),
+        ("execute", "/attempt_id", true),
+        ("status", "/local_handle", true),
+        ("cancel", "/local_handle", true),
+        ("status", "/attempt_id", false),
+        ("cancel", "/attempt_id", false),
+        ("status", "/local_handle/id", false),
+        ("cancel", "/artifacts/outputs/map", false),
+    ] {
+        let mut config = valid_config(directory.path().join("unused.pb"));
+        let workflow = &mut config.capabilities[0].workflow;
+        let steps = match phase {
+            "execute" => &mut workflow.execute,
+            "status" => &mut workflow.status,
+            _ => &mut workflow.cancel,
+        };
+        steps[0].request.bindings.push(RequestBindingConfig {
+            target: "/value".into(),
+            value: ValueExpressionConfig::Pointer {
+                pointer: pointer.into(),
+            },
+        });
+        assert_eq!(
+            CompiledLocalCatalog::compile(config, directory.path()).is_ok(),
+            allowed,
+            "{phase}: {pointer}"
+        );
+    }
+}
+
+/// Old combined contracts cannot read new semantic fields; new mappings cannot read legacy fields.
+#[test]
+fn runtime_pointers_follow_negotiated_invocation_generation() {
+    let directory = tempfile::tempdir().unwrap();
+    for (modern, pointer, allowed) in [
+        (false, "/invocation/capability_contract", true),
+        (false, "/invocation/operation", false),
+        (false, "/invocation/objective", false),
+        (true, "/invocation/capability_contract", false),
+        (true, "/invocation/operation", true),
+        (true, "/invocation/objective", true),
+    ] {
+        let mut config = if modern {
+            crate::NodeServiceConfig::load(
+                &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml"),
+            )
+            .unwrap()
+        } else {
+            valid_config(directory.path().join("unused.pb"))
+        };
+        let workflow = if modern {
+            &mut config.operations[0].workflow
+        } else {
+            &mut config.capabilities[0].workflow
+        };
+        workflow.execute[0].request.bindings.clear();
+        workflow.execute[0]
+            .request
+            .bindings
+            .push(RequestBindingConfig {
+                target: "/value".into(),
+                value: ValueExpressionConfig::Pointer {
+                    pointer: pointer.into(),
+                },
+            });
+        assert_eq!(
+            CompiledLocalCatalog::compile(config, directory.path()).is_ok(),
+            allowed,
+            "modern={modern} {pointer}"
+        );
+    }
+}

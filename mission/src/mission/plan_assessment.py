@@ -14,6 +14,7 @@ from mission.models import JSONObject, MissionPlan
 from mission.plan_validation import MAX_PLAN_ISSUES, PlanValidationError
 
 SCHEMA = "roboguide.plan-validation/v0.2"
+NODE_PREFLIGHT_SCHEMA = "roboguide.plan-validation/v0.3"
 LEGACY_SCHEMA = "roboguide.plan-validation/v0.1"
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _CODES = {
@@ -40,6 +41,11 @@ _CODES = {
     "verifier.retained_capacity_exceeded",
     "verifier.retained_placement_unavailable",
 }
+_NODE_CODES = {
+    "node_preflight.operation_unsupported",
+    "node_preflight.parameters_incompatible",
+    "node_preflight.resources_incompatible",
+}
 
 
 def validate_assessment(
@@ -53,6 +59,8 @@ def validate_assessment(
     defect. PlanValidationError means the exact checked draft has known issues.
     """
     schema = value.get("schema_version")
+    if not isinstance(schema, str):
+        raise ValueError("Controller plan assessment is invalid or detached")
     fields = {
         "schema_version",
         "scope",
@@ -65,17 +73,27 @@ def validate_assessment(
         "world_identity",
         "issues",
         "issues_truncated",
-    } | ({"execution_topology"} if schema == SCHEMA else set())
+    } | ({"execution_topology"} if schema in {SCHEMA, NODE_PREFLIGHT_SCHEMA} else set())
+    if schema == NODE_PREFLIGHT_SCHEMA:
+        fields.add("node_preflight")
     if (
         set(value) != fields
-        or not isinstance(schema, str)
-        or schema not in {SCHEMA, LEGACY_SCHEMA}
+        or schema not in {SCHEMA, LEGACY_SCHEMA, NODE_PREFLIGHT_SCHEMA}
         or value["scope"] != "published-contracts"
         or value["mission_id"] != plan.mission.mission_id
         or value["plan_body_sha256"] != plan_body_digest(plan)
         or type(value["issues_truncated"]) is not bool
     ):
         raise ValueError("Controller plan assessment is invalid or detached")
+    node_source = value.get("node_preflight")
+    if schema == NODE_PREFLIGHT_SCHEMA and (
+        not isinstance(node_source, dict)
+        or set(node_source) != {"scope", "source_digest"}
+        or node_source["scope"] != "declared-node-configs"
+        or not isinstance(node_source["source_digest"], str)
+        or not _DIGEST.fullmatch(node_source["source_digest"])
+    ):
+        raise ValueError("Controller Node preflight source is invalid")
     topology = value.get("execution_topology")
     if topology is not None:
         validate_execution_topology(topology)
@@ -120,7 +138,7 @@ def validate_assessment(
             not isinstance(issue, dict)
             or set(issue) != {"code", "path", "message"}
             or not isinstance(issue["code"], str)
-            or issue["code"] not in _CODES
+            or issue["code"] not in (_CODES | _NODE_CODES if node_source else _CODES)
             or not isinstance(issue["path"], str)
             or not issue["path"].startswith("/")
             or len(issue["path"]) > 1024
@@ -143,6 +161,7 @@ def validate_assessment(
                     "verifier_source_digest": value["verifier_source_digest"],
                     "deployment_digest": value["deployment_digest"],
                     "issues_truncated": value["issues_truncated"],
+                    **({"node_preflight": node_source} if node_source else {}),
                 }
                 for issue in issues
             ]

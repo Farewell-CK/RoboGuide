@@ -2074,6 +2074,15 @@ empty placeholders or a top-level `src/`.
 
 ## Build, Test, and Development Commands
 
+ADR-0255 adds static canonical runtime-pointer shape/phase/generation checks to the production
+Node compiler. `core/node-service/src/preflight.rs` owns explicit private-config plan compatibility;
+`roboguide-node --validate <config> --plan <plan>` and Controller's optional startup
+`ROBOGUIDE_NODE_PREFLIGHT_CONFIGS` JSON path array share it. Opt-in plan-validation v0.3 retains
+exact plan/source digests and bounded logical diagnostics; absent private inputs retain v0.2 and
+grant no private coverage. Parameters and mandatory resources must fit the same supplied catalog.
+No inventory, writer, Node worker, reservation, public Node/checkpoint generation or physical fact
+is created. Actual submission and runtime gates remain independent. See ADR-0255.
+
 ADR-0109 adds the inventory-free, read-only Controller `POST /v1/missions/validate-plan`
 query (`roboguide.plan-validation/v0.2`, with explicit v0.1 read compatibility). The digest-bound
 execution-planning evidence v0.2 publishes supported modes, DAG/Context-relation support and

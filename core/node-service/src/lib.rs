@@ -15,7 +15,10 @@ mod engine;
 mod journal;
 mod local_engine;
 mod memory;
+mod preflight;
 mod service;
+
+pub use preflight::{NodePlanIssue, NodePlanPreflight};
 
 pub use artifact::{
     ArtifactClient, ArtifactError, ArtifactManifestEnvelope, ArtifactOutput, ArtifactProvenance,

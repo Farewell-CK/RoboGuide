@@ -85,7 +85,7 @@ pub(super) fn compile_legacy_capabilities(
                 )
             })
             .transpose()?;
-        let workflow = compile_workflow(config.workflow, &config.owner, connections)?;
+        let workflow = compile_workflow(config.workflow, &config.owner, connections, false, false)?;
         let contract = config.contract.clone();
         let operation = CompiledOperation {
             contract: config.contract,
@@ -210,6 +210,7 @@ pub(super) fn compile_operations(
     connections: &BTreeMap<String, CompiledConnection>,
     resources: &BTreeMap<String, CompiledResource>,
     supports_artifacts: bool,
+    supports_capacity: bool,
 ) -> Result<BTreeMap<String, CompiledOperation>, CatalogError> {
     let mut operations = BTreeMap::new();
     for config in configs {
@@ -245,7 +246,13 @@ pub(super) fn compile_operations(
             format!("operations.{}.artifact_operation", config.operation),
             format!("requires schema `{CONFIG_SCHEMA_V0_3}`"),
         )?;
-        let workflow = compile_workflow(config.workflow, &config.owner, connections)?;
+        let workflow = compile_workflow(
+            config.workflow,
+            &config.owner,
+            connections,
+            true,
+            supports_capacity,
+        )?;
         let operation = config.operation.clone();
         insert_unique(
             &mut operations,

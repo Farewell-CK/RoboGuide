@@ -5,8 +5,8 @@
 //! Single, configuration-driven RoboGuide Node Service process.
 
 use node_service::{
-    GrpcDriver, HttpDriver, LocalDriver, LocalIntegrationEngine, McpDriver, NodeService,
-    NodeServiceConfig, compile_extension_config_json,
+    GrpcDriver, HttpDriver, LocalDriver, LocalIntegrationEngine, McpDriver, NodePlanPreflight,
+    NodeService, NodeServiceConfig, compile_extension_config_json,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,7 +20,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let path = arguments
             .next()
             .map_or_else(|| PathBuf::from("config/node.toml"), PathBuf::from);
-        println!("{}", compile_extension_config_json(&path)?);
+        let mut paths = vec![path.clone()];
+        let mut plan_path = None;
+        while let Some(flag) = arguments.next() {
+            match flag.as_str() {
+                "--plan" if plan_path.is_none() => {
+                    plan_path = Some(arguments.next().ok_or("--plan requires a plan path")?);
+                }
+                "--node-config" => paths.push(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or("--node-config requires a config path")?,
+                )),
+                _ => return Err("expected one --plan and optional --node-config paths".into()),
+            }
+        }
+        if let Some(plan_path) = plan_path {
+            let body = std::fs::read(plan_path)?;
+            let plan = orchestration::decode_mission_plan(std::str::from_utf8(&body)?)?;
+            let preflight = NodePlanPreflight::load(&paths)?;
+            let assessment = preflight.assess(&plan, &body);
+            println!("{}", serde_json::to_string_pretty(&assessment)?);
+            if assessment["decision"] == "blocked" {
+                return Err("Node plan preflight found incompatible plan fields".into());
+            }
+        } else {
+            if paths.len() > 1 {
+                return Err("additional --node-config inputs require --plan".into());
+            }
+            println!("{}", compile_extension_config_json(&path)?);
+        }
         return Ok(());
     }
     let path = first.map_or_else(|| PathBuf::from("config/node.toml"), PathBuf::from);

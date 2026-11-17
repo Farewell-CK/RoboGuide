@@ -240,6 +240,11 @@ impl CompiledWorkflow {
 }
 
 impl CompiledWorkflowStep {
+    /// Checks concrete plan-owned sources without invoking this step or selecting resources.
+    pub(crate) fn invocation_sources_exist(&self, invocation: &serde_json::Value) -> bool {
+        self.request.invocation_sources_exist(invocation)
+    }
+
     /// Returns the stable workflow-local step identity.
     pub fn id(&self) -> &str {
         &self.id

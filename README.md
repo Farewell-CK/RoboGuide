@@ -969,6 +969,25 @@ cargo run -p roboguide-node -- --validate \
   scenarios/extension-conformance-v0.1/node.toml
 ```
 
+`--validate` 同时拒绝与 runtime 实际结构不符的 Pointer（例如
+`/invocation/intent/parameters/destination`；正确路径为
+`/invocation/parameters/destination`），并检查执行阶段、标量层级和旧/新 invocation 字段。
+提供具体计划后，还可离线检查参数名及 Node 私有必需资源与计划需求的兼容性：
+
+```bash
+cargo run -p roboguide-node -- --validate config/node.toml --plan mission-plan.json
+```
+
+异构计划可重复追加 `--node-config <另一份配置>`，检查范围是全部显式提供的配置集合。
+
+Controller 启动前设置
+`ROBOGUIDE_NODE_PREFLIGHT_CONFIGS='["/absolute/node-a.toml","/absolute/node-b.toml"]'`，
+`/v1/missions/validate-plan` 将增加同一套检查，返回带私有来源摘要的
+`roboguide.plan-validation/v0.3`；未配置时保留 v0.2。
+这些声明由 `core/node-service/src/preflight.rs` 读取并复用生产编译器，
+只检查显式提供的配置，不探测 Node/设备，不建立候选或资源承诺。
+详情及边界见 [ADR-0255](docs/decisions/0255-private-node-plan-preflight.md)。
+
 ```bash
 cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:50051
 cargo run -p real-node-smoke -- --endpoint http://127.0.0.1:50051 \

@@ -298,6 +298,10 @@ impl CompiledLocalCatalog {
                 &connections,
                 &resources,
                 supports_artifacts,
+                matches!(
+                    config.schema.as_str(),
+                    CONFIG_SCHEMA_V0_14 | CONFIG_SCHEMA_V0_15
+                ),
             )?;
             (profiles, operations)
         } else {

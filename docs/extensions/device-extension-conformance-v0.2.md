@@ -76,6 +76,15 @@ cargo run -p roboguide-node -- --validate \
 Failure diagnostics use `capability_profiles.<contract>`, `operations.<operation>`, connection, and
 workflow-step paths. The report retains legacy `capabilities` only when compiling a v0.6 source.
 
+The production compiler also checks canonical runtime pointer shape, phase and negotiated
+invocation generation. For example, semantic parameters are read from
+`/invocation/parameters/destination`; `/invocation/intent/parameters/destination` is invalid.
+Concrete parameter names and private required-resource coverage can additionally be checked with
+`roboguide-node --validate node.toml --plan mission-plan.json`. This emits the separate
+`roboguide.node-plan-preflight/v0.1` report and exits nonzero on incompatibility, without starting a
+journal, driver or worker. See [ADR-0255](../decisions/0255-private-node-plan-preflight.md) for the
+optional Controller integration and limits of this declared-config check.
+
 ## Deferred evidence ingress
 
 Verifier evidence does not enter Node Contract v0.6. A future generic evidence-ingress slice may

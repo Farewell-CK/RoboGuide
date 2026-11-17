@@ -105,6 +105,44 @@ impl CompiledRequestMapping {
         }
         Ok(request)
     }
+
+    /// Checks only plan-known invocation sources, without evaluating local responses or effects.
+    pub(crate) fn invocation_sources_exist(&self, invocation: &Value) -> bool {
+        self.bindings
+            .iter()
+            .all(|binding| invocation_source_exists(&binding.value, invocation))
+    }
+}
+
+/// Recurses through mappings while keeping Control-generated bindings outside offline evidence.
+fn invocation_source_exists(expression: &ValueExpressionConfig, invocation: &Value) -> bool {
+    match expression {
+        ValueExpressionConfig::Pointer { pointer } => {
+            let Some(relative) = pointer.strip_prefix("/invocation/") else {
+                return true;
+            };
+            let field = relative.split('/').next().unwrap_or_default();
+            if field == "execution_generation" {
+                return true;
+            }
+            if field == "resource_grants" {
+                // The plan determines array length; Control alone supplies the actual grants.
+                let mut parts = relative.split('/');
+                parts.next();
+                return match parts.next() {
+                    Some(index) => invocation
+                        .pointer(&format!("/resource_grants/{index}"))
+                        .is_some(),
+                    None => invocation.get("resource_grants").is_some(),
+                };
+            }
+            invocation.pointer(&format!("/{relative}")).is_some()
+        }
+        ValueExpressionConfig::Function { arguments, .. } => arguments
+            .iter()
+            .all(|argument| invocation_source_exists(argument, invocation)),
+        ValueExpressionConfig::Constant { .. } => true,
+    }
 }
 
 impl WorkflowContext {

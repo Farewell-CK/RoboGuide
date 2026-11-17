@@ -225,3 +225,114 @@ async fn published_plan_queries_keep_unknown_and_diagnostic_bounds_explicit() {
     assert_eq!(result["issues_truncated"], true);
     assert!(live.lock().unwrap().orchestrator.mission_ids().is_empty());
 }
+
+/// Private declarations add only source-bound diagnostics; queries never create live Node facts.
+#[tokio::test]
+async fn private_node_preflight_rejects_mismatches_without_inventory_or_writes() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("private-node.toml");
+    let source = include_str!("../../../../config/node.toml")
+        .replace("generic-node", "private-node-identity")
+        .replace("compute.noop@v1", "object.relocate@v1")
+        .replace(
+            "pointer = \"/invocation\"",
+            "pointer = \"/invocation/parameters/destination\"",
+        );
+    std::fs::write(&path, source).unwrap();
+    let preflight = node_service::NodePlanPreflight::load(&[path]).unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let live = controller(&log);
+    let before = server_checkpoint_json(&live.lock().unwrap()).unwrap();
+    let sequence = log.latest_sequence().unwrap();
+    let viewer = OperatorPrincipal {
+        role: Some("viewer".into()),
+        ..Default::default()
+    };
+    let mut value = plan(&[], false, 1, 1);
+    for (resources, parameter, expected) in [
+        (
+            serde_json::json!([]),
+            true,
+            Some("node_preflight.resources_incompatible"),
+        ),
+        (
+            serde_json::json!([{"kind":"compute","units":1}]),
+            false,
+            Some("node_preflight.parameters_incompatible"),
+        ),
+        (
+            serde_json::json!([{"kind":"compute","units":1}]),
+            true,
+            None,
+        ),
+    ] {
+        value["tasks"][0]["roles"][0]["requirements"]["resources"] = resources;
+        value["tasks"][0]["roles"][0]["execution_intent"]["parameters"] = if parameter {
+            serde_json::json!({"destination":"reception-1f"})
+        } else {
+            serde_json::json!({"destinaton":"reception-1f"})
+        };
+        let encoded = serde_json::to_vec(&value).unwrap();
+        let reply = route_with_node_preflight(
+            &live,
+            &log,
+            &viewer,
+            &request("POST", "/v1/missions/validate-plan", &encoded, None),
+            None,
+            None,
+            Some(&preflight),
+        )
+        .await;
+        assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+        let result = body(&reply);
+        assert_eq!(result["schema_version"], "roboguide.plan-validation/v0.3");
+        assert_eq!(
+            result["node_preflight"]["source_digest"],
+            preflight.source_digest()
+        );
+        assert_eq!(
+            result["decision"],
+            if expected.is_some() {
+                "blocked"
+            } else {
+                "not_blocked"
+            }
+        );
+        if let Some(code) = expected {
+            assert_eq!(result["issues"][0]["code"], code);
+        }
+        for private in [
+            "private-node-identity",
+            "compute-slot",
+            "local-runtime",
+            "127.0.0.1:8081",
+        ] {
+            assert!(!reply.contains(private), "{reply}");
+        }
+    }
+    assert_eq!(
+        server_checkpoint_json(&live.lock().unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(log.latest_sequence().unwrap(), sequence);
+    assert_eq!(log.control_command_count().unwrap(), 0);
+    assert!(!directory.path().join("node-state").exists());
+    assert!(!directory.path().join("artifact-cache").exists());
+    let legacy = route(
+        &live,
+        &log,
+        &viewer,
+        &request(
+            "POST",
+            "/v1/missions/validate-plan",
+            &serde_json::to_vec(&value).unwrap(),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(
+        body(&legacy)["schema_version"],
+        "roboguide.plan-validation/v0.2"
+    );
+    assert!(body(&legacy).get("node_preflight").is_none());
+}
