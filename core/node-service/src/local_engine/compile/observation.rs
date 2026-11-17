@@ -312,7 +312,6 @@ pub(super) fn compile_memory_providers(
     connections: &BTreeMap<String, CompiledConnection>,
     state_directory: &Path,
     supports_workflows: bool,
-    supports_preparation: bool,
 ) -> Result<BTreeMap<String, CompiledMemoryProvider>, CatalogError> {
     let mut providers = BTreeMap::new();
     let mut storage_roots: BTreeSet<PathBuf> = BTreeSet::new();
@@ -386,7 +385,6 @@ pub(super) fn compile_memory_providers(
             &config.owner,
             connections,
             "discover",
-            false,
         )?;
         let export = compile_memory_workflow(
             config.export,
@@ -394,7 +392,6 @@ pub(super) fn compile_memory_providers(
             &config.owner,
             connections,
             "export",
-            false,
         )?;
         let import = compile_memory_workflow(
             config.import,
@@ -402,7 +399,6 @@ pub(super) fn compile_memory_providers(
             &config.owner,
             connections,
             "import",
-            supports_preparation,
         )?;
         require(
             config.visibility != "exchangeable"
@@ -561,7 +557,6 @@ pub(super) fn compile_memory_workflow(
     owner: &str,
     connections: &BTreeMap<String, CompiledConnection>,
     operation: &str,
-    attempt_available: bool,
 ) -> Result<Option<CompiledMemoryWorkflow>, CatalogError> {
     let Some(config) = config else {
         return Ok(None);
@@ -579,7 +574,7 @@ pub(super) fn compile_memory_workflow(
     let steps = compile_steps(config.steps, owner, connections, &mut BTreeSet::new())?;
     validate_memory_context_sources(
         &steps,
-        attempt_available,
+        false,
         &format!("memory_providers.{provider_id}.{operation}.steps"),
     )?;
     if let Some(pointer) = &config.manifests_pointer {
@@ -668,7 +663,7 @@ fn validate_memory_result_source(
     field: &str,
 ) -> Result<(), CatalogError> {
     require(
-        !pointer.starts_with("/steps/")
+        pointer.starts_with("/invocation/")
             || steps
                 .iter()
                 .any(|step| pointer_targets_step(pointer, step.id())),

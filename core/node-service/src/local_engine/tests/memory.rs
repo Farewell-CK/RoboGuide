@@ -2,6 +2,73 @@
 
 use super::*;
 
+/// Prepared import still uses `new`, so no configuration generation creates a top-level attempt.
+#[test]
+fn audit_prepared_import_cannot_read_absent_top_level_attempt() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = NodeServiceConfig::load(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml"),
+    )
+    .unwrap();
+    config.schema = CONFIG_SCHEMA_V0_10.into();
+    config.memory_providers[0].import = Some(MemoryWorkflowConfig {
+        steps: vec![WorkflowStepConfig {
+            id: "import".into(),
+            connection: "local-http".into(),
+            operation: LocalOperationConfig::Http {
+                method: "POST".into(),
+                path: "/memory/import".into(),
+            },
+            request: RequestMappingConfig {
+                base: serde_json::json!({}),
+                bindings: vec![RequestBindingConfig {
+                    target: "/attempt".into(),
+                    value: ValueExpressionConfig::Pointer {
+                        pointer: "/attempt_id".into(),
+                    },
+                }],
+            },
+        }],
+        manifests_pointer: None,
+        artifact_path_pointer: None,
+    });
+    assert!(CompiledLocalCatalog::compile(config, directory.path()).is_err());
+}
+
+/// Result pointers into unavailable root namespaces cannot be deferred to a backend response.
+#[test]
+fn audit_memory_results_refuse_unavailable_context_namespaces() {
+    let directory = tempfile::tempdir().unwrap();
+    for pointer in [
+        "/step/discover/result",
+        "/local_handle",
+        "/attempt_id",
+        "/artifacts/inputs/missing",
+    ] {
+        let mut config = NodeServiceConfig::load(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/node.toml"),
+        )
+        .unwrap();
+        config.memory_providers[0].discover = Some(MemoryWorkflowConfig {
+            steps: vec![WorkflowStepConfig {
+                id: "discover".into(),
+                connection: "local-http".into(),
+                operation: LocalOperationConfig::Http {
+                    method: "GET".into(),
+                    path: "/memory".into(),
+                },
+                request: RequestMappingConfig::default(),
+            }],
+            manifests_pointer: Some(pointer.into()),
+            artifact_path_pointer: None,
+        });
+        assert!(
+            CompiledLocalCatalog::compile(config, directory.path()).is_err(),
+            "{pointer}"
+        );
+    }
+}
+
 /// A result pointer cannot read an absent step or another phase's response.
 #[test]
 fn preflight_audit_rejects_memory_result_from_unconfigured_step() {
@@ -83,7 +150,7 @@ fn memory_continuity_result_stays_in_original_import_workflow() {
     }
 }
 
-/// Discovery/export have no execution attempt; import may use the original prepared-attempt context.
+/// Discover/export/import carry invocation metadata but no top-level execution attempt.
 #[test]
 fn memory_workflow_sources_follow_actual_context() {
     let directory = tempfile::tempdir().unwrap();
@@ -164,7 +231,7 @@ fn memory_workflow_sources_follow_actual_context() {
                 bindings: vec![RequestBindingConfig {
                     target: "/attempt".into(),
                     value: ValueExpressionConfig::Pointer {
-                        pointer: "/attempt_id".into(),
+                        pointer: "/invocation/execution_id".into(),
                     },
                 }],
             },

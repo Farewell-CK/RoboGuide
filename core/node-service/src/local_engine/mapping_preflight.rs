@@ -91,9 +91,7 @@ impl StaticJson {
         let mut current = self;
         for token in &tokens[..tokens.len() - 1] {
             current = match current {
-                Self::Unknown(children) => {
-                    children.entry(token.clone()).or_insert_with(Self::unknown)
-                }
+                Self::Unknown(children) => opaque_child(children, token),
                 Self::Object(object) => object
                     .entry(token.clone())
                     .or_insert_with(|| Self::Object(BTreeMap::new())),
@@ -108,6 +106,7 @@ impl StaticJson {
         let last = tokens.last().expect("non-empty pointer has a final token");
         match current {
             Self::Unknown(children) => {
+                forget_array_aliases(children, last);
                 children.insert(last.clone(), value);
             }
             Self::Object(object) => {
@@ -126,6 +125,24 @@ impl StaticJson {
         }
         Ok(())
     }
+}
+
+/// Drops facts that an opaque array write could replace through another numeric spelling/append.
+fn forget_array_aliases(children: &mut BTreeMap<String, StaticJson>, token: &str) {
+    if token == "-" || token.parse::<usize>().is_ok() {
+        children.retain(|key, _| key == token || (key != "-" && key.parse::<usize>().is_err()));
+    }
+}
+
+/// Preserves a known child only when another target spelling cannot have replaced that child.
+fn opaque_child<'a>(
+    children: &'a mut BTreeMap<String, StaticJson>,
+    token: &str,
+) -> &'a mut StaticJson {
+    forget_array_aliases(children, token);
+    children
+        .entry(token.into())
+        .or_insert_with(StaticJson::unknown)
 }
 
 /// Masks original Control/local-generated facts while retaining plan-owned fields and array counts.

@@ -170,8 +170,25 @@ fn habitat_relocation_registration_retains_exclusive_resources_and_unknown_limit
                 .expect("relocation profile reaches Node Protocol v0.4");
             assert_eq!(profile.kind, "transport");
             assert_eq!(profile.ready, ready);
+            assert_eq!(
+                profile.attributes.len(),
+                2,
+                "only actual declared attributes reach registration"
+            );
+            assert_eq!(
+                profile.attributes["location-access"].value,
+                Some(integration::grpc::v0_4::scalar_value::Value::StringValue(
+                    "base-floor".into()
+                ))
+            );
+            assert_eq!(
+                profile.attributes["supports-floor-transition"].value,
+                Some(integration::grpc::v0_4::scalar_value::Value::BoolValue(
+                    false
+                ))
+            );
             assert!(
-                profile.attributes.is_empty(),
+                !profile.attributes.contains_key("max-payload-grams"),
                 "payload limits remain unknown"
             );
             assert!(registration.operation_support.iter().any(|support| {

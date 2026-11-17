@@ -486,6 +486,147 @@ mod tests {
     use super::*;
     use crate::{RequestBindingConfig, RequestMappingConfig};
 
+    /// Numeric target spellings alias on arrays, so opaque parents cannot retain conflicting facts.
+    #[test]
+    fn audit_numeric_aliases_do_not_reject_valid_dynamic_array() {
+        let config = RequestMappingConfig {
+            base: serde_json::json!({}),
+            bindings: vec![
+                RequestBindingConfig {
+                    target: "".into(),
+                    value: ValueExpressionConfig::Pointer {
+                        pointer: "/steps/source".into(),
+                    },
+                },
+                RequestBindingConfig {
+                    target: "/0".into(),
+                    value: ValueExpressionConfig::Constant {
+                        value: Value::Bool(true),
+                    },
+                },
+                RequestBindingConfig {
+                    target: "/00".into(),
+                    value: ValueExpressionConfig::Constant {
+                        value: serde_json::json!({}),
+                    },
+                },
+                RequestBindingConfig {
+                    target: "/0/child".into(),
+                    value: ValueExpressionConfig::Constant {
+                        value: Value::Bool(true),
+                    },
+                },
+            ],
+        };
+        let mapping =
+            CompiledRequestMapping::compile(config).expect("actual array completion is valid");
+        let mut context = WorkflowContext::new(serde_json::json!({}));
+        context
+            .record_step("source", serde_json::json!([null]))
+            .unwrap();
+        assert_eq!(
+            mapping.render(&context).unwrap(),
+            serde_json::json!([{"child":true}])
+        );
+    }
+
+    /// Fixed-seed concrete completions detect unsound rejections without treating samples as proof.
+    #[test]
+    fn bounded_partial_evaluation_agrees_with_concrete_completions() {
+        let targets = [
+            "",
+            "/a",
+            "/a/b",
+            "/0",
+            "/00",
+            "/+0",
+            "/-",
+            "/0/child",
+            "/00/child",
+            "/a~1b/~0",
+        ];
+        let values = [
+            serde_json::json!({}),
+            serde_json::json!([]),
+            serde_json::json!([{}, {}]),
+            serde_json::json!({"a":{}, "0":true, "00":{}}),
+            serde_json::json!(true),
+            serde_json::json!(null),
+        ];
+        let expressions = [
+            ValueExpressionConfig::Pointer {
+                pointer: "/steps/source".into(),
+            },
+            ValueExpressionConfig::Constant {
+                value: serde_json::json!({}),
+            },
+            ValueExpressionConfig::Constant {
+                value: serde_json::json!([{}, {}]),
+            },
+            ValueExpressionConfig::Constant {
+                value: Value::Bool(true),
+            },
+            ValueExpressionConfig::Function {
+                function: ValueFunction::ToString,
+                arguments: vec![ValueExpressionConfig::Pointer {
+                    pointer: "/steps/source".into(),
+                }],
+            },
+        ];
+        let mut seed = 0x0255_f00d_u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (seed >> 32) as usize
+        };
+        let mut rejected = 0;
+        let mut successful = 0;
+        for _ in 0..4096 {
+            let mut config = RequestMappingConfig {
+                base: values[next() % values.len()].clone(),
+                bindings: vec![],
+            };
+            let mut used = BTreeSet::new();
+            for _ in 0..(2 + next() % 4) {
+                let target = targets[next() % targets.len()];
+                if used.insert(target) {
+                    config.bindings.push(RequestBindingConfig {
+                        target: target.into(),
+                        value: expressions[next() % expressions.len()].clone(),
+                    });
+                }
+            }
+            let result = CompiledRequestMapping::compile(config.clone());
+            rejected += usize::from(result.is_err());
+            // Execute the original runtime renderer even for a statically rejected configuration.
+            let raw = CompiledRequestMapping {
+                base: config.base,
+                bindings: config
+                    .bindings
+                    .into_iter()
+                    .map(|binding| CompiledBinding {
+                        target: binding.target,
+                        value: binding.value,
+                    })
+                    .collect(),
+            };
+            for completion in &values {
+                let mut context = WorkflowContext::new(serde_json::json!({}));
+                context.record_step("source", completion.clone()).unwrap();
+                if raw.render(&context).is_ok() {
+                    successful += 1;
+                    assert!(
+                        result.is_ok(),
+                        "false rejection {result:?}, mapping={raw:?}, completion={completion}"
+                    );
+                }
+            }
+        }
+        assert!(rejected > 100 && successful > 100);
+        eprintln!(
+            "partial-evaluation configs=4096 completions=24576 rejected={rejected} successful-renders={successful}"
+        );
+    }
+
     /// Mapping supports prior step output and deterministic quaternion conversion.
     #[test]
     fn renders_multistep_pointer_and_quaternion() {
