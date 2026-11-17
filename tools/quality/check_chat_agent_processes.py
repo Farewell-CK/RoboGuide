@@ -202,6 +202,7 @@ class Trace:
     stale_state: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
     delay_next_inventory: bool = False
+    delay_next_provider: bool = False
     entered: threading.Event = field(default_factory=threading.Event)
     release: threading.Event = field(default_factory=threading.Event)
 
@@ -490,6 +491,11 @@ def provider_handler(
                 trace.provider.append(entry)
                 number = len(trace.provider)
             try:
+                if trace.delay_next_provider:
+                    trace.delay_next_provider = False
+                    trace.entered.set()
+                    if not trace.release.wait(25):
+                        raise ValueError("fixture Provider wait was not released")
                 if remote is None:
                     result = fixture_response(payload, number)
                 else:
@@ -783,6 +789,34 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
                 assert len(trace.reads) == before, row
                 assert row["provider_calls"] >= 1, "ordinary chat bypassed the configured model"
                 transcript.append(row)
+            if remote is None:
+                trace.entered.clear()
+                trace.release.clear()
+                trace.delay_next_provider = True
+                before_endings, before_reads = chat.endings(), len(trace.reads)
+                chat.send("你是谁？")
+                chat.wait(trace.entered.is_set, "owned slow Provider request")
+                chat.send("/status")
+                active_chat = chat
+                chat.wait(lambda: "已等待" in active_chat.text(), "immediate local status")
+                chat.send("/help")
+                chat.wait(lambda: "任务与规划" in active_chat.text(), "immediate local help")
+                chat.wait(lambda: "仍在处理" in active_chat.text(), "quiet slow-request notice")
+                assert chat.endings() == before_endings and len(trace.reads) == before_reads
+                trace.release.set()
+                chat.wait(lambda: active_chat.endings() > before_endings, "original response drain")
+                data = json.loads((output / "sessions/conversation.json").read_text())
+                assert [r["text"] for r in data["messages"] if r["role"] == "user"][
+                    -1
+                ] == "你是谁？"
+                transcript.append(
+                    {
+                        "user": "你是谁？",
+                        "busy_controls_immediate": True,
+                        "quiet_wait_notice": True,
+                        "controller_reads": 0,
+                    }
+                )
             for text in ("你好，帮我查一下节点", "第二个节点呢？", "当前有没有任务在运行？"):
                 before = len(trace.reads)
                 row = question_step(chat, trace, text)
@@ -913,6 +947,8 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
                 native_task_request=True,
                 native_task_clarification=True,
                 original_task_constraints=True,
+                busy_controls_immediate=True if remote is None else None,
+                quiet_wait_notice=True if remote is None else None,
                 editable_queue=True,
                 mi_request_posts=len(trace.mi_writes),
                 responses_streaming=True,

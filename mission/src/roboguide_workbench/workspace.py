@@ -19,6 +19,7 @@ from roboguide_workbench.client import ReadOnlyController, WorkbenchError, ident
 from roboguide_workbench.evidence import QueryStatus, ReadResult
 from roboguide_workbench.mission_views import render_mission_list
 from roboguide_workbench.persistence import SessionStore
+from roboguide_workbench.plan_view import LIFECYCLE_LABELS, plan_document, plan_overview
 from roboguide_workbench.routing import Query, Router
 from roboguide_workbench.session import HELP, Session
 from roboguide_workbench.state_queries import choices, discover, fields, read_state
@@ -28,6 +29,8 @@ from roboguide_workbench.views import inventory_view, render_mission, render_nod
 EXTRA_HELP = """可以直接提问：有哪些设备？dog2 还有多少电？它在哪里？当前有哪些任务？
 也可以直接说：让狗1巡检东区；先只规划；把目标改成门口；执行刚才的计划；取消该请求。
 Agent 会查能力、补问和调用 MI；原有权限、风险审批与执行准入照常检查。
+新计划与修改版本会完整展示；查询已展示且未变化的计划时显示简洁进度。
+直接说“展开计划”可再次查看完整参数。
 
 设备与状态（无需模型）：
   /nodes、/node ID       查看节点；/node #2 查询上次展示的第二个节点
@@ -121,13 +124,21 @@ def diagnostic_text(title: str, raw: JSONObject, mission_id: str, group_id: str)
     return "原恢复评估：\n" + "\n".join(lines)
 
 
-def render_request(raw: JSONObject) -> str:
+def render_request(raw: JSONObject, *, include_plan: bool = True) -> str:
     """Show the exact reviewed draft and unanswered questions without claiming execution."""
     record = checked_request(raw)
     lines = [
-        f"Request {record.request_id}：{record.lifecycle.value}",
+        f"Request {record.request_id}：{LIFECYCLE_LABELS[record.lifecycle.value]}"
+        f"（{record.lifecycle.value}）",
         f"Mission：{record.mission_id}",
-        f"提交意图：{record.submission_intent.mode if record.submission_intent else '未知'}",
+        "提交方式："
+        + (
+            "仅规划（draft_only）"
+            if record.submission_intent and record.submission_intent.mode == "draft_only"
+            else "按审批策略进入执行流程（submit_when_ready）"
+            if record.submission_intent
+            else "未知"
+        ),
         f"计划版本：{record.draft_revision}；摘要：{record.draft_digest or '尚无草案'}",
     ]
     if record.assessment:
@@ -141,14 +152,14 @@ def render_request(raw: JSONObject) -> str:
             lines.append(f"问题 {turn.turn_id}：{safe_text(turn.content)}")
     if record.plan:
         plan = record.plan.to_json()
-        # The actual Task/Role/operation/parameter document is shown, not an LLM summary.
-        text = json.dumps(plan, ensure_ascii=False, indent=2)
+        lines.append(plan_overview(plan))
+        text = plan_document(plan)
         if len(text) > 64000:
             lines.append("计划超过显示上限；不会设置可执行选择。请缩小计划或使用正式审批界面。")
+        elif include_plan:
+            lines.append("计划任务与原始参数（完整计划）：\n" + text)
         else:
-            lines.append(
-                "计划任务与原始参数（完整计划）：\n" + safe_text(text).replace("\\u000a", "\n")
-            )
+            lines.append("计划内容未变，沿用上次完整展示的版本；说“展开计划”可再次查看完整参数。")
     lines.extend("提示：" + safe_text(issue) for issue in record.issues)
     if record.approval_required:
         lines.append("仍需风险审批：" + ", ".join(record.approval_reasons))
@@ -209,6 +220,7 @@ class WorkbenchSession(Session):
             raise WorkbenchError("会话问题引用损坏。")
         self.previous_question = previous
         self.shown_draft: JSONObject | None = None
+        self.acknowledged_draft: JSONObject | None = None
         self.suggestion: tuple[str, str] | None = None
         self.pending_cancel: JSONObject | None = None
         self.reference_checkpoint: JSONObject | None = None
@@ -396,6 +408,7 @@ class WorkbenchSession(Session):
             self.last_state = None
             self.request_id = None
             self.shown_draft = None
+            self.acknowledged_draft = None
             self.suggestion = None
             self.task_dialogue.clear()
             return "已清除对象选择和待补充目标；原任务、命令回执和历史仍保留。"
@@ -484,10 +497,7 @@ class WorkbenchSession(Session):
         self.last_raw = raw
         self.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
         self.shown_draft = (
-            raw
-            if record.plan
-            and len(json.dumps(record.plan.to_json(), ensure_ascii=False, indent=2)) <= 64000
-            else None
+            raw if record.plan and len(plan_document(record.plan.to_json())) <= 64000 else None
         )
         return rendered
 
@@ -593,6 +603,17 @@ class WorkbenchSession(Session):
         """Dispatch explicit commands; model output never enters this method as a write."""
         command, _, argument = text.partition(" ")
         argument = argument.strip()
+        if command == "/plan-detail":
+            if argument or self.shown_draft is None:
+                raise WorkbenchError("请先读取当前请求，取得完整计划后再展开。")
+            record = checked_request(self.shown_draft)
+            if record.plan is None:
+                raise WorkbenchError("当前请求还没有计划。")
+            return (
+                f"已展示计划 · Request {record.request_id} · 第 {record.draft_revision} 版\n"
+                f"摘要：{record.draft_digest}\n"
+                "完整原始计划（未刷新执行状态）：\n" + plan_document(record.plan.to_json())
+            )
         if command in {"/state", "/state-fields"}:
             try:
                 values = shlex.split(argument)

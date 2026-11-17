@@ -1163,6 +1163,11 @@ assistant context across history bounds/resume; model source hints cannot erase 
 clarify_task consumes no HTTP slot. Same-turn validated identities permit explicit edits/cancellation,
 never new display ACK. Logical task correction preserves independent failures and original Unknown.
 test_workbench_task_flow.py owns continuous actual-MI/HTTP software cases; real-model evidence is separate.
+plan_view.py shows complete canonical parameters on new/revised/resumed plans; compact progress
+requires the same ephemeral acknowledged Request/revision/digest/plan. Failed display never grants
+reuse. show_plan expands locally without refreshing status. Terminal help/status during work are
+local controls; waiting notices never renew deadlines or reissue operations. Regressions live in
+test_workbench_terminal_ux.py and the installed PTY gate.
 
 ADR-0254 adds installed chat v0.4 global and explicitly selected project model profiles, first-run setup, local status and
 scope-bound session navigation. Existing displayed-reference confirmation and original pending

@@ -37,6 +37,7 @@ start_task(mode=run) 开始正常执行流程；明确只规划时用 mode=plan�
 缺少区域、目标或成功标准时用 clarify_task 自然追问并保存任务上下文，不创建占位任务。
 明确能力缺口时先解释，不能通过编造合同来完成任务。
 answer_request 使用用户原始补充更新当前 Request；read_request 查询规划/审批/运行进度。
+用户要展开完整计划或参数时用 show_plan；该工具只展开已取得的版本，不代表重新查询当前状态。
 多轮补充区域或参数不会撤销用户先前“只规划、不执行”的要求；只有后续明确改变意图才可执行。
 execute_plan/approve_plan 只用于用户明确授权的已完整显示版本；审批仍需服务端 approver 权限。
 工具错误或重复调用只影响对应部分，继续完成复合问题中的其它独立部分。成功结果不重复读取。
@@ -71,6 +72,7 @@ _READ_LABELS = {
     "read_state": "正在读取设备状态",
 }
 _ACTION_LABELS = {
+    "show_plan": "正在展开完整计划",
     "clarify_task": "正在补充任务信息",
     "start_task": "正在准备任务",
     "answer_request": "正在补充任务要求",
@@ -81,6 +83,7 @@ _ACTION_LABELS = {
     "observe_operation": "正在核对原操作回执",
 }
 _ACTION_COSTS = {
+    "show_plan": 0,
     "clarify_task": 0,
     "start_task": 2,
     "answer_request": 1,
@@ -366,7 +369,7 @@ def _evidence(name: str, returned: ReadResult, number: int) -> JSONObject:
         "id": f"E{number}",
         "source": name,
         "scope": "local-chat/original-dialogue"
-        if name == "clarify_task"
+        if name in {"clarify_task", "show_plan"}
         else "configured-controller/current-identity",
         "received_at": datetime.now(UTC).isoformat(),
         "complete": returned.complete,

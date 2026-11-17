@@ -75,6 +75,26 @@ hints change. Actual network errors and original Unknown never gain a replacemen
 Local clarification is not a task mutation and consumes no HTTP slot; all call/deadline bounds
 and the one actual task mutation per turn remain unchanged.
 
+### Terminal readability and exact display reuse (2026-11-17)
+
+`plan_view.py` renders every canonical plan field as readable YAML, with exact JSON escaping
+when invisible formatting would otherwise change a displayed scalar. A short step overview is
+only a reading guide. New, revised and first-resumed plans are still shown completely; no model
+summary replaces the full plan or its parameters. Display limits also apply to the actual render.
+
+An ephemeral `acknowledged_draft` is adopted only after the original DisplayTurn flush and
+checkpoint succeed. Only the same Request, revision, full digest and whole plan may reuse that
+complete display for a compact progress card. Current constraints, issues and approval reasons
+remain visible. Failure, interruption, reset and restart revoke this reuse. Existing fresh server
+version/permission checks still precede execution or approval. `show_plan` is a zero-I/O local
+tool for natural parameter expansion, not a new observation or execution grant.
+
+Busy `/help` and `/status` inspect local frontend metadata without another foreground owner,
+history write or Controller query. Queue previews use terminal cell widths and never change the
+saved original. Occasional waiting notices appear at 15 and 45 seconds, without timer redraws,
+invented percentages or repeated requests. Reply headings distinguish partial/unavailable query
+results from Mission or device failure. All output still uses the original complete display ACK.
+
 ## Validation
 
 Owned loopback tests exercise compound refusal/repetition, dual source choice, historical resume,

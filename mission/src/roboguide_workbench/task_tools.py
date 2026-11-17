@@ -38,6 +38,11 @@ def definitions() -> list[JSONObject]:
             {"start_turn": source},
         ),
         (
+            "show_plan",
+            "展开当前已取得版本的完整计划参数；只显示原计划，不刷新状态，不执行或审批。",
+            {},
+        ),
+        (
             "read_request",
             "查询当前或明确指定的 Request；空 ID 使用本会话当前任务。",
             {"request_id": {"type": "string", "maxLength": 256}},
@@ -190,7 +195,12 @@ class TaskTools:
             if limit == "discussion" or limit == "plan" and arguments["mode"] == "run":
                 raise ToolRefusal("用户要求讨论或仅规划，不能开启执行流程；可继续补充或仅规划。")
             original = self.dialogue.instruction()
-        if name not in {"read_request", "observe_operation", "clarify_task"} and re.fullmatch(
+        if name not in {
+            "read_request",
+            "observe_operation",
+            "clarify_task",
+            "show_plan",
+        } and re.fullmatch(
             r"(?:你好|您好|谢谢|多谢|感谢|好的|好|收到|嗯|hello|hi|thanks|thank you)[。！!,.，\s]*",
             self.question,
             re.IGNORECASE,
@@ -201,6 +211,14 @@ class TaskTools:
             session.checkpoint()
             result = ReadResult("需要补充：" + safe_text(cast(str, arguments["question"])))
             self.results.append(result)
+            return result
+        if name == "show_plan":
+            self._require_input_request(allow_named_edit=True)
+            if session.shown_draft is None:
+                raise ToolRefusal("请先读取当前请求，取得计划后再展开完整参数。")
+            result = ReadResult(session._command("/plan-detail"))
+            self.results.append(result)
+            self.owns_selection = True
             return result
         try:
             if name == "start_task":

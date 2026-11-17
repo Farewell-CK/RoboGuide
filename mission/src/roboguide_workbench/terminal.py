@@ -26,8 +26,9 @@ from prompt_toolkit.utils import get_cwidth
 
 from roboguide_workbench.answers import bounded_history
 from roboguide_workbench.display import DisplayPersistenceError, DisplayTurn, discard_confirmation
+from roboguide_workbench.evidence import QueryStatus
 from roboguide_workbench.views import render_mission, safe_text
-from roboguide_workbench.workspace import WorkbenchSession
+from roboguide_workbench.workspace import EXTRA_HELP, WorkbenchSession
 
 COMMANDS = [
     "/nodes",
@@ -73,6 +74,7 @@ COMMANDS = [
 # Controller is working.  It is deliberately local to this terminal process;
 # queued text is not a new permission to perform a Mission effect.
 MAX_QUEUED_REQUESTS = 3
+SLOW_NOTICE_DELAYS = (15.0, 30.0)
 
 # Read-only commands can safely run after the current writer drains.  Watches
 # and quit are handled immediately below because they own separate lifecycle
@@ -206,6 +208,19 @@ def _wrapped_lines(line: str, width: int) -> list[str]:
         cells += char_cells
     result.append("".join(current))
     return result
+
+
+def _message_preview(text: str, width: int = 80) -> str:
+    """Fit an unsent-message preview by terminal cells without altering the queued original."""
+    text = safe_text(" ".join(text.split()))
+    if get_cwidth(text) <= width:
+        return text
+    result = ""
+    for char in text:
+        if get_cwidth(result + char) > max(0, width - 1):
+            break
+        result += char
+    return result + "…"
 
 
 async def interactive(session: WorkbenchSession) -> int:
@@ -365,7 +380,7 @@ async def interactive(session: WorkbenchSession) -> int:
         try:
             # Notifications carry no confirmation authority and use patch_stdout so a
             # watch update cannot overwrite the live input buffer.
-            print(safe_text(message), flush=True)
+            print("\n".join(safe_text(line) for line in message.split("\n")), flush=True)
         except (ValueError, OSError):
             pass
 
@@ -381,8 +396,7 @@ async def interactive(session: WorkbenchSession) -> int:
             flush=True,
         )
         print(
-            "  直接提问，例如：有哪些设备？它还有多少电？\n"
-            "  /state-fields 查看状态对象；/help 查看命令。\n",
+            "  直接提问：有哪些设备？它还有多少电？\n  也可直接说目标：让狗1巡检东区，先只规划。\n",
             file=output,
             flush=True,
         )
@@ -431,7 +445,9 @@ async def interactive(session: WorkbenchSession) -> int:
     if hasattr(session, "stream_output"):
         session.stream_output = update_stream
 
-    async def display(result: str, suggestion: tuple[str, str] | None = None) -> bool:
+    async def display(
+        result: str, suggestion: tuple[str, str] | None = None, *, status: QueryStatus = "complete"
+    ) -> bool:
         """Flush a role-labeled, wrapped assistant turn before acknowledging its state."""
 
         def write() -> bool:
@@ -441,7 +457,10 @@ async def interactive(session: WorkbenchSession) -> int:
             width = 100
             with suppress(AttributeError, OSError, ValueError):
                 width = max(20, min(160, prompt.output.get_size().columns))
-            print("\n── RG · 助手", file=output, flush=True)
+            label = {"complete": "", "partial": " · 部分结果", "failed": " · 本轮回复未完成"}[
+                status
+            ]
+            print("\n── RG · 助手" + label, file=output, flush=True)
             lines = result.splitlines() or [""]
             first_line = True
             for line in lines:
@@ -479,8 +498,19 @@ async def interactive(session: WorkbenchSession) -> int:
         turn = DisplayTurn(session)
         session.input_references = original_references
         session.input_history = original_history
+        outcome: QueryStatus = "complete"
+
+        async def slow_feedback() -> None:
+            """Print occasional real waiting notices without a ticking redraw or fake progress."""
+            for delay in SLOW_NOTICE_DELAYS:
+                await asyncio.sleep(delay)
+                if not muted and not closing and started_at is not None:
+                    notify(f"· {phase} · 已等待 {time.monotonic() - started_at:.0f}s，仍在处理。")
+
+        waiting = asyncio.create_task(slow_feedback())
         try:
             result = await asyncio.to_thread(session.ask, text)
+            outcome = session.query_status
             await asyncio.sleep(0)
             if stream_buffer:
                 preview_tasks.append(asyncio.create_task(show_preview(stream_buffer)))
@@ -494,16 +524,21 @@ async def interactive(session: WorkbenchSession) -> int:
                     if previewed and result.startswith(previewed)
                     else result
                 )
-                displayed = await display(remaining_text or "回复完成。", turn.suggestion)
+                displayed = await display(
+                    remaining_text or "回复完成。", turn.suggestion, status=outcome
+                )
                 if displayed and not muted:
                     turn.acknowledge()
         except (ValueError, OSError) as error:
+            outcome = "failed"
             if not muted:
                 try:
-                    await display("操作未完成：" + safe_text(str(error)))
+                    await display("操作未完成：" + safe_text(str(error)), status="failed")
                 except (ValueError, OSError):
                     pass
         finally:
+            waiting.cancel()
+            await asyncio.gather(waiting, return_exceptions=True)
             if preview_tasks:
                 await asyncio.gather(*preview_tasks, return_exceptions=True)
             stream_buffer = ""
@@ -518,12 +553,19 @@ async def interactive(session: WorkbenchSession) -> int:
             visible_references = session.query_references()
             visible_history = bounded_history(session.store.data.get("messages"))
             if started_at is not None and not muted and not closing:
-                notify(f"· 本轮结束 · {time.monotonic() - started_at:.1f}s")
+                detail = {"complete": "", "partial": "部分结果 · ", "failed": "回复未完成 · "}[
+                    outcome
+                ]
+                notify(f"· 本轮结束 · {detail}{time.monotonic() - started_at:.1f}s")
             started_at, phase = None, "待命"
             refresh_toolbar()
             if not closing and not unavailable and queued:
                 next_text, original_references, original_history = queued.popleft()
-                notify(f"继续处理队列中的问题（剩余 {len(queued)} 条）。")
+                notify(
+                    f"继续处理队列中的问题（剩余 {len(queued)} 条）。\n"
+                    + "待发问题："
+                    + _message_preview(next_text, 100)
+                )
                 foreground = asyncio.create_task(
                     execute(next_text, original_references, original_history)
                 )
@@ -540,8 +582,12 @@ async def interactive(session: WorkbenchSession) -> int:
 
         def composer() -> str:
             """Keep unsent message previews directly above the current input buffer."""
+            width = 100
+            with suppress(AttributeError, OSError, ValueError):
+                width = max(20, min(160, prompt.output.get_size().columns))
             lines = [
-                f"待发 {index}. {safe_text(item[0])[:100]}" for index, item in enumerate(queued, 1)
+                f"待发 {index}. {_message_preview(item[0], width - 12)}"
+                for index, item in enumerate(queued, 1)
             ]
             if lines:
                 lines.append("Alt-Up 取回编辑 · Alt-Backspace 撤回末条 · /queue 管理")
@@ -637,6 +683,16 @@ async def interactive(session: WorkbenchSession) -> int:
                             notify(safe_text(str(error)))
                     continue
                 if not text:
+                    continue
+                if foreground and not foreground.done() and text in {"/help", "/status"}:
+                    if text == "/help":
+                        notify(EXTRA_HELP)
+                    else:
+                        elapsed = time.monotonic() - started_at if started_at is not None else 0.0
+                        notify(
+                            f"会话 {_session_label()} · {phase} · 已等待 {elapsed:.1f}s"
+                            f" · 待发 {len(queued)}/{MAX_QUEUED_REQUESTS}"
+                        )
                     continue
                 if foreground and not foreground.done():
                     if not _is_queueable(text):

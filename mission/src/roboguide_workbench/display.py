@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import uuid
 from dataclasses import dataclass
 
@@ -22,6 +23,7 @@ def discard_confirmation(session: Session) -> None:
         session.shown_draft = None
         session.suggestion = None
         session.pending_cancel = None
+        session.acknowledged_draft = None
 
 
 @dataclass
@@ -91,6 +93,7 @@ class DisplayTurn:
                     row["displayed"] = False
                 raise
             self.session.shown_draft, self.session.suggestion = self.draft, self.suggestion
+            self.session.acknowledged_draft = copy.deepcopy(self.draft)
             self.session.pending_cancel = self.cancellation
             self.session.display_turn_id = None
         self.finished = True

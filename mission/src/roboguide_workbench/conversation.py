@@ -22,11 +22,12 @@ from roboguide_workbench.answers import (
 )
 from roboguide_workbench.client import WorkbenchError
 from roboguide_workbench.evidence import ReadResult
+from roboguide_workbench.plan_view import same_plan
 from roboguide_workbench.routing import Query, ResponsesRouter
 from roboguide_workbench.task_tools import TaskTools
 from roboguide_workbench.task_tools import definitions as task_definitions
 from roboguide_workbench.views import safe_text
-from roboguide_workbench.workspace import WorkbenchSession
+from roboguide_workbench.workspace import WorkbenchSession, render_request
 
 
 class ConversationSession(WorkbenchSession):
@@ -47,12 +48,6 @@ class ConversationSession(WorkbenchSession):
             self.pending_cancel = None
         if question == "/help":
             return super()._turn(question)
-        if question == "/plan-detail":
-            if self.shown_draft is None:
-                raise WorkbenchError("请先 /request 查看当前计划。")
-            return safe_text(
-                json.dumps(self.shown_draft.get("plan"), ensure_ascii=False, indent=2)
-            ).replace("\\u000a", "\n")
         if question.startswith("/"):
             if question == "/reset":
                 self.evidence = []
@@ -335,10 +330,9 @@ class ConversationSession(WorkbenchSession):
             self.store.save()
 
     def _show_request(self, raw: JSONObject) -> str:
-        """Summarize the host-validated plan and show changes while retaining its exact identity."""
-        previous = getattr(self, "displayed_plan_history", None)
+        """Expand new plans completely and keep acknowledged unchanged progress reads compact."""
+        previous = self.acknowledged_draft
         full = super()._show_request(raw)
-        self.displayed_plan_history = raw
         self.request_context: JSONObject = {
             key: raw.get(key)
             for key in ("request_id", "lifecycle", "assessment", "draft_revision", "draft_digest")
@@ -346,20 +340,18 @@ class ConversationSession(WorkbenchSession):
         plan = raw.get("plan")
         if not isinstance(plan, dict):
             return full
-        tasks = plan.get("tasks")
-        rows = tasks if isinstance(tasks, list) else []
-        summary = full.split("计划任务与原始参数", 1)[0]
-        summary += "\n计划步骤（完整参数用 /plan-detail 展开）：\n"
-        for task in rows:
-            if not isinstance(task, dict):
-                continue
-            summary += safe_text(json.dumps(task, ensure_ascii=False)) + "\n"
-        if previous and previous.get("draft_digest") != raw.get("draft_digest"):
-            summary += f"版本变化：{previous.get('draft_revision')} → {raw.get('draft_revision')}\n"
+        summary = render_request(raw, include_plan=False) if same_plan(previous, raw) else full
+        if (
+            previous
+            and previous.get("request_id") == raw.get("request_id")
+            and previous.get("draft_revision") != raw.get("draft_revision")
+        ):
+            summary += (
+                f"\n版本变化：{previous.get('draft_revision')} → {raw.get('draft_revision')}\n"
+            )
             old = previous.get("plan")
             if isinstance(old, dict):
                 changed = [key for key in set(old) | set(plan) if old.get(key) != plan.get(key)]
-                summary += "修改部分：" + ", ".join(sorted(changed)) + "\n"
-        if raw.get("approval_required"):
-            summary += "仍需原风险审批。\n"
-        return summary + "执行仍绑定上述原版本；/execute 授权，/answer 修改。"
+                if changed:
+                    summary += "修改部分：" + ", ".join(sorted(changed))
+        return summary
