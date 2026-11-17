@@ -88,6 +88,9 @@ attributes 为空，而原始场景已声明 `location-access`/`supports-floor-t
 - Memory 的 discover/export/原始 import outcome 可引用拼错或其他 workflow 的步骤。
   现在对 `/steps/...` 校验精确 workflow，保留既有 invocation 投影及 response-relative
   instance/query 指针，不猜测尚未返回的实际响应字段。
+  discover/export/原始结果 query 的 `/attempt_id` 引用也会拒绝；config v0.10+ 的 prepared import、availability
+  和 use 保留其实际 attempt 输入。Memory 的 staged 文件来自 `/invocation/staged_artifact`，
+  不可借用普通 execution 独立填充的 `/artifacts/inputs/...` 或 `/artifacts/outputs/...`。
 - 上一实现的 CLI `--plan` 分支只用了生产编译器，漏掉 conformance 的额外完整性检查。
   两种 CLI 模式现在对同一份已读取配置复用原 conformance 门禁，避免重新读源产生竞态。
 
@@ -98,6 +101,6 @@ catalog，不修改原 Debug/identity/digest 表示，也不渲染真实 Control
 所有检查仍是静态必要条件，不建立运行或物理成功证明。
 
 复查验证：六个新增反例在修复前全部失败，修复后与补充的正向/边界用例一起通过；
-Node 162 项、Integration Server 306 项、CLI 真实子进程回归及受影响三个包的
+Node 163 项、Integration Server 306 项、CLI 真实子进程回归及受影响三个包的
 all-targets/all-features Clippy、Rustfmt 和 diff 检查通过。上一节已在原始 HEAD 复现的
 1 项既有 Node 测试本轮显式跳过；未重复全仓 pytest 或运行模拟器、设备与 HA/recovery gate。

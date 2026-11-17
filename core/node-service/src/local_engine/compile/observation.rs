@@ -312,6 +312,7 @@ pub(super) fn compile_memory_providers(
     connections: &BTreeMap<String, CompiledConnection>,
     state_directory: &Path,
     supports_workflows: bool,
+    supports_preparation: bool,
 ) -> Result<BTreeMap<String, CompiledMemoryProvider>, CatalogError> {
     let mut providers = BTreeMap::new();
     let mut storage_roots: BTreeSet<PathBuf> = BTreeSet::new();
@@ -385,6 +386,7 @@ pub(super) fn compile_memory_providers(
             &config.owner,
             connections,
             "discover",
+            false,
         )?;
         let export = compile_memory_workflow(
             config.export,
@@ -392,6 +394,7 @@ pub(super) fn compile_memory_providers(
             &config.owner,
             connections,
             "export",
+            false,
         )?;
         let import = compile_memory_workflow(
             config.import,
@@ -399,6 +402,7 @@ pub(super) fn compile_memory_providers(
             &config.owner,
             connections,
             "import",
+            supports_preparation,
         )?;
         require(
             config.visibility != "exchangeable"
@@ -540,6 +544,7 @@ fn compile_memory_continuity(
     .remove(0);
     let query =
         compile_steps(vec![config.query], owner, connections, &mut BTreeSet::new())?.remove(0);
+    validate_memory_context_sources(std::slice::from_ref(&query), false, &field)?;
     Ok(Some(CompiledMemoryContinuity {
         import_result_pointer: config.import_result_pointer,
         instance,
@@ -556,6 +561,7 @@ pub(super) fn compile_memory_workflow(
     owner: &str,
     connections: &BTreeMap<String, CompiledConnection>,
     operation: &str,
+    attempt_available: bool,
 ) -> Result<Option<CompiledMemoryWorkflow>, CatalogError> {
     let Some(config) = config else {
         return Ok(None);
@@ -571,6 +577,11 @@ pub(super) fn compile_memory_workflow(
         &format!("memory_providers.{provider_id}.{operation}.steps"),
     )?;
     let steps = compile_steps(config.steps, owner, connections, &mut BTreeSet::new())?;
+    validate_memory_context_sources(
+        &steps,
+        attempt_available,
+        &format!("memory_providers.{provider_id}.{operation}.steps"),
+    )?;
     if let Some(pointer) = &config.manifests_pointer {
         validate_pointer(pointer).map_err(|source| CatalogError::Mapping {
             step: format!("memory_providers.{provider_id}.{operation}"),
@@ -628,6 +639,26 @@ pub(super) fn compile_memory_workflow(
         manifests_pointer: config.manifests_pointer,
         artifact_path_pointer: config.artifact_path_pointer,
     }))
+}
+
+/// Checks actual Memory context namespaces without imposing an invocation schema on provider input.
+fn validate_memory_context_sources(
+    steps: &[CompiledWorkflowStep],
+    attempt_available: bool,
+    field: &str,
+) -> Result<(), CatalogError> {
+    for pointer in steps.iter().flat_map(CompiledWorkflowStep::source_pointers) {
+        let unavailable = (pointer == "/attempt_id" && !attempt_available)
+            || pointer.starts_with("/attempt_id/")
+            || (pointer.starts_with("/artifacts/")
+                && !matches!(pointer, "/artifacts/inputs" | "/artifacts/outputs"));
+        require(
+            !unavailable,
+            field,
+            format!("mapping source `{pointer}` is unavailable in this Memory context"),
+        )?;
+    }
+    Ok(())
 }
 
 /// Checks named step results against this workflow without narrowing existing invocation projections.
@@ -708,6 +739,11 @@ fn compile_memory_availability(
         &mut BTreeSet::new(),
     )?
     .remove(0);
+    validate_memory_context_sources(
+        std::slice::from_ref(&observation),
+        true,
+        &format!("memory_providers.{provider_id}.availability"),
+    )?;
     require(
         config
             .contract
@@ -771,6 +807,8 @@ fn compile_memory_use(
     )?;
     let query = steps.pop().expect("compiled query");
     let control = steps.pop().expect("compiled control");
+    validate_memory_context_sources(std::slice::from_ref(&query), true, &field)?;
+    validate_memory_context_sources(std::slice::from_ref(&control), true, &field)?;
     memory_use_endpoint(&control, connections)?;
     memory_use_endpoint(&query, connections)?;
     Ok(Some(CompiledMemoryUse {

@@ -268,6 +268,15 @@ impl CompiledLocalCatalog {
                     | CONFIG_SCHEMA_V0_14
                     | CONFIG_SCHEMA_V0_15
             ),
+            matches!(
+                config.schema.as_str(),
+                CONFIG_SCHEMA_V0_10
+                    | CONFIG_SCHEMA_V0_11
+                    | CONFIG_SCHEMA_V0_12
+                    | CONFIG_SCHEMA_V0_13
+                    | CONFIG_SCHEMA_V0_14
+                    | CONFIG_SCHEMA_V0_15
+            ),
         )?;
         require(
             matches!(
