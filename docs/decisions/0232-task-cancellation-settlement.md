@@ -18,7 +18,7 @@ physical StopConfirmed，也不能用于恢复、续跑或设备交接。v0.1 �
 
 管理员 POST /v1/executions/{id}/safety-stop/reconcile 提交 stop-reconciliation/v0.1。
 请求固定原停止记录摘要、幂等命令、原 generation、核验内容及 no-effects 或 stopped
-结论。仅当原记录已经转人工、原 attempt 仍为同代、原任务已 Cancelled、Mission 正在
+结论。仅当原记录已经转人工、原 attempt 仍为当前同代、原任务已 Cancelled 或 Failed、Mission 正在
 取消时接纳。身份来自已有认证 principal，不能来自请求体。该操作保留原记录与原期限，
 记录新的管理员证据，并复用正常取消收尾。它不写入物理停止证明或授权恢复。
 
@@ -38,3 +38,18 @@ Executor root Canceled 或网络 ACK 代替。现有 native 查询不足的部�
 隔离测试覆盖真实 Node State 归属、取消及资源释放、原记录保留、原窗口、迟到、缺字段、
 跨任务和代次、重复和冲突请求、管理员权限与租户、冷恢复及证据篡改、旧闭合解码器拒绝。
 不以软件测试宣称设备停止。现场服务、旧任务结案和运动验证需另行执行与记录。
+
+## 2026-11-17 维护：失败终态的人工取消结案
+
+Mission 进入 Cancelling 后，当前 attempt 仍可能收到原始 Failed，例如 Node 在派发前
+拒绝任务后报告失败。若原停止目的为 ManualEscalation，只接受 Cancelled 会令管理员
+无法结案，原资源持续保留。人工结案与冷恢复验证因此同时接纳当前同代的 Cancelled
+或 Failed；保留原 Runtime 终态、失败事件、停止记录及期限，不伪造 Cancelled。
+
+Failed 本身不允许释放。仍须原 Mission 正在取消、精确记录摘要、generation、已认证
+管理员和显式核验内容，再由正常 apply_pending_cancellations 完成 Mission 取消和资源
+释放。人工结案仅用于取消收尾，不授予 resume、handoff 或物理停止确认。
+AutomaticNoEffects 继续仅接纳 Cancelled，不能用无副作用观察自动结案 Failed。
+
+回归覆盖两种终态的资源保留、管理员与租户权限、SQL 回滚、命令重放及冲突、取消中与
+取消完成后的冷恢复，以及原 Failed 和停止记录保留。现场部署及原任务实际结案另行验收。
