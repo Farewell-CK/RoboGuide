@@ -888,7 +888,7 @@ object CharacterParser {
      * @return 英文字母或者#
      */
     fun getSortKey(sortKeyString: String): String {
-        val key = sortKeyString.substring(0, 1).toUpperCase(Locale.ROOT)
+        val key = sortKeyString.substring(0, 1).uppercase(Locale.ROOT)
         return if (key.matches(Regex("[A-Z]")))  key else "#"
     }
 

@@ -1,0 +1,64 @@
+{
+  "date": "2026-11-16",
+  "version": "1.0.18",
+  "version_code": 19,
+  "apk": "NAVI-中文版-1.0.18-室内避障测试.apk",
+  "apk_bytes": 28840628,
+  "apk_sha256": "0d70515685d1c372e12de3649a90745d0e0abb3668a0d884d30d69985ae3f6a4",
+  "signer_sha256": "becff9f7435d3a3eb0c5ae4191071c6c2d129ecc48dd52b9c1ad1afaef7c5f3e",
+  "same_signer_as_existing_apk": true,
+  "signature_and_alignment_verified": true,
+  "flutter_tests_passed": 93,
+  "python_policy_tests_passed": 11,
+  "deployment_tests_passed": 2,
+  "health": {
+    "status": "healthy",
+    "model": "facebook/mask2former-swin-large-ade-semantic",
+    "revision": "aa25c92404a40599614215e76514c79b427c7527",
+    "device": "cuda",
+    "pid": 1058201,
+    "input": "RGB monocular",
+    "profile": "indoor",
+    "policy_version": 2,
+    "distance_available": false,
+    "automatic_detour": false,
+    "busy": false
+  },
+  "production_backup": "/home/seaway/sdb/niulinqiang/roboguide_demo/navi-obstacle/deploy-backups/20261116-105248-indoor",
+  "candidate_stopped": true,
+  "original_model_retained": true,
+  "gateway_obstacle_protocol_verified": true,
+  "dino_embedding_preserved": true,
+  "dino_only_ms": [
+    60,
+    29,
+    31
+  ],
+  "dino_concurrent_ms": [
+    33,
+    41,
+    40,
+    54,
+    64
+  ],
+  "obstacle_concurrent_ms": [
+    134,
+    133,
+    133,
+    138,
+    136
+  ],
+  "desktop_tailnet_probe": {
+    "status": "not_connected",
+    "backend_state": "NoState",
+    "gpu_service_failure_inferred": false
+  },
+  "phone_hallway_test": "pending",
+  "host_roboguide_apk_rebuilt": false,
+  "known_challenge": "Occluded close-up cats/sofa image did not yield a sofa candidate; raw predictions retained in verification report.",
+  "limits": [
+    "No metric distance",
+    "No automatic detour",
+    "No hallway accuracy or phone end-to-end latency measured"
+  ]
+}

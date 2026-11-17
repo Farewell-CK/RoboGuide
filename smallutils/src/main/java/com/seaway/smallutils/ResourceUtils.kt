@@ -146,7 +146,7 @@ object ResourceUtils {
         }
         val index = fileName.lastIndexOf(".")
         return if (index != -1) {
-            fileName.substring(index + 1).toLowerCase(Locale.US)
+            fileName.substring(index + 1).lowercase(Locale.US)
         } else {
             null
         }

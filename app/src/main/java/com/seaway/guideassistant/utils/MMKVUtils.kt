@@ -94,7 +94,7 @@ object MMKVUtils {
         for (i in bArray.indices) {
             sTemp = Integer.toHexString(0xFF and bArray[i].toInt())
             if (sTemp.length < 2) sb.append(0)
-            sb.append(sTemp.toUpperCase(Locale.getDefault()))
+            sb.append(sTemp.uppercase(Locale.getDefault()))
         }
         return sb.toString()
     }

@@ -16,6 +16,14 @@
             android:padding="@dimen/dp_20">
 
             <Button
+                android:id="@+id/btn_navi_indoor"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="56dp"
+                android:text="@string/navi_indoor_entry"
+                android:contentDescription="@string/navi_indoor_description" />
+
+            <Button
                 android:id="@+id/btn_navigation_records"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

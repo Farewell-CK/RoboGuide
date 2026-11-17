@@ -63,7 +63,7 @@ class Captcha {
         for (i in 0 until DEFAULT_CODE_LENGTH) {
             mBuilder.append(CHARS[mRandom.nextInt(CHARS.size)])
         }
-        val upper = mBuilder.toString().toUpperCase()
+        val upper = mBuilder.toString().uppercase(java.util.Locale.getDefault())
         return if (upper.contains("O") && upper.contains("0")) {
             createCode()
         } else mBuilder.toString()
