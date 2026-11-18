@@ -135,12 +135,17 @@ impl ControlPlane {
         }
     }
 
-    /// Renews current-process liveness from an admitted continuous receive interval.
-    pub fn accept_session_liveness<S: SharedNodeStateReader + SharedNodeStateWriter>(
+    /// Renews live liveness and records the first admitted interval of each real session.
+    pub fn accept_session_liveness<
+        S: SharedNodeStateReader + SharedNodeStateWriter,
+        E: EventSink,
+    >(
         &mut self,
         state: &mut S,
         evidence: &NodeSessionLivenessEvidence,
         decision_at: TimestampMs,
+        correlation_id: &CorrelationId,
+        events: &mut E,
     ) -> Result<bool, ControlError> {
         let Some(session) = self.node_sessions.get(&evidence.node_id) else {
             return Ok(false);
@@ -203,8 +208,27 @@ impl ControlPlane {
             .node_sessions
             .get_mut(&evidence.node_id)
             .expect("session validated without mutation above");
+        let first = session.accepted_sequence == 0;
         session.accepted_sequence = evidence.last_sequence;
         session.accepted_received_at = evidence.last_received_at;
+        if first {
+            events.append(
+                evidence.last_received_at,
+                correlation_id,
+                None,
+                EventPayload::NodeSessionLivenessAccepted {
+                    node_id: evidence.node_id.clone(),
+                    session_id: evidence.session_id.clone(),
+                    lease_id: evidence.lease_id.clone(),
+                    first_sequence: evidence.first_sequence,
+                    last_sequence: evidence.last_sequence,
+                    activated_at: evidence.activated_at,
+                    first_received_at: evidence.first_received_at,
+                    last_received_at: evidence.last_received_at,
+                    maximum_gap_ms: evidence.maximum_gap_ms,
+                },
+            );
+        }
         Ok(true)
     }
 

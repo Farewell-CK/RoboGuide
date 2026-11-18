@@ -4,7 +4,9 @@ Current-session renewal advances the Controller's lease and live receive
 projection under the original writer. It uses the original admitted receive
 time. Unchanged reported health updates the live status and its freshness.
 Registration, route loss, expiry, and accepted health transitions retain
-durable evidence. Health transitions retain the existing heartbeat event type.
+durable evidence. The first accepted interval records its real Node session for
+existing session provenance consumers. Health transitions retain the existing
+heartbeat event type.
 
 Checkpoints retain Node registration and the latest health or reachability
 transition. Restore clears leases and starts every known Node as Unreachable.
