@@ -381,11 +381,12 @@ impl ArtifactClient {
         }
     }
 
-    /// Records one node-local replica transition in the rebuildable Spatial Memory catalog.
+    /// Records a receiver-owned replica transition with its actual accepted Node session.
     pub async fn record_replica(
         &self,
         manifest: &MapArtifactManifest,
         node_id: &NodeId,
+        session_id: &str,
         mission_id: &MissionId,
         status: ReplicaEvidenceStatus,
     ) -> Result<(), ArtifactError> {
@@ -405,6 +406,8 @@ impl ArtifactClient {
         });
         let response = self
             .request(reqwest::Method::POST, endpoint.clone())
+            .header("X-RoboGuide-Node-Id", node_id.as_str())
+            .header("X-RoboGuide-Session-Id", session_id)
             .json(&payload)
             .send()
             .await

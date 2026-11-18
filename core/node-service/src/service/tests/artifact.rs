@@ -195,7 +195,7 @@ async fn artifact_preparation_marker_blocks_mutable_source_reread_after_restart(
     );
 }
 
-/// Exact input-finalization retry stays fenced when durable staged bytes are unavailable.
+/// Exact finalization retries require durable bytes and the receiver's accepted session for evidence.
 #[tokio::test]
 async fn artifact_input_retry_reproves_local_bytes_before_replica_evidence() {
     use domain::{
@@ -240,6 +240,8 @@ async fn artifact_input_retry_reproves_local_bytes_before_replica_evidence() {
     let address = listener.local_addr().expect("artifact address reads");
     let replica_writes = Arc::new(AtomicUsize::new(0));
     let server_writes = Arc::clone(&replica_writes);
+    let replica_requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let server_requests = Arc::clone(&replica_requests);
     let body = serde_json::to_vec(&serde_json::json!({
         "status": "published",
         "manifest": manifest,
@@ -265,6 +267,7 @@ async fn artifact_input_retry_reproves_local_bytes_before_replica_evidence() {
                 body.clone()
             } else {
                 server_writes.fetch_add(1, Ordering::SeqCst);
+                server_requests.lock().unwrap().push(request.to_string());
                 b"{}".to_vec()
             };
             let response = format!(
@@ -353,6 +356,7 @@ async fn artifact_input_retry_reproves_local_bytes_before_replica_evidence() {
         &invocation_json,
     )
     .expect("workflow identity computes");
+    let receiver = catalog.node_id().to_string();
     let journal_path = crate::journal_path(state_dir.path());
     let journal = crate::ExecutionJournal::open(&journal_path).expect("journal opens");
     let spec = crate::ExecutionSpec::new(
@@ -394,7 +398,7 @@ async fn artifact_input_retry_reproves_local_bytes_before_replica_evidence() {
         engine
             .execute(
                 "import-recovery".to_string(),
-                invocation,
+                invocation.clone(),
                 vec!["base".to_string()]
             )
             .expect("exact retry is accepted"),
@@ -421,5 +425,65 @@ async fn artifact_input_retry_reproves_local_bytes_before_replica_evidence() {
         Some(crate::ArtifactFinalizationKind::Import)
     );
     assert_eq!(replica_writes.load(Ordering::SeqCst), 0);
+
+    let staged = state_dir.path().join("artifact-cache/inputs/lab-r1.bundle");
+    std::fs::create_dir_all(staged.parent().unwrap()).unwrap();
+    std::fs::write(staged, b"maps").unwrap();
+    engine
+        .execute(
+            "import-recovery".into(),
+            invocation.clone(),
+            vec!["base".into()],
+        )
+        .unwrap();
+    let unavailable = tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(unavailable.phase, ExecutionPhase::Unknown);
+    assert!(
+        unavailable
+            .reason
+            .contains("current accepted replica session is unavailable")
+    );
+    assert_eq!(replica_writes.load(Ordering::SeqCst), 0);
+
+    let _session = engine.publication_session("receiver-session").unwrap();
+    engine
+        .execute("import-recovery".into(), invocation, vec!["base".into()])
+        .unwrap();
+    let completed = tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        completed.phase,
+        ExecutionPhase::Completed,
+        "{}",
+        completed.reason
+    );
+    assert_eq!(replica_writes.load(Ordering::SeqCst), 2);
+    for request in replica_requests.lock().unwrap().iter() {
+        let headers = request
+            .split_once("\r\n\r\n")
+            .unwrap()
+            .0
+            .to_ascii_lowercase();
+        let receiver_header = format!("x-roboguide-node-id: {receiver}");
+        assert!(headers.lines().any(|line| line == receiver_header));
+        assert!(
+            headers
+                .lines()
+                .any(|line| line == "x-roboguide-session-id: receiver-session")
+        );
+    }
+    assert_eq!(
+        audit.get("import-recovery").unwrap().unwrap().status(),
+        crate::JournalStatus::Completed
+    );
+    assert_eq!(
+        audit.artifact_finalization("import-recovery").unwrap(),
+        None
+    );
     artifact_server.abort();
 }

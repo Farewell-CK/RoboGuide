@@ -495,16 +495,17 @@ impl ArtifactStager {
         }
     }
 
-    /// Reports a node-local replica transition for an already validated manifest.
+    /// Reports a receiver-owned replica transition with its actual accepted Node session.
     pub async fn record_replica(
         &self,
         manifest: &MapArtifactManifest,
         node_id: &NodeId,
+        session_id: &str,
         mission_id: &MissionId,
         status: ReplicaEvidenceStatus,
     ) -> Result<(), ArtifactError> {
         self.client
-            .record_replica(manifest, node_id, mission_id, status)
+            .record_replica(manifest, node_id, session_id, mission_id, status)
             .await
     }
 
