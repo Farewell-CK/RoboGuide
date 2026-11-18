@@ -372,6 +372,35 @@ def _engine(
     )
 
 
+def test_list_requests_filters_tenant_and_returns_recent_updates(tmp_path: Path) -> None:
+    """Tenant-scoped listing returns only the newest bounded projections."""
+    engine = _engine(
+        tmp_path,
+        FakeInterpreter([_assessment(), _assessment(), _assessment()]),
+        FakePlanner(),
+        FakeController(
+            _inventory(*_fixture_contracts()),
+            [SubmissionReceipt(True, 202, "Running")] * 3,
+        ),
+    )
+    with engine.authenticated_command("tenant-a", False):
+        first = engine.create("first")
+        newest = engine.create("newest")
+    with engine.authenticated_command("tenant-b", False):
+        foreign = engine.create("foreign")
+
+    listed = engine.list_requests("tenant-a", limit=20)
+    assert [record.request_id for record in listed] == [newest.request_id, first.request_id]
+    assert all(record.request_id != foreign.request_id for record in listed)
+    assert [record.request_id for record in engine.list_requests("tenant-a", limit=1)] == [
+        newest.request_id
+    ]
+    with pytest.raises(MissionRequestError, match="limit"):
+        engine.list_requests("tenant-a", limit=0)
+    with pytest.raises(MissionRequestError, match="tenant"):
+        engine.list_requests("*")
+
+
 def test_ambiguous_instruction_loops_before_planning_then_auto_accepts(tmp_path: Path) -> None:
     """Open questions prevent planning until a user message resolves the missing goal."""
     interpreter = FakeInterpreter([_assessment("Which destination?"), _assessment()])
