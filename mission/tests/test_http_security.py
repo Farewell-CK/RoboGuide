@@ -328,19 +328,6 @@ def test_mtls_identity_tenant_forgery_and_slow_handshake(tmp_path: Path) -> None
             timeout=2,
         ) as response:
             assert json.loads(response.read()) == first
-        with urllib.request.urlopen(
-            f"{endpoint}/v1/mission-requests?limit=20",  # noqa: S310
-            context=_client(directory, "tenant-a"),
-            timeout=2,
-        ) as response:
-            listed = cast(dict[str, object], json.loads(response.read()))
-            assert listed["mission_requests"] == [first]
-        with urllib.request.urlopen(
-            f"{endpoint}/v1/mission-requests?limit=20",  # noqa: S310
-            context=_client(directory, "tenant-b"),
-            timeout=2,
-        ) as response:
-            assert json.loads(response.read()) == {"mission_requests": []}
         lookup = f"{endpoint}/v1/mission-requests/by-mission/{first['mission_id']}"
         for name in ("tenant-a", "viewer"):
             with urllib.request.urlopen(

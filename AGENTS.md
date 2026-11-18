@@ -2412,7 +2412,17 @@ Native checks freeze successfully built binaries and source files. Use short fre
 sockets, and check the required source case, retained lineage and certificate validity before reusing
 historical process evidence. Commit verified functional changes promptly on the authorized branch.
 
-For Mission changes, run:
+Do not run the full repository test suite after every small or localized edit. Start with the
+narrowest relevant formatter, linter, type, unit, contract, or process check, and do not repeat an
+unchanged full check after each incremental edit. Expand to cross-package or full-workspace tests
+only when a check fails, the change crosses module boundaries, changes shared/public contracts,
+schemas, codecs, recovery generations, build/deployment behavior, or when a release/merge gate
+requires it. The full `uv run pytest -q` commands below are expanded gates, not the default for
+every edit; record any broader check that was intentionally deferred.
+
+For Mission changes, run the checks that cover the affected package by default. Use the full
+command set below for cross-package changes, failures that require expansion, or release/merge
+validation:
 
 ```bash
 uv run ruff format --check mission apps/mission-service tools/quality integrations/robonix-map-service \
@@ -2457,7 +2467,8 @@ Responses adapters classify only generated-plan Catalog violations as
 existing bounded Planner/Repairer recovery. Catalog loading, Provider, identity and deployment
 configuration failures retain their independent refusal paths; no requirements are auto-filled.
 
-For evaluation harness changes, run:
+For evaluation harness changes, run the affected checks by default. Use the full command set below
+for cross-package changes, failures that require expansion, or release/merge validation:
 
 ```bash
 uv run ruff format --check evaluation
@@ -2544,6 +2555,12 @@ matching, transport errors, intent round trips, and heterogeneous local mappings
 Use concise Conventional Commit subjects, for example `docs: define development
 baseline`. Pull requests identify the V2 responsibility and module, explain failure
 behavior, link ADRs/issues, and list checks.
+
+Every change to `main` must go through a GitHub pull request targeting `main`.
+Never push directly to `main`, including after a local merge. Merge on GitHub only
+after review and passing required CI for the version being merged. After merging,
+verify the remote `main` commit SHA and its own CI result. See the
+[merge workflow](docs/development/coding-standards.md).
 
 Authorized AI tools may manage Git operations. GitHub must show the responsible
 human as commit author/committer and PR author, never a tool or anonymous bot. The

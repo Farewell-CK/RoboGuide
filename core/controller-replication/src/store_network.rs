@@ -160,14 +160,30 @@ impl SqliteRaftStore {
     pub(crate) fn try_network_authority(
         &self,
     ) -> Result<(CertificateTrust, StoredMembership<u64, ReplicaMember>), String> {
+        let (trust, membership) = self.observe_network_authority()?;
+        Ok((
+            trust,
+            membership.ok_or("original committed network membership is unavailable")?,
+        ))
+    }
+
+    /// Separates an unapplied bootstrap membership from malformed or unavailable original storage.
+    pub(crate) fn observe_network_authority(
+        &self,
+    ) -> Result<
+        (
+            CertificateTrust,
+            Option<StoredMembership<u64, ReplicaMember>>,
+        ),
+        String,
+    > {
         self.read_network_snapshot(|transaction| {
             let trust: CertificateTrust = read_meta(transaction, "certificate_trust")
                 .map_err(|error| error.to_string())?
                 .ok_or("original network certificate authority is missing")?;
             trust.validate()?;
-            let membership = read_meta(transaction, "membership")
-                .map_err(|error| error.to_string())?
-                .ok_or("original committed network membership is unavailable")?;
+            let membership =
+                read_meta(transaction, "membership").map_err(|error| error.to_string())?;
             Ok((trust, membership))
         })
     }

@@ -72,6 +72,11 @@ enum Request {
     },
     /// Reads original committed activation without replaying the request.
     ObserveApplicationUpgrade,
+    /// Reads the selected voter's actual matched log position without requesting a handoff.
+    TransferLogProgress {
+        /// Exact original voter to observe.
+        member: u64,
+    },
     /// Requests the actual maintained leader transfer with independent no-child or original wait proof.
     TransferTo {
         /// Exact original configured voter to receive the election trigger.
@@ -483,6 +488,13 @@ async fn serve(config: Config) -> Result<(), String> {
                 node.abort_application_generation(epoch, original_command_id, command_id)
                     .await
                     .map(|receipt| json!({"receipt":receipt}))
+            }
+            Request::TransferLogProgress { member } => {
+                let progress = node.leader_transfer_log_progress(member);
+                let caught_up = progress
+                    .as_ref()
+                    .is_some_and(LeaderTransferLogProgress::caught_up);
+                Ok(json!({"progress":progress,"caught_up":caught_up}))
             }
             Request::TransferTo {
                 member,

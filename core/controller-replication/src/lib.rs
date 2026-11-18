@@ -189,6 +189,24 @@ pub struct LeaderTransferReceipt {
     pub state: String,
 }
 
+/// A readonly sample of one target's acknowledged prefix, not a handoff receipt or permission.
+#[derive(Debug, Serialize)]
+pub struct LeaderTransferLogProgress {
+    /// Actual source epoch at this sample.
+    pub source_epoch: ControllerEpoch,
+    /// Source's current required log position.
+    pub required_last_log_index: Option<u64>,
+    /// Target position acknowledged to the source, independent of complete content evidence.
+    pub matched_log_index: Option<u64>,
+}
+
+impl LeaderTransferLogProgress {
+    /// Reports only whether this sample meets the log-prefix prerequisite.
+    pub fn caught_up(&self) -> bool {
+        self.matched_log_index >= self.required_last_log_index
+    }
+}
+
 /// Member-local handoff evidence retained across process restart, never Raft snapshot authority.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1303,6 +1321,43 @@ impl ReplicaNode {
         self.check_epoch(epoch).await
     }
 
+    /// Observes the source's actual matched index before issuing a once-only handoff request.
+    pub fn leader_transfer_log_progress(
+        &self,
+        member_id: u64,
+    ) -> Option<LeaderTransferLogProgress> {
+        let metrics = self.raft.metrics();
+        let metrics = metrics.borrow();
+        (metrics.state == openraft::ServerState::Leader
+            && metrics.current_leader == Some(self.config.replica_id)
+            && member_id != self.config.replica_id
+            && metrics
+                .membership_config
+                .voter_ids()
+                .any(|id| id == member_id))
+        .then(|| Self::transfer_log_sample(&metrics, member_id))
+    }
+
+    /// Projects the same OpenRaft sample for observation and original transfer admission.
+    fn transfer_log_sample(
+        metrics: &openraft::RaftMetrics<u64, ReplicaMember>,
+        member_id: u64,
+    ) -> LeaderTransferLogProgress {
+        LeaderTransferLogProgress {
+            source_epoch: ControllerEpoch {
+                term: metrics.current_term,
+                replica_id: metrics.id,
+            },
+            required_last_log_index: metrics.last_log_index,
+            matched_log_index: metrics
+                .replication
+                .as_ref()
+                .and_then(|replication| replication.get(&member_id))
+                .and_then(|log| log.as_ref())
+                .map(|log| log.index),
+        }
+    }
+
     /// Requests a target voter to trigger a controlled election under the current source epoch.
     pub async fn request_leader_transfer(
         &self,
@@ -1345,15 +1400,8 @@ impl ReplicaNode {
             return Err("leader transfer target is not a current voter".into());
         }
         let metrics = self.raft.metrics().borrow().clone();
-        let required_last_log_index = metrics.last_log_index;
-        if !metrics
-            .replication
-            .as_ref()
-            .and_then(|replication| replication.get(&member_id))
-            .and_then(|log| log.as_ref())
-            .map(|log| Some(log.index) >= required_last_log_index)
-            .unwrap_or(required_last_log_index.is_none())
-        {
+        let progress = Self::transfer_log_sample(&metrics, member_id);
+        if !progress.caught_up() {
             return Err("leader transfer target has not caught up to the current log".into());
         }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
@@ -1361,7 +1409,7 @@ impl ReplicaNode {
             transfer_id: transfer_id.clone(),
             source_epoch: epoch,
             target: member_id,
-            required_last_log_index,
+            required_last_log_index: progress.required_last_log_index,
             state: "prepared".into(),
             confirmed_epoch: None,
             source_process: self.store.transfer_source_process(epoch)?,
@@ -1420,7 +1468,7 @@ impl ReplicaNode {
                 member_id,
                 transfer_id,
                 epoch,
-                required_last_log_index,
+                prepared.required_last_log_index,
                 prepared
                     .source_drain
                     .clone()

@@ -167,6 +167,7 @@ impl ReplicaNode {
                 .ok_or("voter contract requires the current leader")?,
             clock,
             caller.clone(),
+            false,
         )
         .await?;
         let view = self.store.network_view().await?;

@@ -595,7 +595,18 @@ where
                                 "original member lacks parent9 initialization contract".into()
                             );
                         }
-                        let (trust, actual) = current.store.try_network_authority()?;
+                        let (trust, actual) = current.store.observe_network_authority()?;
+                        connection
+                            .as_ref()
+                            .ok_or("initialization contract requires actual mutual TLS")?
+                            .authorize_with_trust(sender, current.config.replica_id, &trust)?;
+                        let policy = current
+                            .store
+                            .content_initialization_policy()
+                            .ok_or("original member lacks the declared initialization policy")?;
+                        let Some(actual) = actual else {
+                            return Ok(None);
+                        };
                         let metrics = current.raft.metrics().borrow().clone();
                         if actual != membership
                             || metrics.membership_config.as_ref() != &membership
@@ -609,11 +620,7 @@ where
                         current
                             .store
                             .validate_content_membership(membership.membership())?;
-                        connection
-                            .as_ref()
-                            .ok_or("initialization contract requires actual mutual TLS")?
-                            .authorize_with_trust(sender, current.config.replica_id, &trust)?;
-                        Ok(current.store.content_initialization_policy().cloned())
+                        Ok(Some(policy.clone()))
                     })
                     .await,
                 )
