@@ -57,21 +57,6 @@ fn historical_plan(value: &serde_json::Value) -> Result<MissionPlan, Orchestrati
     Ok(plan)
 }
 
-/// Holds Context safety/occupancy and continuity contracts fixed while relations and unfinished
-/// ContextRole bindings may be revised.
-fn context_contracts(plan: &MissionPlan) -> Vec<serde_json::Value> {
-    plan.contexts()
-        .iter()
-        .map(|context| {
-            let mut value = serde_json::to_value(context).expect("typed Context serialization");
-            let object = value.as_object_mut().expect("typed Context object");
-            object.remove("relations");
-            object.remove("roles");
-            value
-        })
-        .collect()
-}
-
 /// Ensures completed Tasks retain every ContextRole and grounded Actor they depended on.
 fn validate_completed_bindings(
     source: &MissionPlan,
@@ -157,8 +142,12 @@ fn validate_delta(
 ) -> Result<(), OrchestrationError> {
     if source.goal() != target.goal()
         || source.schema_version() != target.schema_version()
-        || context_contracts(source) != context_contracts(target)
         || source.contexts().len() != target.contexts().len()
+        || source
+            .contexts()
+            .iter()
+            .zip(target.contexts())
+            .any(|(source, target)| !source.same_revision_contract(target))
     {
         return Err(OrchestrationError::InvalidContract(
             "revision changed original goal, schema or Context safety contract".into(),

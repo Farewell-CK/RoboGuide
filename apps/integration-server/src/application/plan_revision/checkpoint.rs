@@ -287,6 +287,13 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<(), Stri
                         "applied switch differs from original candidate/Review/version".into(),
                     );
                 }
+                switching::validate_binding_trigger(
+                    controller,
+                    &switch.source_group,
+                    &source_plan(controller, &mission, switch.source_revision)?,
+                    &source_plan(controller, &mission, version.revision)?,
+                    switch.trigger,
+                )?;
                 for attempt in &switch.attempts {
                     if !super::super::safety_stop::attempt_confirmed(
                         controller,

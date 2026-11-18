@@ -226,8 +226,6 @@ fn revision_inherits_completed_task_and_rejects_renamed_repetition() {
             }
         }
     }
-    // The completed prepare Task keeps its edge Actor, while the unfinished transport Tasks
-    // move from the failed carrier Actor to a newly introduced replacement Actor.
     for role in document["contexts"][0]["roles"].as_array_mut().unwrap() {
         if role["id"] == "carrier" {
             role["actor"] = "replacement-carrier".into();
@@ -248,6 +246,17 @@ fn revision_inherits_completed_task_and_rejects_renamed_repetition() {
         .validate_plan_revision(&mission, &target, &control)
         .unwrap();
     assert_eq!(completed, BTreeSet::from([first.task_id().clone()]));
+    let mut added_role = document.clone();
+    added_role["contexts"][0]["roles"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"id":"added-role","actor":"edge"}));
+    let changed_contract = decode_mission_plan(&added_role.to_string()).unwrap();
+    assert!(
+        orchestrator
+            .validate_plan_revision(&mission, &changed_contract, &control)
+            .is_err()
+    );
     let mut repeat = document.clone();
     let mut renamed = repeat["tasks"][0].clone();
     renamed["id"] = "renamed-side-effect".into();

@@ -222,6 +222,68 @@ impl Fixture {
     }
 }
 
+/// An administrative Review is not local-execution failure evidence.
+#[test]
+fn reviewed_actor_failover_requires_a_current_failed_attempt() {
+    let fixture = Fixture::new();
+    fixture.install_for_trigger(true);
+    let mission = fixture.plan.goal().mission_id();
+    let mut alternate = fixture.alternative();
+    alternate["contexts"][0]["roles"][0]["actor"] = "replacement-carrier".into();
+    for task in alternate["tasks"].as_array_mut().unwrap() {
+        for role in task["roles"].as_array_mut().unwrap() {
+            if role["actor"] == "carrier" {
+                role["actor"] = "replacement-carrier".into();
+            }
+        }
+    }
+    fixture
+        .command(
+            "failover-ticket",
+            1,
+            serde_json::json!({"kind":"request-candidate","ticket_id":"failover"}),
+            "proposer",
+        )
+        .unwrap();
+    let submitted = fixture
+        .command(
+            "failover-output",
+            2,
+            serde_json::json!({"kind":"submit-candidate","ticket_id":"failover","plan":alternate,
+            "provenance":{"kind":"operator","principal":"proposer"}}),
+            "proposer",
+        )
+        .unwrap();
+    fixture.command(
+        "failover-review", 3,
+        serde_json::json!({"kind":"review-candidate","ticket_id":"failover",
+            "plan_digest":submitted["plan_digest"],"decision":"approve","reason":"bind exact output"}),
+        "administrator",
+    ).unwrap();
+    let refusal = fixture.command(
+        "manual-failover", 4,
+        serde_json::json!({"kind":"request-switch","ticket_id":"failover","target_group_id":"successor"}),
+        "administrator",
+    ).unwrap_err();
+    assert!(refusal.contains("requires the original local-execution-failed trigger"));
+    fixture.transition(|controller| {
+        assert!(
+            !switching::observe_trigger(
+                controller,
+                mission,
+                Trigger::LocalExecutionFailed,
+                fixture.clock.now(),
+            )
+            .unwrap()
+        );
+        assert!(
+            controller.runtime_revisions[mission.as_str()]
+                .switches
+                .is_empty()
+        );
+    });
+}
+
 /// Discovery is current evidence filtered by actual subject/tenant and cannot renew original authority.
 #[test]
 fn generation_work_discovery_is_readonly_current_and_tenant_principal_scoped() {

@@ -2,20 +2,6 @@
 
 use super::*;
 
-/// Returns Context safety contracts while allowing unfinished ContextRole bindings to change.
-fn context_contracts(plan: &MissionPlan) -> Vec<serde_json::Value> {
-    plan.contexts()
-        .iter()
-        .map(|context| {
-            let mut value = serde_json::to_value(context).expect("typed Context serialization");
-            let object = value.as_object_mut().expect("typed Context object");
-            object.remove("relations");
-            object.remove("roles");
-            value
-        })
-        .collect()
-}
-
 /// Keeps completed Task Actor/ContextRole bindings immutable across a Group replacement.
 fn validate_completed_bindings(
     source: &MissionPlan,
@@ -25,7 +11,11 @@ fn validate_completed_bindings(
     if source.goal() != target.goal()
         || source.schema_version() != target.schema_version()
         || source.contexts().len() != target.contexts().len()
-        || context_contracts(source) != context_contracts(target)
+        || source
+            .contexts()
+            .iter()
+            .zip(target.contexts())
+            .any(|(source, target)| !source.same_revision_contract(target))
     {
         return Err(ControlError::InvalidProposal(
             "revision source, target, original goal, schema or Context safety contract is invalid"
@@ -145,30 +135,9 @@ impl ControlPlane {
         validate_completed_bindings(source_plan, target_plan, &completed)?;
         let mut candidate = self.clone();
         let mission_id = source_plan.goal().mission_id().clone();
-        let completed_actors: BTreeSet<_> = completed
-            .iter()
-            .flat_map(|task_id| source_plan.task_graph().task(task_id))
-            .flat_map(|task| {
-                task.requirement()
-                    .roles()
-                    .iter()
-                    .filter_map(|role| role.actor_id().cloned())
-                    .chain(
-                        task.continuity()
-                            .context_roles()
-                            .values()
-                            .filter_map(|role_id| {
-                                source_plan.contexts().iter().find_map(|context| {
-                                    context.role(role_id).map(|role| role.actor_id().clone())
-                                })
-                            }),
-                    )
-            })
-            .collect();
         let stale_actors: BTreeSet<_> = source_plan
             .actors()
             .iter()
-            .filter(|actor| !completed_actors.contains(actor.id()))
             .filter(|actor| {
                 target_plan
                     .actors()
