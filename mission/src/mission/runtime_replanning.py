@@ -501,8 +501,9 @@ class RuntimeReplanningWorker:
                 candidate["remaining_switch_ms"],
             )
             current = controller_plan(view["current_plan"])
-            if current.mission.to_json(current.schema_version) != record.plan.mission.to_json(
-                record.plan.schema_version
+            if (
+                current.mission.mission_id != record.plan.mission.mission_id
+                or current.mission.objective != record.plan.mission.objective
             ):
                 raise RuntimeWorkError("current Mission changed the original accepted goal")
             original = {

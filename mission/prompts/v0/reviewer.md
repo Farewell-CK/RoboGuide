@@ -325,9 +325,13 @@ Reject meta-tasks that only define requirements, analyze the request, design int
 roles, or ask another planner to continue planning.
 
 When `runtime_replanning_context` is present, review a proposed revision against the exact original
-goal and actual completed Tasks. Reject any removal or change of a completed Task, repeated completed
-effect disguised by a fresh name, reused unfinished Task ID, weakened Actor/Context safety contract,
-or invented current fact. The supplied original grounding snapshot remains historical; it cannot
+Mission `id`, `objective` and actual completed Tasks. Reject any removal or change of a completed
+Task or its Actor/ContextRole binding, repeated completed effect disguised by a fresh name, reused
+unfinished Task ID, weakened Actor/Context safety contract, or invented current fact. When
+`runtime_replanning_context.fault` is `local-execution-failed`, an unfinished replacement Task may
+introduce or switch to another already admitted Physical Entity from `grounding_context`, provided
+the Mission identity, objective, safety contracts and all completed Task definitions remain unchanged.
+The supplied original grounding snapshot remains historical; it cannot
 renew freshness or authorize a physical action. Missing evidence stays unknown. Your structured
 decision is semantic advice. It cannot grant administrative Review authority, certify a stop, replace
 Control commitment or declare the independent original Mission goal satisfied.

@@ -57,19 +57,95 @@ fn historical_plan(value: &serde_json::Value) -> Result<MissionPlan, Orchestrati
     Ok(plan)
 }
 
-/// Holds Context roles, safety/occupancy and continuity contracts fixed while relations may be revised.
+/// Holds Context safety/occupancy and continuity contracts fixed while relations and unfinished
+/// ContextRole bindings may be revised.
 fn context_contracts(plan: &MissionPlan) -> Vec<serde_json::Value> {
     plan.contexts()
         .iter()
         .map(|context| {
             let mut value = serde_json::to_value(context).expect("typed Context serialization");
-            value
-                .as_object_mut()
-                .expect("typed Context object")
-                .remove("relations");
+            let object = value.as_object_mut().expect("typed Context object");
+            object.remove("relations");
+            object.remove("roles");
             value
         })
         .collect()
+}
+
+/// Ensures completed Tasks retain every ContextRole and grounded Actor they depended on.
+fn validate_completed_bindings(
+    source: &MissionPlan,
+    target: &MissionPlan,
+    completed: &BTreeSet<TaskId>,
+) -> Result<(), OrchestrationError> {
+    for task_id in completed {
+        let Some(task) = source.task_graph().task(task_id) else {
+            continue;
+        };
+        let context_id = task.continuity().context_id();
+        let source_context = source
+            .contexts()
+            .iter()
+            .find(|context| context.context_id() == context_id)
+            .expect("MissionPlan validation guarantees source Context");
+        let target_context = target
+            .contexts()
+            .iter()
+            .find(|context| context.context_id() == context_id)
+            .ok_or_else(|| {
+                OrchestrationError::InvalidContract(
+                    "revision removed the Context used by a completed Task".into(),
+                )
+            })?;
+        for role_id in task.continuity().context_roles().values() {
+            let source_role = source_context
+                .role(role_id)
+                .expect("validated source ContextRole");
+            if target_context.role(role_id) != Some(source_role) {
+                return Err(OrchestrationError::InvalidContract(
+                    "revision changed a ContextRole used by a completed Task".into(),
+                ));
+            }
+            let source_actor = source
+                .actors()
+                .iter()
+                .find(|actor| actor.id() == source_role.actor_id())
+                .expect("MissionPlan validation guarantees source Actor");
+            if target
+                .actors()
+                .iter()
+                .find(|actor| actor.id() == source_actor.id())
+                != Some(source_actor)
+            {
+                return Err(OrchestrationError::InvalidContract(
+                    "revision changed the Actor binding used by a completed Task".into(),
+                ));
+            }
+        }
+        for actor_id in task
+            .requirement()
+            .roles()
+            .iter()
+            .filter_map(|role| role.actor_id())
+        {
+            let source_actor = source
+                .actors()
+                .iter()
+                .find(|actor| actor.id() == actor_id)
+                .expect("MissionPlan validation guarantees source Actor");
+            if target
+                .actors()
+                .iter()
+                .find(|actor| actor.id() == source_actor.id())
+                != Some(source_actor)
+            {
+                return Err(OrchestrationError::InvalidContract(
+                    "revision changed the Actor binding used by a completed Task".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Validates a semantic replacement without changing original facts or permitting renamed repetition.
@@ -80,15 +156,15 @@ fn validate_delta(
     used: &BTreeSet<TaskId>,
 ) -> Result<(), OrchestrationError> {
     if source.goal() != target.goal()
-        || source.actors() != target.actors()
         || source.schema_version() != target.schema_version()
-        || source.binding_semantics() != target.binding_semantics()
         || context_contracts(source) != context_contracts(target)
+        || source.contexts().len() != target.contexts().len()
     {
         return Err(OrchestrationError::InvalidContract(
-            "revision changed original goal, Actors, schema or Context safety contract".into(),
+            "revision changed original goal, schema or Context safety contract".into(),
         ));
     }
+    validate_completed_bindings(source, target, completed)?;
     for id in completed {
         if source.task_graph().task(id).is_none()
             || source.task_graph().task(id) != target.task_graph().task(id)

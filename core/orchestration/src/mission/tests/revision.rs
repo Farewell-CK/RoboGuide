@@ -226,6 +226,23 @@ fn revision_inherits_completed_task_and_rejects_renamed_repetition() {
             }
         }
     }
+    // The completed prepare Task keeps its edge Actor, while the unfinished transport Tasks
+    // move from the failed carrier Actor to a newly introduced replacement Actor.
+    for role in document["contexts"][0]["roles"].as_array_mut().unwrap() {
+        if role["id"] == "carrier" {
+            role["actor"] = "replacement-carrier".into();
+        }
+    }
+    for task in document["tasks"].as_array_mut().unwrap() {
+        if task["id"].as_str() == Some(first_id) {
+            continue;
+        }
+        for role in task["roles"].as_array_mut().unwrap() {
+            if role["actor"] == "carrier" {
+                role["actor"] = "replacement-carrier".into();
+            }
+        }
+    }
     let target = decode_mission_plan(&document.to_string()).unwrap();
     let completed = orchestrator
         .validate_plan_revision(&mission, &target, &control)
