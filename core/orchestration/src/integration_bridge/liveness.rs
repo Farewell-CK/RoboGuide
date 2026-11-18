@@ -15,8 +15,13 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .node_liveness_evidence()
             .map_err(IntegrationRuntimeError::Protocol)?;
         for evidence in evidence {
-            self.control
-                .accept_session_liveness(&mut self.state, &evidence, now)?;
+            self.control.accept_session_liveness(
+                &mut self.state,
+                &evidence,
+                now,
+                correlation_id,
+                &mut self.events,
+            )?;
             self.control.accept_session_reported_health(
                 &mut self.state,
                 &evidence,
@@ -31,6 +36,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
     pub fn refresh_node_liveness(
         &mut self,
         decision_at: TimestampMs,
+        correlation_id: &CorrelationId,
     ) -> Result<(), IntegrationRuntimeError> {
         use ports::NodeLivenessReader;
         let evidence = self
@@ -38,8 +44,13 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .node_liveness_evidence()
             .map_err(IntegrationRuntimeError::Protocol)?;
         for evidence in evidence {
-            self.control
-                .accept_session_liveness(&mut self.state, &evidence, decision_at)?;
+            self.control.accept_session_liveness(
+                &mut self.state,
+                &evidence,
+                decision_at,
+                correlation_id,
+                &mut self.events,
+            )?;
         }
         Ok(())
     }

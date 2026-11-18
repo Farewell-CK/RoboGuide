@@ -238,7 +238,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 "ingress receive time exceeds decision time".into(),
             ));
         }
-        self.refresh_node_liveness(decision_at)?;
+        self.refresh_node_liveness(decision_at, correlation_id)?;
         self.runtime.refresh_peer_channel_deadlines(decision_at);
         match event {
             GrpcNodeEvent::Registered {
