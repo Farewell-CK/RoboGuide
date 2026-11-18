@@ -583,9 +583,7 @@ class MissionRequestStore:
         decoded: object = json.loads(str(row[0]))
         return _restore_record(decoded)
 
-    def list_requests(
-        self, tenant_id: str, *, limit: int = 20
-    ) -> tuple[MissionRequestRecord, ...]:
+    def list_requests(self, tenant_id: str, *, limit: int = 20) -> tuple[MissionRequestRecord, ...]:
         """Return the most recently updated requests owned by one tenant."""
         if (
             not isinstance(tenant_id, str)
