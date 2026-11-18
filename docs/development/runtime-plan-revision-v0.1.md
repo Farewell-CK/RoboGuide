@@ -41,6 +41,13 @@ namespace、倒退或不可读时不授予新工作。迁移到另一时钟域�
 完整 generations/State/权限/原预算仍满足，才在单一应用事务提交新版本。确认前不释放承诺，
 不发送新 Execute。超时或证据不确定保留 manual hold 和所有权。
 
+只有原策略允许的 `local-execution-failed` 和原 Group 的当前实际失败 attempt 同时存在时，
+已 Review 的候选才可替换未完成 Task 的 Actor/ContextRole 绑定。手动切换、Unknown 和
+语义拒绝不能授权换绑。ContextRole 的身份、容量 envelope 和其他安全合同不变；已满足
+Task 的定义和绑定保持原样，部署配置的固定 Actor placement 也不撤销。恢复时重验原
+switch trigger 和失败 attempt，不把 Review
+或触发标签当作失败证据。
+
 旧 Group 标记已被替代并 Released，保留原 Task 状态和全部 Runtime history；旧 Group 的
 Execute outbox 永久被拦截。已满足事实只从真实原 Group 继承，后续原 Group outcome 不推动
 新版本。新 Group 重新准备 Memory 和真实运行资格。原 Group-scoped selector 不能直接消费于

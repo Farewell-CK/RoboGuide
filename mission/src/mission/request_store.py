@@ -583,6 +583,32 @@ class MissionRequestStore:
         decoded: object = json.loads(str(row[0]))
         return _restore_record(decoded)
 
+    def list_requests(self, tenant_id: str, *, limit: int = 20) -> tuple[MissionRequestRecord, ...]:
+        """Return the most recently updated requests owned by one tenant."""
+        if (
+            not isinstance(tenant_id, str)
+            or not tenant_id.strip()
+            or tenant_id == "*"
+            or type(limit) is not int
+            or not 1 <= limit <= 64
+        ):
+            raise MissionRequestError(
+                "Mission Request list requires one tenant and a limit from 1 to 64"
+            )
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT r.document_json
+                FROM mission_requests r
+                JOIN mission_request_tenants t ON t.request_id = r.request_id
+                WHERE t.tenant_id = ?
+                ORDER BY r.updated_at_ms DESC, r.request_id DESC
+                LIMIT ?
+                """,
+                (tenant_id, limit),
+            ).fetchall()
+        return tuple(_restore_record(json.loads(str(row[0]))) for row in rows)
+
     def request_for_mission(self, mission_id: str, tenant_id: str) -> str | None:
         """Use the original unique Mission index and tenant join; legacy absence stays hidden."""
         if (

@@ -338,6 +338,46 @@ class MissionRequestHandler(BaseHTTPRequestHandler):
                     },
                 )
             return
+        if path == "/v1/mission-requests":
+            principal = self._principal
+            if principal is None or principal[2] == "*":
+                self._send(
+                    HTTPStatus.FORBIDDEN,
+                    {"error": "Mission Request list requires one tenant"},
+                )
+                return
+            try:
+                query = parse_qs(
+                    self.path.partition("?")[2], keep_blank_values=True, max_num_fields=1
+                )
+                if set(query) - {"limit"} or any(len(values) != 1 for values in query.values()):
+                    raise ValueError("invalid Mission Request list query")
+                limit = int(query.get("limit", ["20"])[0])
+            except ValueError:
+                self._send(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "invalid Mission Request list limit"},
+                )
+                return
+            try:
+                records = self.server.engine.list_requests(principal[2], limit=limit)
+            except MissionRequestError:
+                self._send(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "invalid Mission Request list limit"},
+                )
+                return
+            except (OSError, sqlite3.Error):
+                self._send(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"error": "Mission Request list unavailable"},
+                )
+                return
+            self._send(
+                HTTPStatus.OK,
+                {"mission_requests": [record.to_json() for record in records]},
+            )
+            return
         prefix = "/v1/mission-requests/"
         if path.startswith(prefix):
             parts = path[len(prefix) :].split("/")
@@ -1006,6 +1046,8 @@ class MissionRequestHttpServer(ThreadingHTTPServer):
         """Return the minimum role required by one Mission Service route."""
         if method == "GET" and path in {"/metrics", "/metrics/prometheus"}:
             return "metrics-reader"
+        if method == "GET" and path == "/v1/mission-requests":
+            return "viewer"
         if method == "POST" and path == "/v1/tenant-migrations":
             return "admin"
         if method == "POST" and path == "/v1/http-commands/observe":

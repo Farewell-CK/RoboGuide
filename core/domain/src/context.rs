@@ -275,6 +275,23 @@ impl CoordinationContext {
             .find(|role| role.context_role_id() == role_id)
     }
 
+    /// Compares the fixed Context contract without comparing execution relations or Actor assignments.
+    pub fn same_revision_contract(&self, target: &Self) -> bool {
+        self.context_id == target.context_id
+            && self.executor_constraints == target.executor_constraints
+            && self.coupling_mode == target.coupling_mode
+            && self.shared_view == target.shared_view
+            && self.peer_channel == target.peer_channel
+            && self
+                .roles
+                .iter()
+                .map(|role| (role.context_role_id(), role.resource_envelope()))
+                .eq(target
+                    .roles
+                    .iter()
+                    .map(|role| (role.context_role_id(), role.resource_envelope())))
+    }
+
     /// Returns execution-time relation specifications in declaration order.
     pub fn relations(&self) -> &[ExecutionRelationSpec] {
         &self.relations

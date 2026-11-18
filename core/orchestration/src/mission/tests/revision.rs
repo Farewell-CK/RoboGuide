@@ -137,6 +137,15 @@ fn revision_inherits_completed_task_and_rejects_renamed_repetition() {
     let mut nodes = InMemorySharedNodeState::new();
     let trace = CorrelationId::new("completed-revision-unit").unwrap();
     let mut events = InMemoryEventLog::new();
+    let original_carrier = domain::ActorId::new("carrier").unwrap();
+    let original_placement = domain::NodeId::new("retained-carrier-node").unwrap();
+    control
+        .set_actor_node_constraint(
+            mission.clone(),
+            original_carrier.clone(),
+            original_placement.clone(),
+        )
+        .unwrap();
     control
         .register_node(
             &mut nodes,
@@ -226,11 +235,37 @@ fn revision_inherits_completed_task_and_rejects_renamed_repetition() {
             }
         }
     }
+    for role in document["contexts"][0]["roles"].as_array_mut().unwrap() {
+        if role["id"] == "carrier" {
+            role["actor"] = "replacement-carrier".into();
+        }
+    }
+    for task in document["tasks"].as_array_mut().unwrap() {
+        if task["id"].as_str() == Some(first_id) {
+            continue;
+        }
+        for role in task["roles"].as_array_mut().unwrap() {
+            if role["actor"] == "carrier" {
+                role["actor"] = "replacement-carrier".into();
+            }
+        }
+    }
     let target = decode_mission_plan(&document.to_string()).unwrap();
     let completed = orchestrator
         .validate_plan_revision(&mission, &target, &control)
         .unwrap();
     assert_eq!(completed, BTreeSet::from([first.task_id().clone()]));
+    let mut added_role = document.clone();
+    added_role["contexts"][0]["roles"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"id":"added-role","actor":"edge"}));
+    let changed_contract = decode_mission_plan(&added_role.to_string()).unwrap();
+    assert!(
+        orchestrator
+            .validate_plan_revision(&mission, &changed_contract, &control)
+            .is_err()
+    );
     let mut repeat = document.clone();
     let mut renamed = repeat["tasks"][0].clone();
     renamed["id"] = "renamed-side-effect".into();
@@ -294,6 +329,13 @@ fn revision_inherits_completed_task_and_rejects_renamed_repetition() {
     let restored =
         MissionOrchestrator::restore_json(&orchestrator.checkpoint_json().unwrap()).unwrap();
     let restored_control = ControlPlane::restore(control.checkpoint()).unwrap();
+    assert_eq!(
+        restored_control
+            .actor_node_constraint(&mission, &original_carrier)
+            .unwrap()
+            .node_id(),
+        &original_placement,
+    );
     restored
         .validate_control_authority(&restored_control)
         .unwrap();

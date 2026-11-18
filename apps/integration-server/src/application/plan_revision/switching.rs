@@ -40,12 +40,52 @@ pub(super) fn attempts(
         .collect()
 }
 
+/// Requires the original failed attempt and policy trigger before transferring Actor authority.
+pub(super) fn validate_binding_trigger(
+    controller: &ControllerState,
+    source_group: &domain::ExecutionGroupId,
+    source: &domain::MissionPlan,
+    target: &domain::MissionPlan,
+    trigger: Option<Trigger>,
+) -> Result<(), String> {
+    if source.actors() == target.actors()
+        && source
+            .contexts()
+            .iter()
+            .map(|context| context.roles())
+            .eq(target.contexts().iter().map(|context| context.roles()))
+    {
+        return Ok(());
+    }
+    if trigger != Some(Trigger::LocalExecutionFailed)
+        || !controller
+            .bridge
+            .attempt_history()
+            .into_iter()
+            .any(|attempt| {
+                let command = attempt.command();
+                command.group_id() == source_group
+                    && attempt.status() == runtime::ExecutionStatus::Failed
+                    && controller.bridge.current_task_attempt_id(
+                        source_group,
+                        command.task_ref(),
+                        command.role_id(),
+                    ) == Some(attempt.execution_id())
+            })
+    {
+        return Err("Actor failover requires the original local-execution-failed trigger and failed attempt".into());
+    }
+    Ok(())
+}
+
 /// Confirms the exact current candidate, completion precondition and actual current review delegation.
+#[allow(clippy::too_many_arguments)]
 fn reviewed_plan(
     controller: &ControllerState,
     mission: &domain::MissionId,
     state: &RevisionState,
     ticket: &str,
+    trigger: Option<Trigger>,
     now: domain::TimestampMs,
     deployment: Option<&DeploymentFeasibility>,
     feed: Option<&TaskVerifierFeed>,
@@ -94,6 +134,13 @@ fn reviewed_plan(
         return Err("reviewed candidate digest differs from original bytes".into());
     }
     coordination::validate_candidate(controller, mission, candidate, &plan, now)?;
+    validate_binding_trigger(
+        controller,
+        execution.group_id(),
+        execution.plan(),
+        &plan,
+        trigger,
+    )?;
     controller
         .orchestrator
         .validate_plan_revision(mission, &plan, controller.bridge.control())
@@ -147,7 +194,7 @@ pub(super) fn begin(
         None
     } else {
         Some(reviewed_plan(
-            controller, mission, state, ticket, now, deployment, feed,
+            controller, mission, state, ticket, trigger, now, deployment, feed,
         )?)
     };
     let execution = controller
@@ -465,6 +512,7 @@ pub(super) fn commit(
         mission,
         state,
         &switch.ticket_id,
+        switch.trigger,
         now,
         deployment,
         feed,
@@ -656,6 +704,7 @@ pub(crate) fn observe_trigger(
                         mission,
                         &state,
                         &candidate.ticket_id,
+                        Some(trigger),
                         now,
                         None,
                         None,

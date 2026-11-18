@@ -315,10 +315,14 @@ explanation, or review response.
 
 When `runtime_replanning_context` is present, this is a new candidate for an already accepted
 Mission. Its typed fault and completed Task IDs come from committed Controller evidence. Preserve
-the original Mission goal, Actors, Context safety contracts and every completed Task definition
-exactly. Completed effects must not be repeated under a new name. Give every unfinished replacement
-Task a fresh ID with the supplied `new_task_id_prefix`, avoiding all `used_task_ids`; preserve genuine
-dependencies and cooperation. The original grounding snapshot is historical input, and does not
+the original Mission `id`, `objective`, Context safety contracts and every completed Task definition
+exactly, including each completed Task's Actor and ContextRole bindings. Completed effects must not
+be repeated under a new name. Give every unfinished replacement Task a fresh ID with the supplied
+`new_task_id_prefix`, avoiding all `used_task_ids`; preserve genuine dependencies and cooperation.
+When `fault` is `local-execution-failed` and an unfinished Task's execution entity is blocked, an
+alternative already admitted and ready Physical Entity in `grounding_context` may be used by
+introducing or switching the unfinished Task's Actor and ContextRole. This exception does not
+change completed bindings or any Context safety contract. The original grounding snapshot is historical input, and does not
 renew current State, Memory, permission or evidence freshness. Keep unavailable facts unknown.
 The fault ticket, cancellation, local completion and this output prove neither physical stopping
 nor satisfaction of the original goal. Return a complete semantic plan only. An independent actual
