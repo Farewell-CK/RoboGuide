@@ -2545,6 +2545,12 @@ Use concise Conventional Commit subjects, for example `docs: define development
 baseline`. Pull requests identify the V2 responsibility and module, explain failure
 behavior, link ADRs/issues, and list checks.
 
+Every change to `main` must go through a GitHub pull request targeting `main`.
+Never push directly to `main`, including after a local merge. Merge on GitHub only
+after review and passing required CI for the version being merged. After merging,
+verify the remote `main` commit SHA and its own CI result. See the
+[merge workflow](docs/development/coding-standards.md).
+
 Authorized AI tools may manage Git operations. GitHub must show the responsible
 human as commit author/committer and PR author, never a tool or anonymous bot. The
 human owner reviews the full diff and checks.
