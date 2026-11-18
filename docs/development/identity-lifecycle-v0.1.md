@@ -6,6 +6,9 @@ Controller wrapper 为 `roboguide.controller-checkpoint/v29`。旧 wrapper 不�
 
 ## 管理与传输权威
 
+静态字典可通过显式管理员采用入口进入生命周期热管理；采用 registry v0.2 保留原静态
+映射、明确归属、原始时间与主体。它不是自动升级。见[在线采用合同](hot-node-enrollment-v0.1.md)。
+
 `ROBOGUIDE_NODE_MTLS_NODE_CERT_DIGESTS` 支持既有静态映射及
 `roboguide.node-identity-registry/v0.1` JSON。生命周期 profile 必须同时配置 Node mTLS
 server cert/key/client CA。空 `records` 合法：只有部署后续授权、正式注册和实际工作流才产生

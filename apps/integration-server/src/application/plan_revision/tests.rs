@@ -2,6 +2,8 @@
 
 mod memory_tests;
 
+mod deployment_tests;
+
 use super::*;
 
 /// Owns original file authorization, SQLite and a zero-attempt Controller without fabricating transport identity.
@@ -90,6 +92,7 @@ impl Fixture {
             )
             .unwrap();
         let controller = Arc::new(Mutex::new(ControllerState {
+            published_deployments: Default::default(),
             federation: Default::default(),
             bridge: IntegrationRuntimeBridge::new(
                 control,

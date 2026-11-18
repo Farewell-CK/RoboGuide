@@ -123,10 +123,10 @@ def write_configuration(
         "mission_service": mission_service,
         "config": "model.toml",
         "session_dir": str(global_state_directory() / "sessions"),
-        "answer_mode": "grounded",
-        "tool_limit": 4,
-        "call_limit": 3,
-        "turn_seconds": 60,
+        "answer_mode": "agent",
+        "tool_limit": 12,
+        "call_limit": 8,
+        "turn_seconds": 120,
     }
     if tenant is not None:
         profile["tenant"] = identifier(tenant)

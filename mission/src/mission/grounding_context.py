@@ -11,6 +11,7 @@ from enum import StrEnum
 from typing import cast
 
 from mission.models import JSONObject, JSONValue
+from mission.origin_evidence import ORIGIN_SCHEMA, validate_origin
 from mission.planning_world_evidence import (
     AuthoritativePlanningWorldEvidence,
     PlanningWorldEvidenceError,
@@ -19,6 +20,7 @@ from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticEvi
 
 GROUNDING_CONTEXT_SCHEMA = "roboguide.grounding-context/v0.2"
 GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA = "roboguide.grounding-context/v0.3"
+GROUNDING_CONTEXT_CONTENT_SCHEMA = "roboguide.grounding-context/v0.4"
 LEGACY_GROUNDING_CONTEXT_SCHEMA = "roboguide.grounding-context/v0.1"
 GROUNDING_SELECTION_POLICY = "roboguide.mission-grounding/admitted-world-and-global-memory/v0.2"
 PHYSICAL_ENTITY_REFERENCE_SCHEMA = "roboguide.world.physical-entity-reference/v0.1"
@@ -49,6 +51,7 @@ class MemoryContentStatus(StrEnum):
     """Describe how much of one discovered Memory revision entered the snapshot."""
 
     METADATA_ONLY = "MetadataOnly"
+    VERIFIED_ORIGIN = "VerifiedReportedOrigin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,9 +204,10 @@ class MemoryGroundingEvidence:
     source_task_ref: JSONObject | None
     created_at_ms: int
     content_status: MemoryContentStatus = MemoryContentStatus.METADATA_ONLY
+    content: JSONObject | None = None
 
     def __post_init__(self) -> None:
-        """Enforce the first grounding slice's global metadata-only Memory boundary."""
+        """Enforce Global scope and exact provenance for explicitly verified origin content."""
         for field, value in (
             ("evidence_id", self.evidence_id),
             ("memory_id", self.memory_id),
@@ -221,6 +225,32 @@ class MemoryGroundingEvidence:
             raise GroundingContextError("Memory visibility is unsupported")
         if not isinstance(self.content_status, MemoryContentStatus):
             raise GroundingContextError("Memory grounding content status must be explicit")
+        if self.content_status == MemoryContentStatus.METADATA_ONLY:
+            if self.content is not None:
+                raise GroundingContextError("metadata-only Memory cannot embed content")
+        else:
+            if (
+                self.payload_schema != ORIGIN_SCHEMA
+                or self.kind != "experience"
+                or self.provider_id != "reported-origins"
+                or self.media_type != "application/json"
+                or self.visibility != "exchangeable"
+                or self.content is None
+            ):
+                raise GroundingContextError("only qualified reported origins admit bytes")
+            try:
+                validate_origin(
+                    self.content,
+                    memory_id=self.memory_id,
+                    owner=self.owner,
+                    artifact=self.artifact,
+                    source_mission_id=self.source_mission_id,
+                    source_execution_id=self.source_execution_id,
+                    source_task_ref=self.source_task_ref,
+                )
+            except (ValueError, OverflowError) as error:
+                raise GroundingContextError(str(error)) from error
+            object.__setattr__(self, "content", _clone_object(self.content, "origin content"))
         _require_nonnegative(self.created_at_ms, "created_at_ms")
         if self.source_mission_id is not None:
             _require_text(self.source_mission_id, "source_mission_id")
@@ -241,12 +271,12 @@ class MemoryGroundingEvidence:
     def __getattribute__(self, name: str) -> object:
         """Return defensive copies of nested Memory metadata owned by this frozen value."""
         value = object.__getattribute__(self, name)
-        if name in {"owner", "artifact", "source_task_ref"} and value is not None:
+        if name in {"owner", "artifact", "source_task_ref", "content"} and value is not None:
             return _clone_object(cast(JSONObject, value), f"memory {name}")
         return value
 
     def to_json(self) -> JSONObject:
-        """Serialize discovery evidence while explicitly declaring that bytes were not read."""
+        """Serialize metadata with an explicit content status and optional verified origin."""
         return {
             "evidence_id": self.evidence_id,
             "selector": {"memory_id": self.memory_id, "revision_id": self.revision_id},
@@ -271,11 +301,12 @@ class MemoryGroundingEvidence:
             ),
             "created_at_ms": self.created_at_ms,
             "content_status": self.content_status.value,
+            **({"content": self.content} if self.content is not None else {}),
         }
 
     @classmethod
     def from_json(cls, value: object) -> MemoryGroundingEvidence:
-        """Restore one sanitized Memory manifest without interpreting its payload schema."""
+        """Restore metadata or revalidate the admitted historical-origin content decoder."""
         item = _object(value, "memory evidence")
         expected = {
             "evidence_id",
@@ -294,6 +325,8 @@ class MemoryGroundingEvidence:
             "created_at_ms",
             "content_status",
         }
+        if item.get("content_status") == MemoryContentStatus.VERIFIED_ORIGIN.value:
+            expected.add("content")
         _require_fields(item, expected, "memory evidence")
         selector = _object(item["selector"], "memory evidence.selector")
         _require_fields(selector, {"memory_id", "revision_id"}, "memory evidence.selector")
@@ -324,6 +357,7 @@ class MemoryGroundingEvidence:
             ),
             created_at_ms=_integer(item, "created_at_ms"),
             content_status=content_status,
+            content=_object(item["content"], "origin content") if "content" in item else None,
         )
 
 
@@ -387,7 +421,9 @@ class GroundingContextSnapshot:
         memory_evidence = tuple(sorted(memory_evidence, key=lambda item: item.evidence_id))
         gaps = tuple(sorted(gaps, key=lambda item: (item.source, item.code, item.detail)))
         schema_version = (
-            GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA
+            GROUNDING_CONTEXT_CONTENT_SCHEMA
+            if any(item.content is not None for item in memory_evidence)
+            else GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA
             if planning_world_evidence is not None
             else GROUNDING_CONTEXT_SCHEMA
         )
@@ -452,6 +488,7 @@ class GroundingContextSnapshot:
             LEGACY_GROUNDING_CONTEXT_SCHEMA,
             GROUNDING_CONTEXT_SCHEMA,
             GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA,
+            GROUNDING_CONTEXT_CONTENT_SCHEMA,
         }:
             raise GroundingContextError("unsupported grounding context schema")
         if self.schema_version == LEGACY_GROUNDING_CONTEXT_SCHEMA and (
@@ -459,7 +496,8 @@ class GroundingContextSnapshot:
         ):
             raise GroundingContextError("legacy grounding context cannot carry semantic evidence")
         if (
-            self.schema_version != GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA
+            self.schema_version
+            not in {GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA, GROUNDING_CONTEXT_CONTENT_SCHEMA}
             and self.planning_world_evidence is not None
         ):
             raise GroundingContextError("planning world evidence requires grounding context v0.3")
@@ -468,6 +506,10 @@ class GroundingContextSnapshot:
             and self.planning_world_evidence is None
         ):
             raise GroundingContextError("grounding context v0.3 requires planning world evidence")
+        if self.schema_version != GROUNDING_CONTEXT_CONTENT_SCHEMA and any(
+            item.content is not None for item in self.memory_evidence
+        ):
+            raise GroundingContextError("Memory content requires grounding context v0.4")
         if self.semantic_evidence is not None and self.planning_world_evidence is not None:
             _require_matching_world_identity(
                 self.semantic_evidence,
@@ -541,7 +583,10 @@ class GroundingContextSnapshot:
                 "gaps",
                 "semantic_evidence",
             }
-        elif schema_version == GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA:
+        elif schema_version in {
+            GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA,
+            GROUNDING_CONTEXT_CONTENT_SCHEMA,
+        }:
             expected = {
                 "schema_version",
                 "context_digest",
@@ -573,13 +618,18 @@ class GroundingContextSnapshot:
             semantic_evidence=(
                 _semantic_evidence(item["semantic_evidence"])
                 if schema_version
-                in {GROUNDING_CONTEXT_SCHEMA, GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA}
+                in {
+                    GROUNDING_CONTEXT_SCHEMA,
+                    GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA,
+                    GROUNDING_CONTEXT_CONTENT_SCHEMA,
+                }
                 and item["semantic_evidence"] is not None
                 else None
             ),
             planning_world_evidence=(
                 _planning_world_evidence(item["planning_world_evidence"])
-                if schema_version == GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA
+                if schema_version
+                in {GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA, GROUNDING_CONTEXT_CONTENT_SCHEMA}
                 and item["planning_world_evidence"] is not None
                 else None
             ),
@@ -651,7 +701,10 @@ def _snapshot_payload(
         payload["semantic_evidence"] = (
             semantic_evidence.to_json() if semantic_evidence is not None else None
         )
-    elif schema_version == GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA:
+    elif schema_version in {
+        GROUNDING_CONTEXT_PLANNING_WORLD_SCHEMA,
+        GROUNDING_CONTEXT_CONTENT_SCHEMA,
+    }:
         payload["semantic_evidence"] = (
             semantic_evidence.to_json() if semantic_evidence is not None else None
         )

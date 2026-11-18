@@ -19,6 +19,7 @@ fn plan(mission: &str) -> domain::MissionPlan {
 /// Creates two legal accepted Missions sharing only the existing Controller authority.
 fn fixture(log: &state::SqliteEventLog) -> ControllerState {
     let mut controller = ControllerState {
+        published_deployments: Default::default(),
         federation: Default::default(),
         mission_admissions: BTreeMap::new(),
         memory_imports: BTreeMap::new(),
@@ -452,6 +453,7 @@ fn held_terminal_fact_is_retained_without_release_or_execute_replay() {
     fixture.events.commit_batch().unwrap();
     let saved: ServerCheckpoint = serde_json::from_str(&checkpoint).unwrap();
     let restored = ControllerState {
+        published_deployments: Default::default(),
         federation: Default::default(),
         bridge: IntegrationRuntimeBridge::restore_from_checkpoint(
             &saved.integration_json,

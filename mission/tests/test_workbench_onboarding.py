@@ -288,7 +288,7 @@ def test_installed_cli_uses_global_model_from_unrelated_directory(
                 "--answer-mode",
                 "facts",
                 "--ask",
-                "集群有哪些节点？",
+                "请列出当前集群节点的详情",
             ],
             cwd=isolated_defaults,
             capture_output=True,

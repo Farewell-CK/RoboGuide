@@ -396,12 +396,24 @@ pub(crate) fn attach_deployment(
     controller: &mut ControllerState,
     deployment: Option<Arc<DeploymentFeasibility>>,
 ) -> Result<(), String> {
-    for state in controller.runtime_revisions.values_mut() {
-        if state.deployment_digest.as_deref() != deployment.as_ref().map(|profile| profile.digest())
+    let mut profiles = BTreeMap::new();
+    for (mission, state) in &controller.runtime_revisions {
+        if controller.published_deployments.is_none()
+            && state.deployment_digest.as_deref() != deployment.as_ref().map(|p| p.digest())
         {
             return Err("runtime revision requires its original startup deployment profile".into());
         }
-        state.deployment = deployment.clone();
+        profiles.insert(
+            mission.clone(),
+            super::super::deployment_management::original(
+                controller,
+                state.deployment_digest.as_deref(),
+                deployment.as_deref(),
+            )?,
+        );
+    }
+    for (mission, state) in &mut controller.runtime_revisions {
+        state.deployment = profiles.remove(mission).expect("resolved original profile");
     }
     Ok(())
 }

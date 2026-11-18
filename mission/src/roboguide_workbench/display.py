@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+import uuid
 from dataclasses import dataclass
 
 from mission.models import JSONObject
@@ -21,6 +23,7 @@ def discard_confirmation(session: Session) -> None:
         session.shown_draft = None
         session.suggestion = None
         session.pending_cancel = None
+        session.acknowledged_draft = None
 
 
 @dataclass
@@ -43,11 +46,19 @@ class DisplayTurn:
         self.cancellation: JSONObject | None = None
         self.finished = False
         if isinstance(session, WorkbenchSession):
+            if session.display_turn_id is not None:
+                raise WorkbenchError("已有前台显示尚未收尾。")
+            self.turn_id = uuid.uuid4().hex
+            self.states, self.last_state = list(session.displayed_states), session.last_state
+            session.display_turn_id = self.turn_id
             session.reference_checkpoint = {
                 "nodes": list(self.nodes),
                 "missions": list(self.missions),
                 "last_node": self.last_node,
                 "last_mission": self.last_mission,
+                "states": list(self.states),
+                "last_state": self.last_state,
+                "raw_query": session.raw_query(),
             }
 
     def stage(self) -> None:
@@ -60,10 +71,31 @@ class DisplayTurn:
     def acknowledge(self) -> None:
         """Publish the references actually displayed, then enable their exact confirmations."""
         if isinstance(self.session, WorkbenchSession):
+            messages = self.session.store.data.get("messages")
+            replies = (
+                [
+                    row
+                    for row in messages
+                    if isinstance(row, dict)
+                    and row.get("role") == "assistant"
+                    and row.get("turn_id") == self.turn_id
+                ]
+                if isinstance(messages, list)
+                else []
+            )
+            for row in replies:
+                row["displayed"] = True
             self.session.reference_checkpoint = None
-            self.session.checkpoint()
+            try:
+                self.session.checkpoint()
+            except BaseException:
+                for row in replies:
+                    row["displayed"] = False
+                raise
             self.session.shown_draft, self.session.suggestion = self.draft, self.suggestion
+            self.session.acknowledged_draft = copy.deepcopy(self.draft)
             self.session.pending_cancel = self.cancellation
+            self.session.display_turn_id = None
         self.finished = True
 
     def reject(self) -> None:
@@ -77,6 +109,7 @@ class DisplayTurn:
         session.last_raw, session.last_read_at = self.last_raw, self.last_read_at
         if isinstance(session, WorkbenchSession):
             session.displayed_missions = list(self.missions)
+            session.displayed_states, session.last_state = list(self.states), self.last_state
             session.reference_checkpoint = None
             try:
                 session.checkpoint()
@@ -84,4 +117,6 @@ class DisplayTurn:
                 raise DisplayPersistenceError(
                     "可见对象引用未能保存，请恢复存储后重新进入会话。"
                 ) from error
+            finally:
+                session.display_turn_id = None
         self.finished = True

@@ -10,7 +10,7 @@ import re
 import socket
 import ssl
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, cast
 from urllib.parse import quote, urlsplit
@@ -31,6 +31,10 @@ _HTTP_TOKEN = rb"[!#$%&'*+.^_`|~0-9A-Za-z-]+"
 
 class WorkbenchError(ValueError):
     """Report unavailable evidence, invalid input or a refused query without retrying."""
+
+
+class ToolRefusal(WorkbenchError):
+    """Reject a host-side tool prerequisite before any network request or write occurred."""
 
 
 def _remaining(deadline: float) -> float:
@@ -321,6 +325,7 @@ def request_json(
     timeout: float,
     context: ssl.SSLContext | None = None,
     accepted_statuses: tuple[int, ...] = (200,),
+    consume: Callable[[http.client.HTTPResponse], JSONObject] | None = None,
 ) -> JSONObject:
     """Read one bounded response without redirects, retries or response-body error disclosure.
 
@@ -355,6 +360,12 @@ def request_json(
         response = connection.getresponse()
         if response.status not in accepted_statuses:
             raise WorkbenchError(f"查询未取得有效结果：HTTP {response.status}。")
+        if consume is not None:
+            decoded = consume(response)
+            if response.length not in {None, 0}:
+                raise WorkbenchError("响应不完整，当前状态未知。")
+            _remaining(deadline)
+            return decoded
         raw = bytearray()
         while not response.isclosed():
             socket.settimeout(_remaining(deadline))
@@ -433,6 +444,16 @@ class ReadOnlyController:
     def inventory(self) -> JSONObject:
         """Read the current identity-visible inventory without selecting any executor."""
         return self._get("/v1/inventory")
+
+    def state_providers(self) -> JSONObject:
+        """Discover identity-visible State declarations without granting device authority."""
+        return self._get("/v1/state/providers")
+
+    def state_records(self, semantic: str = "reported") -> JSONObject:
+        """Read tenant-visible reports, preserving stale and conflicting sources."""
+        if semantic not in {"reported", "observed", ""}:
+            raise WorkbenchError("状态语义超出设备只读查询范围。")
+        return self._get("/v1/state/records" + ("?semantic=" + semantic if semantic else ""))
 
     def mission(self, mission_id: str) -> JSONObject:
         """Read an encoded literal Mission identity without accepting arbitrary route suffixes."""

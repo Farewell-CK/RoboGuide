@@ -45,8 +45,14 @@ convention = "google"
 
 [tool.pytest.ini_options]
 addopts = "-q"
-pythonpath = ["integrations/spatial-provider", "apps/recovery-tool", "tools/deployment"]
+pythonpath = [
+    "integrations/spatial-provider",
+    "integrations/robonix-task",
+    "apps/recovery-tool",
+    "tools/deployment",
+]
 testpaths = [
+    "tools/quality",
     "tools/observability/tests",
     "tools/deployment/tests",
     "apps/recovery-tool/tests",
@@ -61,6 +67,7 @@ testpaths = [
 [tool.mypy]
 python_version = "3.13"
 strict = true
+mypy_path = ["integrations/robonix-task"]
 files = [
     "tools/observability",
     "tools/deployment",

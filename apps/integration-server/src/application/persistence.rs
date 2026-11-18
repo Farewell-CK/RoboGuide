@@ -12,7 +12,22 @@ pub(crate) fn open_controller_event_log(
             state::ControllerStorageFormat::Legacy
         }
         Ok("1") => state::ControllerStorageFormat::V1,
-        _ => return Err("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA must be legacy or 1".into()),
+        Ok(version @ ("2" | "3")) => {
+            if std::env::vars_os()
+                .any(|(key, _)| key.to_string_lossy().starts_with("ROBOGUIDE_REPLICA_"))
+            {
+                return Err(
+                    "storage v2 is standalone; replica recovery projection is not negotiated"
+                        .into(),
+                );
+            }
+            if version == "3" {
+                state::ControllerStorageFormat::V3
+            } else {
+                state::ControllerStorageFormat::V2
+            }
+        }
+        _ => return Err("ROBOGUIDE_CONTROLLER_STORAGE_SCHEMA must be legacy, 1, 2 or 3".into()),
     };
     Ok(state::SqliteEventLog::open_controller_with_checkpoint_policy(event_path, policy, format)?)
 }
@@ -39,6 +54,7 @@ pub(crate) fn server_checkpoint_json(
         .checkpoint_json()
         .map_err(|error| format!("orchestration checkpoint failure: {error}"))?;
     serde_json::to_string(&ServerCheckpoint {
+        published_deployments: controller.published_deployments.clone(),
         federation: controller.federation.clone(),
         replication_profile: controller
             .bridge

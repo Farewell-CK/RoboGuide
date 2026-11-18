@@ -18,6 +18,36 @@ pub(crate) struct MissionAdmission {
 }
 
 impl MissionAdmission {
+    /// Acknowledges an unchanged accepted plan without new admission, dispatch or clock updates.
+    pub(crate) fn replay(
+        controller: &ControllerState,
+        plan: &domain::MissionPlan,
+        group_id: &domain::ExecutionGroupId,
+        tenant: &str,
+    ) -> Result<Option<serde_json::Value>, String> {
+        let mission_id = plan.goal().mission_id();
+        let Some(execution) = controller.orchestrator.execution(mission_id) else {
+            return Ok(None);
+        };
+        if controller.bridge.control().mission_tenant(mission_id) != Some(tenant) {
+            return Err("Mission tenant is immutable or unavailable".into());
+        }
+        if execution.plan() != plan || execution.group_id() != group_id {
+            return Err(format!(
+                "Mission {mission_id} already exists with a different plan or Group"
+            ));
+        }
+        if let Some(receipt) = controller.mission_admissions.get(mission_id.as_str()) {
+            receipt.validate(controller, mission_id.as_str())?;
+        }
+        // Preserve the POST acceptance shape; GET remains the current lifecycle projection.
+        Ok(Some(serde_json::json!({
+            "mission_id": mission_id.as_str(),
+            "group_id": group_id.as_str(),
+            "status": "Running",
+        })))
+    }
+
     /// Records the actual HTTP body without reserializing or interpreting Mission semantics.
     pub(crate) fn new(
         mission_id: domain::MissionId,

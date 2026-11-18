@@ -15,7 +15,22 @@ use std::sync::Arc;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args_os().skip(1);
-    let first = arguments.next();
+    let mut first = arguments.next();
+    let mut observations = Vec::new();
+    while first.as_deref().and_then(std::ffi::OsStr::to_str)
+        == Some("--observe-unadmitted-cancellation")
+    {
+        let identity = arguments
+            .next()
+            .ok_or("exact cancellation identity required")?
+            .into_string()
+            .map_err(|_| "invalid exact cancellation observation")?;
+        if identity.trim().is_empty() || identity.len() > 1024 || observations.len() >= 16 {
+            return Err("invalid exact cancellation observation".into());
+        }
+        observations.push(identity);
+        first = arguments.next();
+    }
     if matches!(
         first.as_deref().and_then(std::ffi::OsStr::to_str),
         Some("--validate" | "conformance")
@@ -79,6 +94,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(McpDriver::new()?),
     ];
     let engine = LocalIntegrationEngine::new(catalog, drivers)?;
-    NodeService::new(engine).run().await?;
+    let mut service = NodeService::new(engine);
+    for identity in observations {
+        service = service.with_unadmitted_cancellation_observation(identity)?;
+    }
+    service.run().await?;
     Ok(())
 }

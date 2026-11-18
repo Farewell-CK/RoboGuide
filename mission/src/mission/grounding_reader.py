@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
+import math
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping
+from dataclasses import replace
 from email.message import Message
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -19,6 +23,7 @@ from mission.grounding_context import (
     GroundingContextSnapshot,
     GroundingFreshness,
     GroundingGap,
+    MemoryContentStatus,
     MemoryGroundingEvidence,
     StateGroundingEvidence,
     dialogue_digest,
@@ -26,16 +31,19 @@ from mission.grounding_context import (
     grounding_selection_policy_ref,
 )
 from mission.models import JSONObject, JSONValue
+from mission.origin_evidence import MAX_ORIGIN_BYTES, ORIGIN_SCHEMA, canonical_origin
 from mission.planning_world_evidence import (
     AuthoritativePlanningWorldEvidence,
     PlanningWorldEvidenceError,
 )
 from mission.request_record import DialogueTurn
+from mission.scene_grounding import SCENE_TARGETS_SCHEMA, qualify_scene_targets
 from mission.security_context import authenticated_tenant
 from mission.semantic_evidence import AuthoritativeSemanticEvidence, SemanticEvidenceError
 
 MAX_GROUNDING_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_SEMANTIC_EVIDENCE_BYTES = 512 * 1024
+PHYSICAL_REPORT_SCHEMA = "roboguide.world.robot-physical-observation/v0.1"
 _STATE_RECORD_FIELDS = {
     "object",
     "semantic",
@@ -140,6 +148,14 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         raise GroundingReadError(f"grounding endpoint returned redirect HTTP {code}")
 
 
+class GroundingContentTransport(Protocol):
+    """Read bounded exact bytes from the same configured and authenticated Artifact authority."""
+
+    def get_bytes(self, url: str, timeout_seconds: float) -> bytes:
+        """Return exact response bytes without JSON normalization or redirect following."""
+        ...
+
+
 class UrllibGroundingJsonTransport:
     """Read bounded JSON from fixed State and Memory HTTP origins."""
 
@@ -155,6 +171,17 @@ class UrllibGroundingJsonTransport:
 
     def get_json(self, url: str, timeout_seconds: float) -> JSONObject:
         """Fetch one JSON document and distinguish retryable acquisition failures."""
+        raw = self.get_bytes(url, timeout_seconds)
+        try:
+            decoded: object = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise GroundingReadError("grounding endpoint returned invalid JSON") from error
+        if not isinstance(decoded, dict) or not all(isinstance(key, str) for key in decoded):
+            raise GroundingReadError("grounding endpoint response must be an object")
+        return cast(JSONObject, decoded)
+
+    def get_bytes(self, url: str, timeout_seconds: float) -> bytes:
+        """Fetch bounded original bytes under the existing origin, TLS and tenant constraints."""
         headers = {"Accept": "application/json"}
         tenant = authenticated_tenant()
         if tenant is not None:
@@ -180,13 +207,7 @@ class UrllibGroundingJsonTransport:
             ) from error
         if len(raw) > MAX_GROUNDING_RESPONSE_BYTES:
             raise GroundingReadError("grounding endpoint response exceeds local limit")
-        try:
-            decoded: object = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise GroundingReadError("grounding endpoint returned invalid JSON") from error
-        if not isinstance(decoded, dict) or not all(isinstance(key, str) for key in decoded):
-            raise GroundingReadError("grounding endpoint response must be an object")
-        return cast(JSONObject, decoded)
+        return cast(bytes, raw)
 
 
 class HttpMissionGroundingReader:
@@ -207,6 +228,8 @@ class HttpMissionGroundingReader:
         semantic_evidence_path: Path | None = None,
         planning_world_evidence_path: Path | None = None,
         planning_world_evidence_required: bool = False,
+        admitted_memory_content_schemas: frozenset[str] = frozenset(),
+        content_transport: GroundingContentTransport | None = None,
     ) -> None:
         """Bind fixed origins and positive evidence budgets without accepting query injection."""
         self._controller_endpoint = _endpoint(controller_endpoint, "Controller")
@@ -226,6 +249,14 @@ class HttpMissionGroundingReader:
         self._max_gaps = max_gaps
         self._max_acquisition_attempts = max_acquisition_attempts
         self._transport = transport or UrllibGroundingJsonTransport()
+        if admitted_memory_content_schemas - {ORIGIN_SCHEMA}:
+            raise GroundingReadError("unsupported Memory content schema admission")
+        self._admitted_memory_content_schemas = admitted_memory_content_schemas
+        self._content_transport = content_transport or (
+            self._transport if isinstance(self._transport, UrllibGroundingJsonTransport) else None
+        )
+        if admitted_memory_content_schemas and self._content_transport is None:
+            raise GroundingReadError("Memory content admission requires an exact-byte transport")
         self._semantic_evidence_path = semantic_evidence_path
         self._planning_world_evidence_path = planning_world_evidence_path
         if planning_world_evidence_required and planning_world_evidence_path is None:
@@ -235,6 +266,14 @@ class HttpMissionGroundingReader:
             raise GroundingReadError("admitted World payload schemas must be nonblank")
         self._admitted_world_payload_schemas = admitted_world_payload_schemas
         self._selection_policy_ref = grounding_selection_policy_ref(admitted_world_payload_schemas)
+        if PHYSICAL_REPORT_SCHEMA in admitted_world_payload_schemas:
+            self._selection_policy_ref += "#physical-profile=v0.1"
+        if SCENE_TARGETS_SCHEMA in admitted_world_payload_schemas:
+            self._selection_policy_ref += "#scene-targets-profile=v0.2"
+        if admitted_memory_content_schemas:
+            self._selection_policy_ref += "#memory-content=" + ",".join(
+                sorted(admitted_memory_content_schemas)
+            )
 
     def capture(
         self,
@@ -244,10 +283,11 @@ class HttpMissionGroundingReader:
     ) -> GroundingContextSnapshot:
         """Capture independent State and Memory reads while retaining partial-failure gaps."""
         gaps = _GroundingGapCollector(self._max_gaps)
-        state = self._read_state(gaps)
+        state, state_read_clock = self._read_state(gaps)
         memory = self._read_memory(gaps)
         semantic_evidence = self._read_semantic_evidence(gaps)
         planning_world_evidence = self._read_planning_world_evidence(gaps)
+        state = _physical_state_before_freeze(state, state_read_clock, gaps)
         return self._bounded_snapshot(
             request_id=request_id,
             dialogue_digest=dialogue_digest(tuple(turn.to_json() for turn in dialogue)),
@@ -311,9 +351,12 @@ class HttpMissionGroundingReader:
                 ) from error
             return None
 
-    def _read_state(self, gaps: _GroundingGapCollector) -> tuple[StateGroundingEvidence, ...]:
+    def _read_state(
+        self, gaps: _GroundingGapCollector
+    ) -> tuple[tuple[StateGroundingEvidence, ...], tuple[JSONValue, int] | None]:
         """Read only World records and preserve the Controller's freshness assessment."""
         path = "/v1/state/records?" + urllib.parse.urlencode({"object_class": "world"})
+        started_ns = time.monotonic_ns()
         try:
             response = self._get_json(f"{self._controller_endpoint}{path}")
             if response.get("schema") != "roboguide.state-query/v0.1":
@@ -321,11 +364,16 @@ class HttpMissionGroundingReader:
             records = _array(response, "records")
         except (GroundingReadError, GroundingContextError, KeyError) as error:
             gaps.add("state_unavailable", "controller-state", str(error))
-            return ()
+            return (), None
         evidence: list[StateGroundingEvidence] = []
         for index, raw in enumerate(records):
             try:
-                item = _state_evidence(raw, self._admitted_world_payload_schemas)
+                item = _state_evidence(
+                    raw,
+                    self._admitted_world_payload_schemas,
+                    controller_observed_at_ms=response.get("observed_at_ms"),
+                    local_read_elapsed_ms=math.ceil((time.monotonic_ns() - started_ns) / 1_000_000),
+                )
             except (GroundingContextError, KeyError) as error:
                 gaps.add(
                     "state_record_rejected",
@@ -343,10 +391,61 @@ class HttpMissionGroundingReader:
                 "controller-state",
                 f"retained at most {self._max_state_evidence} World State records",
             )
-        return tuple(evidence)
+        return tuple(evidence), (response.get("observed_at_ms"), started_ns)
+
+    def _read_memory_content(
+        self, item: MemoryGroundingEvidence, gaps: _GroundingGapCollector
+    ) -> MemoryGroundingEvidence:
+        """Read only admitted Global origin bytes and retain metadata on any failed verification."""
+        if item.payload_schema not in self._admitted_memory_content_schemas:
+            return item
+        try:
+            artifact = item.artifact
+            if (
+                item.visibility != "exchangeable"
+                or item.media_type != "application/json"
+                or item.kind != "experience"
+                or item.provider_id != "reported-origins"
+                or artifact is None
+                or self._content_transport is None
+            ):
+                raise GroundingReadError("origin manifest is not qualified for content reading")
+            digest, size = artifact.get("content_digest"), artifact.get("byte_size")
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 71
+                or not digest.startswith("sha256:")
+                or any(char not in "0123456789abcdef" for char in digest[7:])
+                or type(size) is not int
+                or not 0 < size <= MAX_ORIGIN_BYTES
+            ):
+                raise GroundingReadError("origin Artifact identity or byte bound is invalid")
+            raw = self._content_transport.get_bytes(
+                self._artifact_endpoint + "/v1/artifacts/" + digest[7:], self._timeout_seconds
+            )
+            if len(raw) != size or "sha256:" + hashlib.sha256(raw).hexdigest() != digest:
+                raise GroundingReadError("origin Artifact bytes differ from manifest")
+            decoded: object = json.loads(raw)
+            content = _object(decoded, "origin content")
+            if raw != canonical_origin(content):
+                raise GroundingReadError("origin bytes are not canonical")
+            updated = item.to_json()
+            updated.pop("evidence_id")
+            updated.update(
+                content=content, content_status=MemoryContentStatus.VERIFIED_ORIGIN.value
+            )
+            return replace(
+                item,
+                content=content,
+                content_status=MemoryContentStatus.VERIFIED_ORIGIN,
+                evidence_id=evidence_id("memory", updated),
+            )
+        except (GroundingReadError, GroundingContextError, ValueError, OverflowError) as error:
+            gaps.add("memory_content_rejected", item.evidence_id, str(error))
+            return item
 
     def _read_memory(self, gaps: _GroundingGapCollector) -> tuple[MemoryGroundingEvidence, ...]:
-        """Read only admissible Global manifest metadata and never fetch artifact bytes."""
+        """Select Global metadata, then fetch only explicitly admitted and bounded origin bytes."""
         try:
             response = self._get_json(f"{self._artifact_endpoint}/v1/memories")
             if response.get("schema") != "roboguide.memory-catalog/v0.1":
@@ -376,7 +475,7 @@ class HttpMissionGroundingReader:
                 "memory-catalog",
                 f"retained at most {self._max_memory_evidence} Global Memory manifests",
             )
-        return tuple(evidence)
+        return tuple(self._read_memory_content(item, gaps) for item in evidence)
 
     def _get_json(self, url: str) -> JSONObject:
         """Retry only transient acquisition failures before preserving one final source gap."""
@@ -500,7 +599,11 @@ def _bounded_gap_detail(detail: str) -> str:
 
 
 def _state_evidence(
-    raw: JSONValue, admitted_world_payload_schemas: frozenset[str]
+    raw: JSONValue,
+    admitted_world_payload_schemas: frozenset[str],
+    *,
+    controller_observed_at_ms: JSONValue = None,
+    local_read_elapsed_ms: int | None = None,
 ) -> StateGroundingEvidence | None:
     """Sanitize one federated State record and exclude every deployment/control object."""
     item = _object(raw, "State record")
@@ -517,6 +620,24 @@ def _state_evidence(
     payload_schema = _text(payload, "payload_schema")
     if payload_schema not in admitted_world_payload_schemas:
         return None
+    if payload_schema == PHYSICAL_REPORT_SCHEMA:
+        _qualify_physical_report(
+            object_ref,
+            payload,
+            controller_observed_at_ms=controller_observed_at_ms,
+            local_read_elapsed_ms=local_read_elapsed_ms,
+        )
+    elif payload_schema == SCENE_TARGETS_SCHEMA:
+        qualify_scene_targets(
+            object_ref,
+            payload,
+            source=item.get("source"),
+            channel_id=item.get("channel_id"),
+            semantic=semantic,
+            stale=item.get("stale"),
+            controller_observed_at_ms=controller_observed_at_ms,
+            local_read_elapsed_ms=local_read_elapsed_ms,
+        )
     stale = item.get("stale")
     if not isinstance(stale, bool):
         raise GroundingContextError("World State record must carry a freshness assessment")
@@ -542,6 +663,165 @@ def _state_evidence(
     return StateGroundingEvidence.from_json(
         {"evidence_id": evidence_id("state", sanitized), **sanitized}
     )
+
+
+def _physical_number(value: JSONValue) -> bool:
+    """Recognize bounded finite physical scalars without treating booleans as measurements."""
+    try:
+        return type(value) in {int, float} and math.isfinite(cast(int | float, value))
+    except OverflowError:
+        return False
+
+
+def _physical_state_before_freeze(
+    evidence: tuple[StateGroundingEvidence, ...],
+    read_clock: tuple[JSONValue, int] | None,
+    gaps: _GroundingGapCollector,
+) -> tuple[StateGroundingEvidence, ...]:
+    """Recheck original budgets after Memory and optional evidence acquisition finish.
+
+    Each capture retains its own clock pair, so concurrent captures cannot reuse another
+    response's Controller time. Only inclusion changes; original evidence stays immutable.
+    Later model deliberation still requires a fresh execution preflight.
+    """
+    retained: list[StateGroundingEvidence] = []
+    for item in evidence:
+        if item.payload_schema not in {PHYSICAL_REPORT_SCHEMA, SCENE_TARGETS_SCHEMA}:
+            retained.append(item)
+            continue
+        try:
+            if read_clock is None:
+                raise GroundingContextError("physical_profile_original_read_clock_missing")
+            observed_at_ms, started_ns = read_clock
+            if item.payload_schema == SCENE_TARGETS_SCHEMA:
+                qualify_scene_targets(
+                    {
+                        "class": "world",
+                        "object_type": item.object_type,
+                        "object_id": item.object_id,
+                    },
+                    {
+                        "value": item.value,
+                        "received_at_ms": item.received_at_ms,
+                        "valid_for_ms": item.valid_for_ms,
+                        "source_epoch": item.source_epoch,
+                        "sequence": item.sequence,
+                    },
+                    source=item.source,
+                    channel_id=item.channel_id,
+                    semantic=item.semantic,
+                    stale=item.freshness is GroundingFreshness.STALE,
+                    controller_observed_at_ms=observed_at_ms,
+                    local_read_elapsed_ms=math.ceil((time.monotonic_ns() - started_ns) / 1_000_000),
+                )
+                retained.append(item)
+                continue
+            _qualify_physical_report(
+                {"object_id": item.object_id},
+                {
+                    "value": item.value,
+                    "received_at_ms": item.received_at_ms,
+                    "valid_for_ms": item.valid_for_ms,
+                },
+                controller_observed_at_ms=observed_at_ms,
+                local_read_elapsed_ms=math.ceil((time.monotonic_ns() - started_ns) / 1_000_000),
+            )
+        except GroundingContextError as error:
+            gaps.add(
+                "state_record_rejected", "controller-state", f"before snapshot freeze: {error}"
+            )
+            continue
+        retained.append(item)
+    return tuple(retained)
+
+
+def _qualify_physical_report(
+    object_ref: JSONObject,
+    envelope: JSONObject,
+    *,
+    controller_observed_at_ms: JSONValue,
+    local_read_elapsed_ms: int | None,
+) -> None:
+    """Reject expired nested reports without renewing, rewriting or comparing source clocks.
+
+    Controller receipt/observation times share one clock; local monotonic elapsed time
+    conservatively includes the complete GET and parsing already performed. Publisher
+    timestamps are retained only as evidence, never subtracted from Controller clocks.
+    This admits diagnostic reports only, not arrival, stopping or motion authority.
+    """
+    value = _object(envelope.get("value"), "physical report")
+    if value.get("physical_entity_id") != object_ref.get("object_id"):
+        raise GroundingContextError("physical_profile_entity_mismatch")
+    received, valid_for = envelope.get("received_at_ms"), envelope.get("valid_for_ms")
+    if (
+        type(controller_observed_at_ms) is not int
+        or type(received) is not int
+        or received < 0
+        or controller_observed_at_ms < received
+        or type(local_read_elapsed_ms) is not int
+        or local_read_elapsed_ms < 0
+        or type(valid_for) is not int
+        or valid_for <= 0
+    ):
+        raise GroundingContextError("physical_profile_controller_clock_unavailable_or_rollback")
+    retained_ms = controller_observed_at_ms - received + local_read_elapsed_ms
+    posture = _object(value.get("posture"), "physical report.posture")
+    availability, reported = posture.get("availability"), posture.get("reported_posture")
+    if availability == "reported_current":
+        age, ttl = posture.get("aggregate_age_ms"), posture.get("source_stale_ms")
+        remaining = posture.get("remaining_at_publisher_ms")
+        if (
+            not isinstance(reported, str)
+            or reported not in {"standing", "down"}
+            or not _physical_number(age)
+            or cast(float, age) < 0
+            or type(ttl) is not int
+            or not 0 < ttl <= 60000
+            or type(remaining) is not int
+            or not 0 < remaining <= min(5000, ttl) - cast(float, age)
+            or remaining <= retained_ms
+            or retained_ms >= valid_for
+        ):
+            raise GroundingContextError("physical_profile_posture_expired_or_unqualified")
+    elif availability not in ("unknown", "unavailable") or reported is not None:
+        raise GroundingContextError("physical_profile_unknown_posture_cannot_be_current")
+    battery = value.get("battery")
+    if isinstance(battery, dict) and battery.get("availability") == "reported_current":
+        percent, remaining = battery.get("percent"), battery.get("remaining_at_publisher_ms")
+        source_age, source_ttl = posture.get("aggregate_age_ms"), posture.get("source_stale_ms")
+        if (
+            not _physical_number(percent)
+            or not 0 <= cast(float, percent) <= 100
+            or type(remaining) is not int
+            or not retained_ms < remaining <= 5000
+            or not _physical_number(source_age)
+            or cast(float, source_age) < 0
+            or type(source_ttl) is not int
+            or not 0 < source_ttl <= 60000
+            or remaining > min(5000, source_ttl) - cast(float, source_age)
+            or retained_ms >= valid_for
+        ):
+            raise GroundingContextError("physical_profile_battery_expired_or_unqualified")
+    mapping = _object(value.get("mapping"), "physical report.mapping")
+    if mapping.get("localization_verified") is not False or any(
+        mapping.get(key) is not None
+        for key in ("pose_measurement_time", "localization_quality", "map_revision_id")
+    ):
+        raise GroundingContextError("physical_profile_pose_authority_not_provided")
+    if mapping.get("response_availability") == "reported_current_response":
+        age = mapping.get("response_age_ms")
+        if (
+            not _physical_number(age)
+            or cast(float, age) < 0
+            or cast(float, age) + retained_ms > 10000
+            or retained_ms >= valid_for
+        ):
+            raise GroundingContextError("physical_profile_mapping_response_expired")
+    elif (
+        mapping.get("response_availability") not in (None, "unknown", "unavailable")
+        or mapping.get("reported_pose") is not None
+    ):
+        raise GroundingContextError("physical_profile_mapping_response_unqualified")
 
 
 def _memory_evidence(raw: JSONValue) -> MemoryGroundingEvidence | None:

@@ -385,6 +385,7 @@ def retired(
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
         "roboguide.recovery-profile/v0.31",
+        "roboguide.recovery-profile/v0.32",
     }:
         raise ValueError("retired private Archive requires explicit recovery v0.14")
     validate_seal(root, publication, budget)

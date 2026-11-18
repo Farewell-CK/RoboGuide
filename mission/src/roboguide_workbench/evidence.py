@@ -8,6 +8,7 @@ from typing import Literal
 from mission.models import JSONObject
 
 QueryStatus = Literal["complete", "partial", "failed"]
+READ_COSTS = {"read_explanation": 3, "read_state": 3}
 
 
 @dataclass(frozen=True)

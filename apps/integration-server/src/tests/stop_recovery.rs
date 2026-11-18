@@ -66,6 +66,7 @@ impl Fixture {
             )
             .expect("submit");
         let mut controller = ControllerState {
+            published_deployments: Default::default(),
             federation: Default::default(),
             bridge: IntegrationRuntimeBridge::new(
                 control,
@@ -190,6 +191,11 @@ impl Fixture {
             .control()
             .allocation_snapshot(TimestampMs::new(10))
             .expect("allocation invariants")
+    }
+
+    /// Exposes only this isolated fixture's database for an actual transactional fault test.
+    pub(super) fn event_path(&self) -> std::path::PathBuf {
+        self._directory.path().join("events.sqlite3")
     }
 
     /// Replaces current registration evidence while preserving the already-dispatched attempt.

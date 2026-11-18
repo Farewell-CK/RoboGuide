@@ -90,6 +90,8 @@ def navigate(session: WorkbenchSession, text: str) -> str | None:
             "call_limit",
             "turn_seconds",
             "progress",
+            "stream_output",
+            "stream_enabled",
             "model_label",
             "config_path",
         ):

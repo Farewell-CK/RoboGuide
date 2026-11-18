@@ -33,9 +33,11 @@ def session_for(
     """Compose a private session with a finite model script and no mutation service."""
     store = SessionStore(tmp_path / "sessions", "queries", {}, False)
     controller = reader or ObservedController()
-    return ConversationSession(
+    session = ConversationSession(
         controller, lambda: router(transport), store, MissionActions(controller, store)
     )
+    session.answer_mode = "legacy"
+    return session
 
 
 def test_two_ordinals_in_same_model_batch_keep_original_objects(tmp_path: Path) -> None:
@@ -329,6 +331,8 @@ def test_installed_natural_language_cli_has_truthful_exit_status(
                 [
                     str(Path(sys.executable).parent / "roboguide"),
                     "chat",
+                    "--answer-mode",
+                    "legacy",
                     "--controller",
                     endpoint,
                     "--config",
@@ -336,7 +340,7 @@ def test_installed_natural_language_cli_has_truthful_exit_status(
                     "--session-dir",
                     str(tmp_path / "sessions"),
                     "--ask",
-                    "集群有几个节点？",
+                    "请根据当前集群证据解释节点数量",
                 ],
                 cwd=tmp_path,
                 capture_output=True,

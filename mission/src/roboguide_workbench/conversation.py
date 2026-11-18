@@ -1,69 +1,206 @@
-"""Third-generation conversation composition over the unchanged explicit command owner."""
+"""Natural Responses conversations over host-owned reads and explicit Mission commands."""
 
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from typing import cast
 
 from mission.models import JSONObject, JSONValue
 
-from roboguide_workbench.answers import EvidenceConversation, bounded_history
+from roboguide_workbench.agent_loop import AgentConversation
+from roboguide_workbench.agent_tools import ReadToolAdapter
+from roboguide_workbench.answers import (
+    EvidenceConversation,
+    bounded_history,
+    host_read_answer,
+    is_active_missions_question,
+    is_inventory_question,
+    local_response,
+)
 from roboguide_workbench.client import WorkbenchError
 from roboguide_workbench.evidence import ReadResult
+from roboguide_workbench.plan_view import same_plan
 from roboguide_workbench.routing import Query, ResponsesRouter
+from roboguide_workbench.task_tools import TaskTools
+from roboguide_workbench.task_tools import definitions as task_definitions
 from roboguide_workbench.views import safe_text
-from roboguide_workbench.workspace import WorkbenchSession
+from roboguide_workbench.workspace import WorkbenchSession, render_request
 
 
 class ConversationSession(WorkbenchSession):
     """Keep grounded explanations separate from authoritative Mission commands and approvals."""
 
-    answer_mode = "grounded"
-    tool_limit = 4
-    call_limit = 3
-    turn_seconds = 60.0
+    answer_mode = "agent"
+    evidence: list[JSONObject]
+    tool_limit = 12
+    call_limit = 8
+    turn_seconds = 120.0
+    stream_output: Callable[[str], None] | None = None
+    stream_enabled = True
     progress: Callable[[str], None] = staticmethod(lambda message: None)
 
     def _turn(self, question: str) -> str:
-        """Use original commands verbatim; only natural-language reads enter evidence reasoning."""
+        """Keep commands verbatim and route natural text through native read and task tools."""
         if not question.startswith("/cancel"):
             self.pending_cancel = None
         if question == "/help":
-            return super()._turn(question) + (
-                "\n第三版：/plan-detail 展开完整计划；异步终端可用 /watches、/unwatch ID。\n"
-                "解释引用本轮证据；/history 是历史，不能代替当前状态。"
-            )
-        if question == "/plan-detail":
-            if self.shown_draft is None:
-                raise WorkbenchError("请先 /request 查看当前计划。")
-            return safe_text(
-                json.dumps(self.shown_draft.get("plan"), ensure_ascii=False, indent=2)
-            ).replace("\\u000a", "\n")
-        if question.startswith("/") or self.answer_mode == "facts":
+            return super()._turn(question)
+        if question.startswith("/"):
             if question == "/reset":
                 self.evidence = []
             return super()._turn(question)
         self.suggestion = None
+        if self.answer_mode in {"agent", "grounded"}:
+            return self._agent_turn(question)
+        return self._legacy_turn(question)
+
+    def _agent_turn(self, question: str) -> str:
+        """Use original user text with host-checked tools rather than generated task commands."""
+        self.evidence = []
+        if self.router is None:
+            self.router = self.router_factory()
+        if not isinstance(self.router, ResponsesRouter):
+            # Explicit injected legacy routers retain their protocol; actual Responses
+            # providers never silently downgrade when a native request fails.
+            return super()._turn(question)
+        references = self.query_references()
+        references["controller"] = self.controller.endpoint
+        history = (
+            self.input_history
+            if self.input_history is not None
+            else bounded_history(self.store.data.get("messages"))
+        )
+        adapter = ReadToolAdapter(self, question, references)
+        tasks = TaskTools(self, question)
+
+        def invoke_read(name: str, arguments: JSONObject, remaining: float) -> ReadResult:
+            """Share validated identities with task tools while keeping visible selection staged."""
+            returned = adapter.read(name, arguments, remaining)
+            tasks.learn_missions(adapter.task_missions(returned))
+            return returned
+
+        def invoke_task(
+            name: str,
+            arguments: JSONObject,
+            original: str,
+            user_turns: tuple[str, ...],
+            remaining: float,
+        ) -> ReadResult:
+            """Publish actual new receipt IDs to subsequent reads without guessing targets."""
+            returned = tasks.invoke(name, arguments, original, remaining, user_turns=user_turns)
+            adapter.learn_task(tasks.known_nodes)
+            return returned
+
+        self.progress("正在思考")
+        result = AgentConversation(
+            self.router, tools=self.tool_limit, calls=self.call_limit, seconds=self.turn_seconds
+        ).answer(
+            question,
+            adapter.references,
+            history,
+            invoke_read,
+            tool_definitions=adapter.definitions() + task_definitions(),
+            progress=self.progress,
+            act=invoke_task,
+            task_read_context=tasks.cache_context,
+            task_work_key=tasks.work_key,
+            on_delta=self.stream_output if self.stream_enabled else None,
+        )
+        self.query_status, self.evidence = result.status, result.evidence
+        if not tasks.owns_selection:
+            if not result.evidence and re.search(r"[?？]|请.+(?:提供|补充|告诉)", result.text):
+                # Compatibility with providers which answer a task clarification directly.
+                self.task_dialogue.pinned = True
+            elif result.evidence and not self.task_dialogue.pinned:
+                self.task_dialogue.clear()
+        self._retain_agent_turn(question, result.items)
+        if result.proposal is not None:
+            if result.proposal_text is None:
+                raise WorkbenchError("操作提议缺少完整原文。")
+            self.suggestion = (result.proposal.kind, result.proposal_text)
+            options = (
+                "/choose plan 仅规划；/choose run 开始执行流程"
+                if result.proposal.kind in {"plan", "run"}
+                else "/choose " + result.proposal.kind
+            )
+            return (
+                "待确认的原文：\n"
+                + safe_text(result.proposal_text).replace("\\u000a", "\n")
+                + "\n确认后按以上原文继续。\n"
+                + options
+            )
+        text = result.text
+        task_answer = tasks.answer(result.evidence)
+        read_answer = adapter.read_answer(result.evidence, include_nonstate=task_answer is not None)
+        if task_answer is not None or read_answer is not None:
+            text = "\n\n".join(
+                part for part in (read_answer.text if read_answer else None, task_answer) if part
+            )
+            if read_answer is not None and not read_answer.complete:
+                self.query_status = (
+                    "partial"
+                    if any(item.complete for item in tasks.results)
+                    or any(item.get("complete") is True for item in read_answer.components)
+                    else "failed"
+                )
+            if result.status != "complete":
+                text += "\n本轮其它操作、读取或回复未完成；未确认部分保持未知。"
+        if result.evidence:
+            summary = adapter.reference_summary(result.evidence)
+            if summary:
+                text += "\n\n" + summary
+            mission = self.last_mission
+            adapter.publish(result.evidence, publish_raw=not tasks.owns_selection)
+            if tasks.owns_selection:
+                self.last_mission = mission
+        return text
+
+    def _retain_agent_turn(self, question: str, items: list[JSONObject]) -> None:
+        """Keep bounded public tool transcripts as historical audit data without permissions."""
+        context = self.store.data.get("context")
+        if not isinstance(context, dict):
+            return
+        previous = context.get("agent_turns")
+        turns = list(previous) if isinstance(previous, list) else []
+        public = [item for item in items if item.get("type") != "reasoning"]
+        current: JSONObject = {"question": question, "items": cast(JSONValue, public)}
+        if len(json.dumps(current, ensure_ascii=False).encode()) > 48_000:
+            current = {
+                "question": question,
+                "items": [],
+                "omitted": "transcript exceeded audit limit",
+            }
+        turns.append(current)
+        while turns and (
+            len(turns) > 10 or len(json.dumps(turns, ensure_ascii=False).encode()) > 128_000
+        ):
+            turns.pop(0)
+        context["agent_turns"] = cast(JSONValue, turns)
+
+    def _legacy_turn(self, question: str) -> str:
+        """Retain the old query protocol only for an explicitly selected compatibility mode."""
+        # Keep basic conversation independent of Provider credentials and Controller reachability.
+        # The full-turn matcher intentionally leaves compound requests (for example,
+        # ``你好，查节点``) to the evidence router.
+        direct = local_response(question)
+        if direct is not None:
+            self.query_status = "complete"
+            return direct
+        if is_active_missions_question(question):
+            return self._read_host_query(Query("active_missions"))
+        if is_inventory_question(question):
+            return self._read_host_query(Query("cluster"))
+        if self.answer_mode == "facts":
+            return super()._turn(question)
         if self.router is None:
             self.router = self.router_factory()
         if not isinstance(self.router, ResponsesRouter):
             return super()._turn(question)
-        references: JSONObject = {
-            "controller": self.controller.endpoint,
-            "displayed_nodes": list(self.displayed_nodes),
-            "displayed_missions": list(self.displayed_missions),
-            "last_node": self.last_node,
-            "last_mission": self.last_mission,
-            "request_id": self.request_id,
-            "previous_question": self.previous_question,
-        }
-        if self.shown_draft:
-            references["draft"] = {
-                key: self.shown_draft.get(key)
-                for key in ("draft_revision", "draft_digest", "lifecycle", "assessment")
-            }
+        references = self.query_references()
+        references["controller"] = self.controller.endpoint
         context = self.store.data.get("context")
         if isinstance(context, dict) and context.get("request_context") is not None:
             references["request_context_historical"] = context["request_context"]
@@ -73,20 +210,19 @@ class ConversationSession(WorkbenchSession):
         def resolve(query: Query) -> Query:
             """Freeze this batch's typed references before its first read can change a list."""
             if query.kind == "compare":
-                comparison_targets[query] = tuple(self.displayed_nodes)
+                comparison_targets[query] = tuple(cast(list[str], references["displayed_nodes"]))
             if query.index is not None:
-                displayed = (
-                    self.displayed_nodes if query.kind == "node" else self.displayed_missions
-                )
+                domain = "nodes" if query.kind == "node" else "missions"
+                displayed = cast(list[str], references["displayed_" + domain])
                 if not 1 <= query.index <= len(displayed):
                     raise WorkbenchError("本批查询没有这个已展示对象序号。")
                 return replace(query, value=displayed[query.index - 1], index=None)
             if query.value and query.kind in {"node", "mission", "explain"}:
-                known = (
-                    [*self.displayed_nodes, self.last_node]
-                    if query.kind == "node"
-                    else [*self.displayed_missions, self.last_mission]
-                )
+                domain = "nodes" if query.kind == "node" else "missions"
+                known = [
+                    *cast(list[str], references["displayed_" + domain]),
+                    references["last_node" if query.kind == "node" else "last_mission"],
+                ]
                 if query.value not in known and query.value not in question:
                     raise WorkbenchError("对象 ID 没有当前问题或查询结果依据。")
             return query
@@ -102,8 +238,8 @@ class ConversationSession(WorkbenchSession):
                 result: str | ReadResult
                 if query.kind == "compare":
                     result = self.read_comparison(comparison_targets[query])
-                elif query.kind == "missions":
-                    result = self._command("/" + query.kind)
+                elif query.kind in {"missions", "active_missions"}:
+                    result = self.read_missions(active_only=query.kind == "active_missions")
                 elif query.kind == "explain":
                     result = self.read_explanation(query.value or "")
                 elif query.kind == "mission":
@@ -117,11 +253,16 @@ class ConversationSession(WorkbenchSession):
                 self.controller.timeout = original_timeout
 
         result = EvidenceConversation(
-            self.router, tools=self.tool_limit, calls=self.call_limit, seconds=self.turn_seconds
+            self.router,
+            tools=min(4, self.tool_limit),
+            calls=min(3, self.call_limit),
+            seconds=min(60, self.turn_seconds),
         ).answer(
             question,
             references,
-            bounded_history(self.store.data.get("messages")),
+            self.input_history
+            if self.input_history is not None
+            else bounded_history(self.store.data.get("messages")),
             read,
             resolve=resolve,
         )
@@ -146,13 +287,42 @@ class ConversationSession(WorkbenchSession):
             return "此问题尚未执行操作；使用 /help 查看支持范围。"
         return result.text
 
+    def _read_host_query(self, query: Query) -> str:
+        """Perform one obvious current read under the configured turn budget."""
+        self.progress("正在读取 " + query.kind)
+        original_timeout = self.controller.timeout
+        self.controller.timeout = min(original_timeout, self.turn_seconds)
+        try:
+            returned = (
+                self.read_missions(active_only=True)
+                if query.kind == "active_missions"
+                else self._execute(query)
+            )
+            result = host_read_answer(query, returned)
+        except (ValueError, OSError, RuntimeError) as error:
+            self.query_status = "failed"
+            return "当前状态读取失败，状态未知；未根据历史记录推断。\n原因：" + safe_text(
+                str(error)
+            )
+        finally:
+            self.controller.timeout = original_timeout
+        self.query_status = result.status
+        self.evidence = result.evidence
+        evidence_log = self.store.data.get("context")
+        if isinstance(evidence_log, dict):
+            evidence_log["last_evidence"] = cast(JSONValue, result.evidence)
+        return result.text
+
     def checkpoint(self) -> None:
         """Persist structured evidence with references through the sole foreground writer."""
         old_context = self.store.data.get("context")
         old_request = old_context.get("request_context") if isinstance(old_context, dict) else None
+        agent_turns = old_context.get("agent_turns") if isinstance(old_context, dict) else None
         super().checkpoint()
         context = self.store.data["context"]
         if isinstance(context, dict):
+            if agent_turns is not None:
+                context["agent_turns"] = agent_turns
             if hasattr(self, "evidence"):
                 context["last_evidence"] = cast(JSONValue, self.evidence)
             if self.request_id:
@@ -160,10 +330,9 @@ class ConversationSession(WorkbenchSession):
             self.store.save()
 
     def _show_request(self, raw: JSONObject) -> str:
-        """Summarize the host-validated plan and show changes while retaining its exact identity."""
-        previous = getattr(self, "displayed_plan_history", None)
+        """Expand new plans completely and keep acknowledged unchanged progress reads compact."""
+        previous = self.acknowledged_draft
         full = super()._show_request(raw)
-        self.displayed_plan_history = raw
         self.request_context: JSONObject = {
             key: raw.get(key)
             for key in ("request_id", "lifecycle", "assessment", "draft_revision", "draft_digest")
@@ -171,20 +340,18 @@ class ConversationSession(WorkbenchSession):
         plan = raw.get("plan")
         if not isinstance(plan, dict):
             return full
-        tasks = plan.get("tasks")
-        rows = tasks if isinstance(tasks, list) else []
-        summary = full.split("计划任务与原始参数", 1)[0]
-        summary += "\n计划步骤（完整参数用 /plan-detail 展开）：\n"
-        for task in rows:
-            if not isinstance(task, dict):
-                continue
-            summary += safe_text(json.dumps(task, ensure_ascii=False)) + "\n"
-        if previous and previous.get("draft_digest") != raw.get("draft_digest"):
-            summary += f"版本变化：{previous.get('draft_revision')} → {raw.get('draft_revision')}\n"
+        summary = render_request(raw, include_plan=False) if same_plan(previous, raw) else full
+        if (
+            previous
+            and previous.get("request_id") == raw.get("request_id")
+            and previous.get("draft_revision") != raw.get("draft_revision")
+        ):
+            summary += (
+                f"\n版本变化：{previous.get('draft_revision')} → {raw.get('draft_revision')}\n"
+            )
             old = previous.get("plan")
             if isinstance(old, dict):
                 changed = [key for key in set(old) | set(plan) if old.get(key) != plan.get(key)]
-                summary += "修改部分：" + ", ".join(sorted(changed)) + "\n"
-        if raw.get("approval_required"):
-            summary += "仍需原风险审批。\n"
-        return summary + "执行仍绑定上述原版本；/execute 授权，/answer 修改。"
+                if changed:
+                    summary += "修改部分：" + ", ".join(sorted(changed))
+        return summary

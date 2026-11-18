@@ -1,0 +1,28 @@
+{
+  "robot": "thor2-ts",
+  "commit": "c9c159ec2c74522f275e62fe79ec5e73e34e1028",
+  "provenance": "Read-only copy of generated build protocols; installed binary provenance is not established",
+  "files": [
+    {
+      "path": "target/release/build/robonix-liaison-4b67fa2138f0ef77/out/pilot.proto",
+      "name": "pilot.proto",
+      "sha256": "4d16de5f8388e9dd6380f12c4ad8d84a9864fb9111a561bd1dfb591c735c7936"
+    },
+    {
+      "path": "target/release/build/robonix-liaison-4b67fa2138f0ef77/out/liaison.proto",
+      "name": "liaison.proto",
+      "sha256": "5805b4f574cf7c88d5640edb0448863c51136a6e71c1d779a277806ab0c32de1"
+    },
+    {
+      "path": "system/atlas/proto/atlas.proto",
+      "name": "atlas.proto",
+      "sha256": "d4818b2e7d8d63a6f9c99dde380dd0d2f589637fa545ec1b28358503e41d3b30"
+    },
+    {
+      "path": "generated locally from the three pinned .proto files",
+      "name": "dog2.pb",
+      "sha256": "b261dd22d1f014db55a63b3f80f31fb5db260df6866db0cea8141a75f0edad7c"
+    }
+  ],
+  "descriptor_compiler": "libprotoc 25.3"
+}

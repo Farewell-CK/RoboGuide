@@ -178,19 +178,37 @@ impl ControlPlane {
                 .resource_topology_history
                 .get(&receipt.revision)
                 .map(serde_json::to_value),
+            kind @ (domain::RegistryCommandKind::PhysicalEntities
+            | domain::RegistryCommandKind::DeploymentFeasibility) => self
+                .deployment_publications(kind)
+                .and_then(|history| history.get(&receipt.revision))
+                .map(serde_json::to_value),
         }
         .transpose()
         .map_err(|error| ControlError::InvalidProposal(error.to_string()))?
         .ok_or_else(|| {
             ControlError::InvalidProposal("registry command lacks original history".into())
         })?;
-        let digest = format!(
-            "sha256:{:x}",
-            Sha256::digest(
-                serde_json::to_vec(&value)
-                    .map_err(|error| ControlError::InvalidProposal(error.to_string()))?
+        let digest = if matches!(
+            receipt.kind,
+            domain::RegistryCommandKind::PhysicalEntities
+                | domain::RegistryCommandKind::DeploymentFeasibility
+        ) {
+            value
+                .as_str()
+                .ok_or_else(|| {
+                    ControlError::InvalidProposal("deployment digest is invalid".into())
+                })?
+                .to_string()
+        } else {
+            format!(
+                "sha256:{:x}",
+                Sha256::digest(
+                    serde_json::to_vec(&value)
+                        .map_err(|error| ControlError::InvalidProposal(error.to_string()))?
+                )
             )
-        );
+        };
         if receipt.command_id.trim().is_empty()
             || receipt.command_id.len() > 256
             || receipt.authority_subject.trim().is_empty()
@@ -390,6 +408,7 @@ impl ControlPlane {
             }
             self.validate_registry_command_receipt(receipt)?;
         }
+        self.validate_deployment_publications()?;
         Ok(())
     }
 

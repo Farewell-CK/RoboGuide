@@ -1,5 +1,10 @@
 # RoboGuide V2 current architecture
 
+[ADR-0255](../../decisions/0255-host-owned-mission-objective.md) introduces an explicit
+`host-objective-v1` Provider draft profile. MI assembles the original objective from the frozen
+GroundedIntent; models generate candidate plans and independent Review receives the complete goal.
+Legacy echo remains the default. [Integration and verification](../../development/mi-host-objective-v0.1.md).
+
 [ADR-0214](../../decisions/0214-replicated-federation-deployment.md) assigns replicated Federation
 configuration to explicit supervisor process inputs. Original domain, authorization and optional
 root peer files enter the common policy identity and reach its unique owned child. This wires
@@ -148,10 +153,19 @@ Global coordination handles `What / Who / When / Shared Where`. Local EAIOS owns
 planning, perception, navigation, motion, hardware control and immediate safety. Node, PhysicalEntity, Host
 and LocalSystem remain distinct identities even when they share a process or machine.
 
+The physical integration proposal distinguishes Local EAIOS task delegation from device integration.
+The former delegates a complete goal to the local operating system; the latter exposes implemented
+device capabilities through an existing runtime or local execution adapter. Both use RG task, resource,
+state and recovery mechanisms. Internal primitives remain locally owned. An opt-in deployment
+catalog and Robonix-side task integration completed one real dog2 stand task through RG.
+[ADR-0231](../../decisions/0231-local-eaios-and-device-integration.md) records the implemented scope
+and pending cancellation, recovery and multi-participant acceptance.
+
 ## 2. Logical architecture
 
 | Responsibility | Authority | Implementation |
 | --- | --- | --- |
+| Scene / physical World ingress | Readonly explicitly attributed entity/source reports retain original definition bytes and remaining freshness; MI qualification supplies grounding without localization, arrival or motion authority (ADR-0247) | [Scene ingress](../../../integrations/robonix-task/robonix_task/scene_targets.py), [MI qualification](../../../mission/src/mission/scene_grounding.py) |
 | Conversation Workbench | Scoped evidence explanations, durable sessions and background Mission watch; explicit user actions enter Mission Service through plan-only/submission intent and original approval gates, with installed setup, scoped session navigation, preflight, explicit cancel and local feedback, without Control authority (ADR-0252/0253/0254) | [workbench](../../../mission/src/roboguide_workbench/) |
 | Mission Intelligence | Original Request/Dialogue/Grounding, drafts, independent Review, bounded Repair, approval and submission reconciliation; model outputs are candidates | [mission](../../../mission/src/mission/) |
 | Orchestration | Complete-plan admission, DAG readiness, logical dispatch priority, Task satisfaction, Mission lifecycle, holds and plan history | [orchestration](../../../core/orchestration/src/) |

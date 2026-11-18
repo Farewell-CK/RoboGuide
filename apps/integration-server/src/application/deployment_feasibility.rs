@@ -12,6 +12,8 @@ use std::collections::{BTreeMap, BTreeSet};
 /// Fixed, trusted startup observation; no live Node inventory or binding authority.
 #[derive(Debug, Clone)]
 pub(crate) struct DeploymentFeasibility {
+    /// Exact validated source document retained for online version history, without renewing clocks.
+    pub(super) source_document: serde_json::Value,
     /// Content identity persisted with each Control candidate restriction.
     digest: String,
     /// Exact canonical operation and destination to observed Node status.
@@ -83,7 +85,26 @@ impl DeploymentFeasibility {
     /// Admits validated source evidence while retaining disabled preferences and assessment defaults.
     pub(crate) fn load(path: &Path) -> Result<Self, String> {
         let snapshot = super::deployment_sources::FrozenFeasibilitySnapshot::load(path)?;
+        let document = snapshot.source_document.clone();
+        Self::from_snapshot(snapshot, document)
+    }
+
+    /// Parses an administrator document through the unchanged concrete source validators.
+    pub(crate) fn from_document(document: serde_json::Value) -> Result<Self, String> {
+        let snapshot =
+            super::deployment_sources::FrozenFeasibilitySnapshot::from_document(document.clone())?;
+        let mut profile = Self::from_snapshot(snapshot, document)?;
+        profile.configure_observation_preferences(domain::TimestampMs::new(0), false)?;
+        Ok(profile)
+    }
+
+    /// Builds one validated interpretation without inventing preference, evidence or receive clocks.
+    fn from_snapshot(
+        snapshot: super::deployment_sources::FrozenFeasibilitySnapshot,
+        document: serde_json::Value,
+    ) -> Result<Self, String> {
         Ok(Self {
+            source_document: document,
             digest: snapshot.digest,
             entries: snapshot.entries,
             identity: snapshot.identity,
@@ -1515,6 +1536,7 @@ mod tests {
             }
             let before_sequence = log.latest_sequence().unwrap();
             let controller = Arc::new(Mutex::new(ControllerState {
+                published_deployments: Default::default(),
                 federation: Default::default(),
                 bridge: IntegrationRuntimeBridge::new(
                     control,
@@ -2454,6 +2476,7 @@ mod tests {
         let mut control = control::ControlPlane::new();
         let state = initial_cost_nodes(&mut control, &plan, &mut events.clone());
         let controller = Arc::new(Mutex::new(ControllerState {
+            published_deployments: Default::default(),
             federation: Default::default(),
             bridge: IntegrationRuntimeBridge::new(
                 control,
@@ -2758,6 +2781,7 @@ mod tests {
             super::super::task_verifier::TaskVerifierFeed::load(&source_path, directory.path().join("verdict.json")).unwrap()
         });
         let controller = Arc::new(Mutex::new(ControllerState {
+            published_deployments: Default::default(),
             federation: Default::default(),
             bridge: IntegrationRuntimeBridge::new(
                 control::ControlPlane::new(),

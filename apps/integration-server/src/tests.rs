@@ -33,6 +33,7 @@ mod safety_stop;
 mod scheduling_disposition;
 mod semantic_verifier;
 mod stop_recovery;
+mod task_settlement;
 mod worker_isolation;
 
 /// A rejected execution cancellation closes its transaction and leaves the writer usable.
@@ -43,6 +44,7 @@ async fn unknown_execution_cancel_rolls_back_transaction() {
     let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
         .expect("event log opens");
     let controller = Arc::new(Mutex::new(ControllerState {
+        published_deployments: Default::default(),
         federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
@@ -125,6 +127,7 @@ async fn verifier_plan_without_deployment_source_is_not_submitted() {
     let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
         .expect("event log opens");
     let controller = Arc::new(Mutex::new(ControllerState {
+        published_deployments: Default::default(),
         federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),
@@ -823,6 +826,7 @@ async fn controller_metrics_expose_durable_high_water() {
     let event_log = state::SqliteEventLog::open(directory.path().join("events.sqlite3"))
         .expect("event log opens");
     let controller = Arc::new(Mutex::new(ControllerState {
+        published_deployments: Default::default(),
         federation: Default::default(),
         bridge: IntegrationRuntimeBridge::new(
             control::ControlPlane::new(),

@@ -70,12 +70,16 @@ class ObservedController(ReadOnlyController):
             "schema": "roboguide.state-query/v0.1",
             "records": [
                 {
-                    "object": {"object_type": "mission", "object_id": "m1"},
+                    "object": {"class": "roboguide", "object_type": "mission", "object_id": "m1"},
+                    "semantic": "desired",
+                    "source": "roboguide:mission-orchestrator",
                     "channel_id": "accepted-plan",
                     "value": {"objective": "检查仓库"},
                 },
                 {
-                    "object": {"object_type": "mission", "object_id": "m1"},
+                    "object": {"class": "roboguide", "object_type": "mission", "object_id": "m1"},
+                    "semantic": "derived",
+                    "source": "roboguide:runtime-orchestration",
                     "channel_id": "mission-lifecycle",
                     "value": {"lifecycle": "Running"},
                 },

@@ -327,9 +327,11 @@ fn apply(
     caller: &Caller<'_>,
     now: domain::TimestampMs,
     kernel: &KernelTime,
-    deployment: Option<&DeploymentFeasibility>,
+    _deployment: Option<&DeploymentFeasibility>,
     feed: Option<&TaskVerifierFeed>,
 ) -> Result<serde_json::Value, String> {
+    let original_deployment = state.deployment.clone();
+    let deployment = original_deployment.as_deref();
     if super::super::federation::execution::goal_owner(controller, mission).is_some() {
         return Err("local revision cannot replace an original distributed manifest; coordinate a complete global stop and new reviewed transaction".into());
     }
@@ -713,6 +715,8 @@ pub(crate) fn submit(
         .lock()
         .map_err(|_| "Controller authority unavailable")?
         .clone();
+    let current_deployment = super::super::deployment_management::current(&candidate, deployment)?;
+    let deployment = current_deployment.as_deref();
     if candidate.bridge.control().mission_tenant(mission) != Some(caller.tenant)
         || !matches!(caller.role, "operator" | "recovery-admin")
         || !authorized_caller(&candidate, caller, now)

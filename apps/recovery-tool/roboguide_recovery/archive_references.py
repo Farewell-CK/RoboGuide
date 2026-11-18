@@ -35,6 +35,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.29",
     "roboguide.recovery-profile/v0.30",
     "roboguide.recovery-profile/v0.31",
+    "roboguide.recovery-profile/v0.32",
 }
 WRAPPER = "roboguide.controller-checkpoint/v49"
 WRAPPERS = {
@@ -443,7 +444,11 @@ def validate(
     if len(archives) != sum(item["kind"] == "archive" for item in components):
         raise ValueError("Archive components duplicate original destinations")
     for item in components:
-        if item["kind"] == "artifact" and artifact_layout.supports(profile_schema):
+        if (
+            item["kind"] == "artifact"
+            and artifact_layout.supports(profile_schema)
+            and not artifact_layout.is_legacy(item, profile_schema)
+        ):
             owner = artifact_layout.validate_storage(
                 root / "stores" / item["component_id"], profile_schema
             )
@@ -461,6 +466,7 @@ def validate(
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
         "roboguide.recovery-profile/v0.31",
+        "roboguide.recovery-profile/v0.32",
     } and not any(item["kind"] in {"replica", "replica-content"} for item in components)
     bindings: dict[str, set[str]] = {}
     if profile_schema in SUPPORTED:
@@ -512,6 +518,7 @@ def validate(
                         "roboguide.recovery-profile/v0.29",
                         "roboguide.recovery-profile/v0.30",
                         "roboguide.recovery-profile/v0.31",
+                        "roboguide.recovery-profile/v0.32",
                     }
                     and isinstance(authority_id, str)
                     and not standalone
@@ -548,6 +555,7 @@ def validate(
                             "roboguide.recovery-profile/v0.29",
                             "roboguide.recovery-profile/v0.30",
                             "roboguide.recovery-profile/v0.31",
+                            "roboguide.recovery-profile/v0.32",
                         }
                     )
                 ):
@@ -643,6 +651,7 @@ def validate(
                         "roboguide.recovery-profile/v0.29",
                         "roboguide.recovery-profile/v0.30",
                         "roboguide.recovery-profile/v0.31",
+                        "roboguide.recovery-profile/v0.32",
                     }
                     or actual_profile is None
                     or seen[prefix] != projection

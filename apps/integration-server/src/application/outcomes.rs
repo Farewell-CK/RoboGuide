@@ -287,10 +287,33 @@ pub(crate) fn apply_pending_cancellations(
     correlation_id: &domain::CorrelationId,
     events: &mut state::SqliteEventLog,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    apply_pending_cancellations_scoped(controller, timestamp, correlation_id, events, None)
+}
+
+/// An administrator command may close only its own original Mission cancellation.
+pub(crate) fn apply_pending_cancellation(
+    controller: &mut ControllerState,
+    mission: &domain::MissionId,
+    timestamp: domain::TimestampMs,
+    correlation_id: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    apply_pending_cancellations_scoped(controller, timestamp, correlation_id, events, Some(mission))
+}
+
+/// Reuses the normal terminal, stop-settlement and Memory fences within an optional exact scope.
+fn apply_pending_cancellations_scoped(
+    controller: &mut ControllerState,
+    timestamp: domain::TimestampMs,
+    correlation_id: &domain::CorrelationId,
+    events: &mut state::SqliteEventLog,
+    target: Option<&domain::MissionId>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cancelling = controller
         .orchestrator
         .mission_ids()
         .into_iter()
+        .filter(|mission| target.is_none_or(|target| target == mission))
         .filter_map(|mission| {
             let execution = controller.orchestrator.execution(&mission)?;
             (execution.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling)
@@ -309,13 +332,14 @@ pub(crate) fn apply_pending_cancellations(
         .orchestrator
         .mission_ids()
         .into_iter()
+        .filter(|mission| target.is_none_or(|target| target == mission))
         .filter_map(|mission_id| {
             let execution = controller.orchestrator.execution(&mission_id)?;
             (execution.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling
                 && controller
                     .bridge
                     .group_attempts_terminal(execution.group_id())
-                && !safety_stop::blocks_release(controller, &mission_id)
+                && !safety_stop::blocks_cancellation_release(controller, &mission_id)
                 && !super::memory_use::blocks_release(controller, &mission_id))
             .then_some(mission_id)
         })

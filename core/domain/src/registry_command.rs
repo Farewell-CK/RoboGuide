@@ -20,6 +20,10 @@ pub enum RegistryCommandKind {
     ResourceQuota,
     /// Original deployment spatial exclusion and local Controller availability calendars.
     ResourceTopology,
+    /// Explicit administrator publication of current physical entity routing evidence.
+    PhysicalEntities,
+    /// Versioned deployment feasibility documents, independent of live Node inventory.
+    DeploymentFeasibility,
 }
 
 /// Original authenticated result of one idempotent registry change.

@@ -286,6 +286,7 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
         "roboguide.recovery-profile/v0.31",
+        "roboguide.recovery-profile/v0.32",
     } and (
         isinstance(original_identity, list)
         and len(original_identity) == 2
@@ -304,6 +305,7 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
         "roboguide.recovery-profile/v0.31",
+        "roboguide.recovery-profile/v0.32",
     } and (
         isinstance(original_identity, list)
         and len(original_identity) == 2
@@ -321,6 +323,7 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
         "roboguide.recovery-profile/v0.31",
+        "roboguide.recovery-profile/v0.32",
     } and (
         isinstance(original_identity, list)
         and len(original_identity) == 2
@@ -339,6 +342,7 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
         "roboguide.recovery-profile/v0.29",
         "roboguide.recovery-profile/v0.30",
         "roboguide.recovery-profile/v0.31",
+        "roboguide.recovery-profile/v0.32",
     } and (
         isinstance(original_identity, list)
         and len(original_identity) == 2
@@ -364,6 +368,7 @@ def validate_parent(connection: sqlite3.Connection, profile_schema: str) -> None
             "roboguide.recovery-profile/v0.29",
             "roboguide.recovery-profile/v0.30",
             "roboguide.recovery-profile/v0.31",
+            "roboguide.recovery-profile/v0.32",
         }
         or not {AUTHORITY, OPERATIONS, BASE} <= metadata.keys()
     ):

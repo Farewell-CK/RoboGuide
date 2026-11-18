@@ -27,6 +27,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.29",
     "roboguide.recovery-profile/v0.30",
     "roboguide.recovery-profile/v0.31",
+    "roboguide.recovery-profile/v0.32",
 }
 WRAPPER = "roboguide.controller-checkpoint/v51"
 WRAPPERS = {

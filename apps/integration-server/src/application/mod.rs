@@ -9,6 +9,7 @@ pub(crate) mod catalog_retention;
 pub(crate) mod coordinated_archive;
 mod deployment_document;
 mod deployment_feasibility;
+pub(crate) mod deployment_management;
 mod deployment_operation_admission;
 mod deployment_sources;
 mod dispatch;
@@ -40,6 +41,8 @@ pub(crate) mod plan_revision;
 pub(crate) mod plan_validation;
 mod recovery;
 pub(crate) mod resource_topology;
+pub(crate) mod retention;
+pub(crate) mod retention_worker;
 pub(crate) mod safety_stop;
 pub(crate) mod scoped_maps;
 pub(crate) mod semantic_verifier;
@@ -69,7 +72,8 @@ pub(crate) use deployment_feasibility::DeploymentFeasibility;
 pub(crate) use dispatch::{deferred_dispatch, node_accepts_execution_session};
 pub(crate) use dispatch::{drive_ready_tasks, drive_rebound_attempts};
 pub(crate) use outcomes::{
-    apply_pending_cancellations, apply_runtime_outcomes, close_terminal_mission_coordination,
+    apply_pending_cancellation, apply_pending_cancellations, apply_runtime_outcomes,
+    close_terminal_mission_coordination,
 };
 pub(crate) use persistence::{
     open_controller_event_log, server_checkpoint_json, validate_replication_checkpoint,

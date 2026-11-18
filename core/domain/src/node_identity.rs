@@ -65,6 +65,9 @@ pub struct NodeIdentityRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeIdentityRegistry {
+    /// Original online adoption authority; mandatory only in the v0.2 generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adoption: Option<Box<crate::NodeIdentityAdoptionReceipt>>,
     /// Retired/revoked leaves cannot be reused by a later enrolment or another Node.
     #[serde(default)]
     pub retired_digests: std::collections::BTreeSet<String>,
@@ -197,6 +200,7 @@ impl NodeIdentityRegistry {
     /// Creates an empty validated registry.
     pub fn new(registry_id: impl Into<String>) -> Self {
         Self {
+            adoption: None,
             schema: NODE_IDENTITY_REGISTRY_SCHEMA.into(),
             registry_id: registry_id.into(),
             records: BTreeMap::new(),
@@ -526,8 +530,10 @@ impl NodeIdentityRegistry {
 
     /// Validates schema, map keys and every lifecycle record before startup use.
     pub fn validate(&self) -> Result<(), IdentityError> {
-        if self.schema != NODE_IDENTITY_REGISTRY_SCHEMA
-            || self.registry_id.trim().is_empty()
+        if !matches!(
+            self.schema.as_str(),
+            NODE_IDENTITY_REGISTRY_SCHEMA | crate::ADOPTED_NODE_IDENTITY_REGISTRY_SCHEMA
+        ) || self.registry_id.trim().is_empty()
             || self.registry_id.len() > 128
             || self.records.len() > 4096
             || self.commands.len() > 16384
@@ -535,6 +541,13 @@ impl NodeIdentityRegistry {
             || self.retired_digests.len() > 16384
         {
             return Err(IdentityError::InvalidField("registry"));
+        }
+        match (self.schema.as_str(), self.adoption.as_deref()) {
+            (NODE_IDENTITY_REGISTRY_SCHEMA, None) => {}
+            (crate::ADOPTED_NODE_IDENTITY_REGISTRY_SCHEMA, Some(receipt)) => {
+                receipt.validate_registry(self)?;
+            }
+            _ => return Err(IdentityError::InvalidField("adoption generation")),
         }
         for digest in &self.retired_digests {
             validate_digest(digest)?;

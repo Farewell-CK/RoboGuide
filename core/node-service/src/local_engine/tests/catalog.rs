@@ -2,6 +2,40 @@
 
 use super::*;
 
+/// The deployment fragment compiles once, while no-effects support refuses legacy or device relabelling.
+#[test]
+fn task_delegation_no_effects_export_compiles_with_explicit_contract() {
+    let fragment = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../integrations/robonix-task/deploy/node.task.fragment.toml"
+    ));
+    let directory = tempfile::tempdir().unwrap();
+    let source = format!(
+        "schema = \"roboguide.node-config/v0.13\"\nnode_id = \"lite3-dog2\"\nserver_endpoint = \"http://127.0.0.1:50051\"\nstate_directory = {:?}\n{fragment}",
+        directory.path().to_string_lossy()
+    );
+    let config: NodeServiceConfig = toml::from_str(&source).unwrap();
+    CompiledLocalCatalog::compile(config.clone(), Path::new(".")).unwrap();
+    for (schema, assurance) in [
+        ("roboguide.execution-safety/v0.1", "no-effects"),
+        ("roboguide.execution-safety/v0.2", "device-observation"),
+    ] {
+        let mut changed = config.clone();
+        let raw = changed.local_systems[0]
+            .metadata
+            .get(domain::EXECUTION_SAFETY_METADATA_KEY)
+            .unwrap();
+        let mut profile: serde_json::Value = serde_json::from_str(raw).unwrap();
+        profile["schema"] = schema.into();
+        profile["operations"][0]["assurance"] = assurance.into();
+        changed.local_systems[0].metadata.insert(
+            domain::EXECUTION_SAFETY_METADATA_KEY.into(),
+            profile.to_string(),
+        );
+        assert!(CompiledLocalCatalog::compile(changed, Path::new(".")).is_err());
+    }
+}
+
 /// Fixed failover routes rotate without changing Node identity; legacy, duplicate and excess routes reject.
 #[test]
 fn bounded_controller_failover_routes_preserve_catalog_identity() {

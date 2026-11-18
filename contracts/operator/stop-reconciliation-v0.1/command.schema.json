@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Administrator cancellation settlement v0.1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "command_id", "expected_record_digest", "execution_generation", "confirmed", "disposition", "attestation", "evidence"],
+  "properties": {
+    "schema_version": {"const": "roboguide.stop-reconciliation/v0.1"},
+    "command_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "expected_record_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "execution_generation": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+    "confirmed": {"const": true},
+    "disposition": {"enum": ["no-effects", "stopped"]},
+    "attestation": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "evidence": {"type": "object", "minProperties": 1}
+  }
+}

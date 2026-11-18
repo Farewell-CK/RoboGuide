@@ -13,6 +13,7 @@ from typing import Any
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import current_environment, load_settings
 from mission.provenance import implementation_identity
+from mission.provider_mission_plan import HOST_OBJECTIVE_PROFILE
 from mission.responses import ResponsesMissionRepairer, ResponsesMissionReviewer
 from mission.runtime_replanning import RuntimeReplanningWorker
 from mission.runtime_replanning_http import JournaledRuntimeTransport, RuntimeJsonPeer
@@ -117,6 +118,12 @@ def compose(
                     settings.schema_path,
                     settings.prompts.repairer_path,
                     settings.prompts.reviewer_path,
+                    *(
+                        (settings.prompts.host_objective_path,)
+                        if settings.provider_plan_profile == HOST_OBJECTIVE_PROFILE
+                        and settings.prompts.host_objective_path is not None
+                        else ()
+                    ),
                 )
             }
         ),

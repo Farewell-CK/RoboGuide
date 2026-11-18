@@ -32,8 +32,14 @@ mod operator_tests;
 
 #[path = "archive_maintenance.rs"]
 mod archive_maintenance;
+#[path = "content_archive_maintenance.rs"]
+mod content_archive_maintenance;
 #[path = "coordinated_archive.rs"]
 mod coordinated_archive;
+#[path = "retention_maintenance.rs"]
+mod retention_maintenance;
+#[path = "storage_metrics.rs"]
+mod storage_metrics;
 
 /// Operator role permitted to acknowledge a crash-loop quarantine.
 const RECOVERY_ADMIN_ROLE: &str = "recovery-admin";
@@ -73,7 +79,7 @@ fn operator_role(request: &ControlHttpRequest, principal: &OperatorPrincipal) ->
     if header.as_deref().is_some_and(|role| {
         !matches!(
             role,
-            "viewer" | "operator" | "recovery-admin" | "metrics-reader"
+            "viewer" | "operator" | "recovery-admin" | "metrics-reader" | "verifier"
         )
     }) {
         return None;
@@ -209,6 +215,7 @@ fn authorize_tenant_path(
             | "/v1/maintenance/archive"
             | "/v1/maintenance/archive/abort"
             | "/v1/maintenance/archive/operations"
+            | "/v1/maintenance/retention"
             | "/v1/maintenance/coordinated-archive"
             | "/v1/maintenance/coordinated-archive/abort"
             | "/v1/maintenance/coordinated-archive/operations"
@@ -225,6 +232,8 @@ fn authorize_tenant_path(
             | "/v1/artifact-authorizations"
             | "/v1/resource-quotas"
             | "/v1/resource-topology"
+            | "/v1/physical-entities"
+            | "/v1/deployment-feasibility"
     ) {
         return Err(
             "global administration/diagnostics require an explicitly delegated global principal"
@@ -241,6 +250,44 @@ fn authorize_operator_request(
     method: &str,
     path: &str,
 ) -> Result<(), (&'static str, &'static str)> {
+    if operator_role(request, principal).as_deref() == Some("verifier") {
+        let scoped = principal.mtls
+            && principal
+                .subject
+                .as_ref()
+                .is_some_and(|subject| !subject.is_empty())
+            && principal
+                .tenants
+                .as_ref()
+                .is_some_and(|tenants| !tenants.is_empty() && !tenants.contains("*"));
+        let mission_read = path.strip_prefix("/v1/missions/").is_some_and(|tail| {
+            let mut pieces = tail.split('/');
+            pieces.next().is_some_and(|id| !id.is_empty())
+                && matches!(
+                    (pieces.next(), pieces.next()),
+                    (None, None)
+                        | (
+                            Some("status" | "tenant" | "execution-attempts" | "admission"),
+                            None
+                        )
+                )
+        });
+        return if scoped
+            && ((method == "GET"
+                && (matches!(
+                    path,
+                    "/healthz" | "/readyz" | "/v1/inventory" | "/v1/state/records"
+                ) || mission_read))
+                || method == "POST" && path == "/v1/verifier-evidence")
+        {
+            Ok(())
+        } else {
+            Err((
+                "403 Forbidden",
+                "verifier principal cannot access this route or lacks scoped mutual TLS",
+            ))
+        };
+    }
     if operator_role(request, principal).as_deref() == Some("metrics-reader") {
         return if method == "GET" && matches!(path, "/metrics" | "/healthz" | "/readyz") {
             Ok(())
@@ -270,6 +317,9 @@ fn authorize_operator_request(
             | "/v1/resource-quotas"
             | "/v1/resource-topology"
             | "/v1/maintenance/archive/operations"
+            | "/v1/maintenance/retention"
+            | "/v1/physical-entities"
+            | "/v1/deployment-feasibility"
             | "/v1/maintenance/coordinated-archive/operations",
         ) => 2,
         ("GET", _)
@@ -285,11 +335,17 @@ fn authorize_operator_request(
         (
             "POST",
             "/v1/maintenance/archive"
+            | "/v1/maintenance/retention"
             | "/v1/maintenance/archive/abort"
             | "/v1/maintenance/coordinated-archive"
             | "/v1/maintenance/coordinated-archive/abort",
         ) => 2,
         ("POST", "/v1/authority/recover") => 2,
+        ("POST", path)
+            if path.starts_with("/v1/executions/") && path.ends_with("/safety-stop/reconcile") =>
+        {
+            2
+        }
         ("POST", "/v1/memory/imports") => 2,
         ("POST", "/v1/memory/import-queries") => 2,
         ("POST", "/v1/memory/use-queries") => 2,
@@ -297,7 +353,13 @@ fn authorize_operator_request(
         ("POST", path) if path.starts_with("/v1/memory/handoffs/") && path.ends_with("/commit") => {
             2
         }
-        ("POST", "/v1/node-identities/commands") => 2,
+        (
+            "POST",
+            "/v1/node-identities/commands"
+            | "/v1/node-identities/adopt"
+            | "/v1/physical-entities"
+            | "/v1/deployment-feasibility",
+        ) => 2,
         ("POST", "/v1/tenant-migrations") => 2,
         (
             "POST",
@@ -880,6 +942,7 @@ where
     } else {
         domain::TimestampMs::new(0)
     };
+    let readiness_write_gate = event_write_gate.clone();
     let authorized_write_gate = Arc::new(AuthorizedRequestGate::new(
         event_write_gate.clone(),
         controller.clone(),
@@ -1340,6 +1403,52 @@ where
             }
         };
     }
+    if matches!(path, "/v1/physical-entities" | "/v1/deployment-feasibility") {
+        let result = if method == "GET" {
+            let live = controller
+                .lock()
+                .map_err(|_| "Controller lock is poisoned")?;
+            if path == "/v1/physical-entities" {
+                Ok(application::deployment_management::physical_view(&live))
+            } else {
+                application::deployment_management::feasibility_view(&live, deployment_feasibility)
+            }
+        } else if method == "POST" {
+            let subject = principal
+                .subject
+                .as_deref()
+                .unwrap_or("trusted-loopback:recovery-admin");
+            if path == "/v1/physical-entities" {
+                application::deployment_management::submit_physical(
+                    controller,
+                    event_log,
+                    event_write_gate.as_ref(),
+                    &request.body,
+                    subject,
+                    clock,
+                )
+            } else {
+                application::deployment_management::submit_feasibility(
+                    controller,
+                    event_log,
+                    event_write_gate.as_ref(),
+                    &request.body,
+                    subject,
+                    clock,
+                    deployment_feasibility,
+                )
+            }
+        } else {
+            Err("unsupported deployment administration method".into())
+        };
+        return match result {
+            Ok(body) => write_http_response(stream, "200 OK", body).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
     if method == "POST" && path == "/v1/resource-topology" {
         return match application::state_policy::submit_resource_topology(
             controller,
@@ -1491,6 +1600,26 @@ where
             }
         };
     }
+    if method == "POST" && path == "/v1/node-identities/adopt" {
+        let result = application::node_identity::adopt(
+            controller,
+            event_log,
+            event_write_gate,
+            clock,
+            &request.body,
+            principal
+                .subject
+                .as_deref()
+                .unwrap_or("loopback:recovery-admin"),
+        );
+        return match result {
+            Ok(receipt) => write_http_response(stream, "200 OK", receipt).await,
+            Err(error) => {
+                write_http_response(stream, "409 Conflict", serde_json::json!({"error":error}))
+                    .await
+            }
+        };
+    }
     if method == "POST" && path == "/v1/tenant-migrations" {
         let result = application::tenant::migrate(
             controller,
@@ -1559,22 +1688,34 @@ where
     }
     let (status, body) = match (method, path) {
         ("GET", "/healthz") => ("200 OK", serde_json::json!({"status": "ok"})),
-        ("GET", "/readyz") => match event_log.readiness() {
-            Ok(()) => {
+        ("GET", "/readyz") => {
+            // Probe the original committed store in its normal writer turn, so an in-flight
+            // application batch is not mistaken for failed storage. This grants no mutation.
+            let ready = application::run_synchronous_transaction(|| {
+                let _turn = readiness_write_gate.lock()?;
+                event_log.readiness().map_err(|error| error.to_string())?;
                 let live = controller
                     .lock()
-                    .map_err(|_| "controller lock is poisoned")?;
-                let unknown = live.bridge.current_unknown_attempts().len();
-                (
+                    .map_err(|_| "controller lock is poisoned".to_string())?;
+                Ok::<_, String>(live.bridge.current_unknown_attempts().len())
+            });
+            match ready {
+                Ok(unknown) => (
                     "200 OK",
                     serde_json::json!({"ready":true,"degraded":unknown>0,"unknown_attempts":unknown}),
-                )
+                ),
+                Err(error) => {
+                    eprintln!(
+                        "Controller readiness authority check failed: {}",
+                        error.chars().take(512).collect::<String>()
+                    );
+                    (
+                        "503 Service Unavailable",
+                        serde_json::json!({"ready":false,"reason":"authority storage or quorum unavailable"}),
+                    )
+                }
             }
-            Err(_) => (
-                "503 Service Unavailable",
-                serde_json::json!({"ready":false,"reason":"authority storage or quorum unavailable"}),
-            ),
-        },
+        }
         ("GET", "/v1/memory/use-leases") => {
             let live = controller
                 .lock()
@@ -1760,7 +1901,8 @@ where
                 Some(purpose) => (
                     "200 OK",
                     serde_json::json!({
-                        "schema_version": "roboguide.safety-stop-view/v0.1", "purpose": purpose,
+                        "schema_version": "roboguide.safety-stop-view/v0.2", "purpose": purpose,
+                        "record_digest": purpose.record_digest()?,
                         "command_receipt_is_stop_proof": false,
                         "physical_device_validation": "HardwareEvidencePending",
                     }),
@@ -1769,6 +1911,111 @@ where
                     "404 Not Found",
                     serde_json::json!({"error": "stop purpose unavailable"}),
                 ),
+            }
+        }
+        ("POST", path)
+            if path.starts_with("/v1/executions/") && path.ends_with("/safety-stop/reconcile") =>
+        {
+            let execution_id = path
+                .trim_start_matches("/v1/executions/")
+                .trim_end_matches("/safety-stop/reconcile");
+            let command = match application::safety_stop::ReconciliationRequest::parse(
+                request_body.as_bytes(),
+            ) {
+                Ok(command) => command,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error":error}),
+                    )
+                    .await;
+                }
+            };
+            let Some(subject) = principal.subject.as_deref() else {
+                return write_http_response(
+                    stream,
+                    "403 Forbidden",
+                    serde_json::json!({"error":"authenticated administrator identity required"}),
+                )
+                .await;
+            };
+            let _write_guard = event_write_gate.lock()?;
+            event_log.begin_batch()?;
+            let result: Result<(ControllerState, Option<String>, serde_json::Value), String> =
+                (|| {
+                    let live = controller
+                        .lock()
+                        .map_err(|_| "controller lock is poisoned")?;
+                    authorize_tenant_path(&live, tenant.as_deref(), path)?;
+                    let mut candidate = live.clone();
+                    let replay = candidate
+                        .safety_stops
+                        .get(execution_id)
+                        .is_some_and(|purpose| purpose.is_settled());
+                    let now = clock.now();
+                    let receipt = application::safety_stop::reconcile_manual(
+                        &mut candidate,
+                        execution_id,
+                        command,
+                        subject,
+                        now,
+                    )?;
+                    if replay {
+                        return Ok((candidate, None, receipt));
+                    }
+                    let mission = candidate
+                        .bridge
+                        .attempt_history()
+                        .into_iter()
+                        .find(|attempt| attempt.execution_id() == execution_id)
+                        .ok_or("original reconciliation attempt is absent")?
+                        .command()
+                        .mission_id()
+                        .clone();
+                    application::apply_pending_cancellation(
+                        &mut candidate,
+                        &mission,
+                        now,
+                        domain::CorrelationId::new("manual-stop-settlement")
+                            .as_ref()
+                            .map_err(|error| error.to_string())?,
+                        &mut event_log.clone(),
+                    )
+                    .map_err(|error| error.to_string())?;
+                    let checkpoint = crate::diagnostics::http_checkpoint(&candidate)
+                        .map_err(|error| error.to_string())?;
+                    Ok((candidate, Some(checkpoint), receipt))
+                })();
+            match result {
+                Ok((candidate, checkpoint, receipt)) => {
+                    if let Some(checkpoint) = checkpoint {
+                        if let Err(error) =
+                            crate::diagnostics::http_save(event_log, &checkpoint, &diagnostics)
+                        {
+                            event_log.rollback_batch()?;
+                            return Err(error.into());
+                        }
+                        if let Err(error) = crate::diagnostics::http_commit(event_log, &diagnostics)
+                        {
+                            let _ = event_log.rollback_batch();
+                            return Err(error.into());
+                        }
+                        *controller
+                            .lock()
+                            .map_err(|_| "controller lock is poisoned")? = candidate;
+                    } else {
+                        event_log.rollback_batch()?;
+                    }
+                    (
+                        "200 OK",
+                        serde_json::json!({"schema_version":"roboguide.stop-reconciliation-receipt/v0.1","execution_id":execution_id,"settlement":receipt,"physical_stop_confirmed":false,"automatic_continuation_authorized":false}),
+                    )
+                }
+                Err(error) => {
+                    event_log.rollback_batch()?;
+                    ("409 Conflict", serde_json::json!({"error":error}))
+                }
             }
         }
         ("GET", "/v1/inventory") => {
@@ -1840,18 +2087,47 @@ where
                 .unwrap_or(100);
             let log = event_log.clone();
             let gate = event_write_gate.clone();
+            let shared = controller.clone();
+            let root =
+                std::env::var_os("ROBOGUIDE_EVENT_ARCHIVE_DIRECTORY").map(std::path::PathBuf::from);
             // The shared connection must never expose an application's uncommitted batch.
             // Wait off the async executor, then hold the existing write gate only for the read.
             let events = tokio::task::spawn_blocking(move || {
-                let _guard = gate.lock()?;
-                log.events_page(after_sequence, limit)
+                let prepared = {
+                    let _guard = gate.lock()?;
+                    log.prepare_event_history_page(after_sequence, limit)
+                        .map_err(|error| error.to_string())?
+                };
+                let source = shared
+                    .lock()
+                    .map_err(|_| "history Controller mutex is poisoned".to_string())?
+                    .memory_preparation
+                    .catalog
+                    .as_ref()
+                    .map(|catalog| catalog.archive_source())
+                    .transpose()?;
+                let current = shared.clone();
+                let permission = gate.clone();
+                let witness = Arc::new(move || {
+                    let live = current
+                        .lock()
+                        .map_err(|_| "history Controller mutex is poisoned".to_string())?;
+                    permission.validate(&live)
+                });
+                let reader = application::archive_content::HistoryReader::new(
+                    root.unwrap_or_default(),
+                    source,
+                    witness,
+                );
+                state::SqliteEventLog::read_prepared_event_history_page(prepared, &reader)
                     .map_err(|error| error.to_string())
             })
             .await
             .unwrap_or_else(|_| Err("event-log reader failed".to_string()));
             match events {
-                Ok(events) => {
-                    let records = events
+                Ok(page) => {
+                    let records = page
+                        .events
                         .iter()
                         .map(|event| {
                             let payload = serde_json::from_str(&event.payload_json)
@@ -1867,7 +2143,11 @@ where
                             })
                         })
                         .collect::<Vec<_>>();
-                    ("200 OK", serde_json::json!({"events": records}))
+                    (
+                        "200 OK",
+                        serde_json::json!({"events": records,"next_after_sequence":page.next_after_sequence,
+                        "has_more":page.has_more,"history_floor":page.history_floor,"through_sequence":page.through_sequence}),
+                    )
                 }
                 Err(error) => (
                     "503 Service Unavailable",
@@ -1929,6 +2209,26 @@ where
             })
             .await
             .map_err(|error| format!("original Archive cleanup worker failed: {error}"))?
+        }
+        ("GET", "/v1/maintenance/retention") => {
+            let log = event_log.clone();
+            let gate = event_write_gate.clone();
+            tokio::task::spawn_blocking(move || {
+                retention_maintenance::observe(&log, &gate, received_at)
+            })
+            .await
+            .map_err(|error| format!("retention observation worker failed: {error}"))?
+        }
+        ("POST", "/v1/maintenance/retention") => {
+            let log = event_log.clone();
+            let gate = event_write_gate.clone();
+            let shared = controller.clone();
+            let body = request.body.clone();
+            tokio::task::spawn_blocking(move || {
+                retention_maintenance::update(&body, &shared, &log, &gate, received_at)
+            })
+            .await
+            .map_err(|error| format!("retention policy worker failed: {error}"))?
         }
         ("GET", "/v1/maintenance/archive") => {
             let log = event_log.clone();
@@ -2028,7 +2328,19 @@ where
                 .clone()
                 .unwrap_or_else(|| "trusted-loopback:recovery-admin".into());
             let original_tenant = tenant.clone().unwrap_or_else(|| "*".into());
-            let result = tokio::task::spawn_blocking(move || {
+            let result = if let Some(command) = content_command {
+                content_archive_maintenance::Context {
+                    controller: shared_controller,
+                    log,
+                    gate,
+                    root: archive_root,
+                    subject,
+                    tenant: original_tenant,
+                }
+                .run(command, clock)
+                .await
+            } else {
+                tokio::task::spawn_blocking(move || {
                 let _write_guard = gate
                     .lock()
                     .map_err(|_| state::SqliteEventLogError::LockPoisoned)?;
@@ -2036,18 +2348,12 @@ where
                 if live.orchestrator.mission_ids().iter().any(|mission| live.orchestrator.execution(mission).is_some_and(|execution| matches!(execution.lifecycle(),orchestration::MissionExecutionLifecycle::Accepted | orchestration::MissionExecutionLifecycle::Running | orchestration::MissionExecutionLifecycle::Cancelling))) || !live.bridge.current_unknown_attempts().is_empty() {
                     return Err(state::SqliteEventLogError::ArchivePolicy("archive maintenance requires no nonterminal Missions or unknown physical attempts".into()));
                 }
-                let source = if content_command.is_some() { Some(live.memory_preparation.catalog.as_ref().ok_or_else(||state::SqliteEventLogError::ArchivePolicy("Archive requires its original Catalog/source backend".into()))?.archive_source().map_err(state::SqliteEventLogError::ArchivePolicy)?) } else { None };
                 drop(live);
-                if let Some(command)=content_command {
-                    let source=source.expect("explicit command resolves its original source under the writer");
-                    let request=state::ArchiveRequest { command_id:command.command_id,principal:subject,tenant:original_tenant,source_owner:source.owner_id().expect("retained source has original identity").into(),destination:archive_root.to_str().ok_or_else(||state::SqliteEventLogError::ArchivePolicy("Archive path must be UTF-8".into()))?.into(),authority_id:log.archive_authority_id()?,budget_ms:command.budget_ms };
-                    let current_gate=gate.clone();
-                    let witness=Arc::new(move || { let live=shared_controller.lock().map_err(|_|"Archive authority mutex is poisoned".to_string())?; current_gate.validate(&live) });
-                    log.archive_and_gc_with_catalog(cutoff,&application::archive_content::ContentArchiveSink::new(source,witness),request)
-                } else { log.archive_and_gc(cutoff, &state::FileArchiveSink::new(archive_root)) }
+                log.archive_and_gc(cutoff, &state::FileArchiveSink::new(archive_root))
             })
             .await
-            .map_err(|error| format!("archive worker failed: {error}"))?;
+            .map_err(|error| format!("archive worker failed: {error}"))?
+            };
             match result {
                 Ok(manifest) => (
                     "200 OK",
@@ -2095,7 +2401,9 @@ where
             let live = controller
                 .lock()
                 .map_err(|_| "controller lock is poisoned")?;
-            let assessment = match deployment_feasibility {
+            let current_deployment =
+                application::deployment_management::current(&live, deployment_feasibility)?;
+            let assessment = match current_deployment.as_deref() {
                 Some(source) => source.assess_initial_plan(
                     &plan,
                     &scoped_control,
@@ -2204,6 +2512,8 @@ where
                 let live = controller
                     .lock()
                     .map_err(|_| "controller lock is poisoned")?;
+                let current_deployment =
+                    application::deployment_management::current(&live, deployment_feasibility)?;
                 let mut scoped = live.bridge.control().clone();
                 scoped
                     .register_mission_tenant(
@@ -2215,7 +2525,7 @@ where
                             &live,
                             &plan,
                             tenant.as_deref().unwrap_or("local"),
-                            deployment_feasibility,
+                            current_deployment.as_deref(),
                             verifier_feed,
                         )
                     })
@@ -2250,6 +2560,42 @@ where
                     .await;
                 }
             };
+            let mission_id = plan.goal().mission_id().clone();
+            let group_id = domain::ExecutionGroupId::new(format!("group-{mission_id}"))?;
+            let gate_wait = StageObservation::start(
+                &diagnostics,
+                DiagnosticKind::Http,
+                DiagnosticStage::WriteGate,
+                None,
+            );
+            let _write_guard = event_write_gate.lock()?;
+            drop(gate_wait);
+            let replay = {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "controller lock is poisoned")?;
+                MissionAdmission::replay(
+                    &live,
+                    &plan,
+                    &group_id,
+                    tenant.as_deref().unwrap_or("local"),
+                )
+            };
+            if !matches!(replay, Ok(None)) {
+                let (status, body) = match replay {
+                    Ok(Some(body)) => match event_log.require_writes_enabled() {
+                        Ok(()) => ("202 Accepted", body),
+                        Err(error) => (
+                            "503 Service Unavailable",
+                            serde_json::json!({"error":error.to_string()}),
+                        ),
+                    },
+                    Err(error) => ("409 Conflict", serde_json::json!({"error":error})),
+                    Ok(None) => unreachable!("new admissions continue below"),
+                };
+                drop(_write_guard);
+                return write_http_response(stream, status, body).await;
+            }
             let verifier_admission = {
                 let live = controller
                     .lock()
@@ -2262,6 +2608,7 @@ where
                 )
             };
             if let Err(error) = verifier_admission {
+                drop(_write_guard);
                 return write_http_response(
                     stream,
                     "422 Unprocessable Entity",
@@ -2269,16 +2616,13 @@ where
                 )
                 .await;
             }
-            let mission_id = plan.goal().mission_id().clone();
-            let group_id = domain::ExecutionGroupId::new(format!("group-{mission_id}"))?;
-            let gate_wait = StageObservation::start(
-                &diagnostics,
-                DiagnosticKind::Http,
-                DiagnosticStage::WriteGate,
-                None,
-            );
-            let _write_guard = event_write_gate.lock()?;
-            drop(gate_wait);
+            let current_deployment = {
+                let live = controller
+                    .lock()
+                    .map_err(|_| "Controller lock is poisoned")?;
+                application::deployment_management::current(&live, deployment_feasibility)?
+            };
+            let deployment_feasibility = current_deployment.as_deref();
             let capacity = {
                 let live = controller
                     .lock()
@@ -3825,5 +4169,6 @@ fn controller_metrics(
     output.push_str(&crate::observability::render(
         controller.bridge.diagnostics(),
     ));
+    output.push_str(&storage_metrics::render(event_log));
     Ok(output)
 }

@@ -132,6 +132,8 @@ fn habitat_mobility_profiles_reach_registration_with_distinct_floor_support() {
 /// Proves the relocation deployment projects exact capability, capacity and readiness facts.
 #[test]
 fn habitat_relocation_registration_retains_exclusive_resources_and_unknown_limits() {
+    use integration::grpc::v0_4::scalar_value::Value as Scalar;
+
     for suffix in ["a", "b"] {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
             "../../scenarios/e1-shared-world-relocation/node-{suffix}.toml"
@@ -190,6 +192,20 @@ fn habitat_relocation_registration_retains_exclusive_resources_and_unknown_limit
             assert!(
                 !profile.attributes.contains_key("max-payload-grams"),
                 "payload limits remain unknown"
+            );
+            assert_eq!(
+                profile
+                    .attributes
+                    .get("location-access")
+                    .and_then(|value| value.value.as_ref()),
+                Some(&Scalar::StringValue("base-floor".to_string()))
+            );
+            assert_eq!(
+                profile
+                    .attributes
+                    .get("supports-floor-transition")
+                    .and_then(|value| value.value.as_ref()),
+                Some(&Scalar::BoolValue(false))
             );
             assert!(registration.operation_support.iter().any(|support| {
                 support.operation.as_ref().is_some_and(|operation| {
@@ -555,6 +571,8 @@ enum StatusFault {
     InvalidResponse,
     /// Local response decoded but lacks the configured state field.
     MissingState,
+    /// Local system explicitly reports ambiguity rather than failing the status read.
+    ReportedUnknown,
 }
 
 /// Driver that proves status reacquisition never repeats physical Execute.
@@ -569,6 +587,8 @@ struct FlakyStatusDriver {
     dispatch_calls: Arc<AtomicUsize>,
     /// Number of status observation calls.
     status_calls: Arc<AtomicUsize>,
+    /// Original durable handles passed to the read-only status route.
+    status_handles: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
     /// Whether the local cancel route accepted a request.
     cancellation_requested: Arc<AtomicBool>,
 }
@@ -582,6 +602,7 @@ impl FlakyStatusDriver {
             terminal_state,
             dispatch_calls: Arc::new(AtomicUsize::new(0)),
             status_calls: Arc::new(AtomicUsize::new(0)),
+            status_handles: Arc::new(std::sync::Mutex::new(Vec::new())),
             cancellation_requested: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -596,7 +617,7 @@ impl LocalDriver for FlakyStatusDriver {
     /// Scripts execute, status, and cancel without retrying Execute inside the driver.
     fn invoke<'a>(&'a self, request: &'a CompiledDriverRequest) -> BoxDriverFuture<'a> {
         Box::pin(async move {
-            let CompiledDriverRequest::Http { path, .. } = request else {
+            let CompiledDriverRequest::Http { path, body, .. } = request else {
                 return Err(DriverError::KindMismatch);
             };
             let payload = match path.as_str() {
@@ -613,6 +634,10 @@ impl LocalDriver for FlakyStatusDriver {
                     serde_json::json!({ "accepted": true })
                 }
                 "/status" => {
+                    self.status_handles
+                        .lock()
+                        .expect("status handle recording lock")
+                        .push(body.clone());
                     let call = self.status_calls.fetch_add(1, Ordering::SeqCst) + 1;
                     if call <= self.failures {
                         match self.fault {
@@ -627,6 +652,10 @@ impl LocalDriver for FlakyStatusDriver {
                                 ));
                             }
                             StatusFault::MissingState => serde_json::json!({ "detail": "missing" }),
+                            StatusFault::ReportedUnknown => serde_json::json!({
+                                "state": "UNKNOWN",
+                                "detail": "abort replied; physical stop remains unverified",
+                            }),
                         }
                     } else if self.cancellation_requested.load(Ordering::SeqCst) {
                         serde_json::json!({ "state": "CANCELLED", "detail": "cancelled" })
@@ -772,6 +801,7 @@ fn gated_catalog_for_contract(
             completed: vec!["COMPLETED".to_string()],
             failed: vec!["FAILED".to_string()],
             cancelled: vec!["CANCELLED".to_string()],
+            unknown: vec!["UNKNOWN".to_string()],
             case_sensitive: false,
         },
     };

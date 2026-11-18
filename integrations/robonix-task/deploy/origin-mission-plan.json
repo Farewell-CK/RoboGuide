@@ -1,0 +1,85 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.10",
+  "mission": {
+    "id": "dog2-origin-capture-example",
+    "objective": "Record the current reported position as an explicitly shared experiment origin.",
+    "actors": [
+      {
+        "id": "observer"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "capture-context",
+      "roles": [
+        {
+          "id": "observer",
+          "actor": "observer"
+        }
+      ],
+      "relations": [],
+      "executor_constraints": [],
+      "coupling_mode": "independent"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "record-origin",
+      "description": "Freeze a reported origin without moving the robot",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "delegate-role",
+          "context_role": "observer",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "spatial.origin",
+                  "name": "capture",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": [
+              {
+                "kind": "compute",
+                "units": 1,
+                "allocation_mode": "divisible",
+                "resource_class": "spatial.origin-slots/v1"
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "spatial.origin",
+              "name": "capture",
+              "version": "v1"
+            },
+            "objective": "查询当前位置并冻结为共享实验起点，保持当前姿态，不下发运动。",
+            "parameters": {
+              "memory_id": "dog2-origin-20261106",
+              "expected_map_id": "1101_visual_dog2",
+              "scope": "global"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "capture-context",
+      "coupling_mode": "independent",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": 30000
+      },
+      "satisfaction": {
+        "expected_effect": "An immutable reported-origin receipt exists for this execution. Central Memory publication is verified separately.",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}

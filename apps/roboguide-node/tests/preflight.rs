@@ -218,3 +218,49 @@ fn cli_legacy_profile_accepts_non_utf8_config_directory() {
     }
     assert!(!directory.join("node-state").exists());
 }
+
+/// Main's explicit cancellation observations remain bounded alongside offline validation flags.
+#[test]
+fn offline_preflight_preserves_explicit_cancellation_observation_options() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("node.toml");
+    std::fs::write(&path, include_str!("../../../config/node.toml")).unwrap();
+    for count in [1, 16, 17] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_roboguide-node"));
+        for _ in 0..count {
+            command.args(["--observe-unadmitted-cancellation", "original-cancellation"]);
+        }
+        let result = command.arg("--validate").arg(&path).output().unwrap();
+        assert_eq!(
+            result.status.success(),
+            count <= 16,
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        if count <= 16 {
+            let report: Value = serde_json::from_slice(&result.stdout).unwrap();
+            assert_eq!(report["controller_contacted"], false);
+        } else {
+            assert!(result.stdout.is_empty());
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        let result = Command::new(env!("CARGO_BIN_EXE_roboguide-node"))
+            .arg("--observe-unadmitted-cancellation")
+            .arg(std::ffi::OsString::from_vec(b"invalid-\xff".to_vec()))
+            .arg("--validate")
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        assert!(result.stdout.is_empty());
+        assert!(
+            String::from_utf8_lossy(&result.stderr)
+                .contains("invalid exact cancellation observation")
+        );
+        assert!(!String::from_utf8_lossy(&result.stderr).contains("panicked"));
+    }
+    assert!(!directory.path().join("node-state").exists());
+}

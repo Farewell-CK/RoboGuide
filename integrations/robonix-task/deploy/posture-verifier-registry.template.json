@@ -1,0 +1,33 @@
+{
+  "command_id": "INSTALL_COMMAND_ID",
+  "expected_revision": 0,
+  "registry": {
+    "schema_version": "roboguide.semantic-verifier-registry/v0.1",
+    "registry_id": "reported-posture-verifiers",
+    "revision": 1,
+    "sources": {
+      "mi-reported-posture": {
+        "source_id": "mi-reported-posture",
+        "revision": 1,
+        "tenant_id": "TENANT_ID",
+        "producer_principals": [
+          "VERIFIER_PRINCIPAL_ID"
+        ],
+        "verifier": {
+          "namespace": "observation.posture",
+          "name": "verify-reported",
+          "version": "v1"
+        },
+        "predicates": [
+          "fresh post-completion Robonix aggregate reports standing",
+          "fresh post-completion Robonix aggregate reports down"
+        ],
+        "max_age_ms": 5000,
+        "stop_timeout_ms": 5000,
+        "enabled": true,
+        "continuous": false,
+        "require_artifact": false
+      }
+    }
+  }
+}

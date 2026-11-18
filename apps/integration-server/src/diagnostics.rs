@@ -588,6 +588,7 @@ mod tests {
         );
         bridge.set_diagnostics(diagnostics);
         let controller = Arc::new(std::sync::Mutex::new(crate::ControllerState {
+            published_deployments: Default::default(),
             federation: Default::default(),
             mission_admissions: BTreeMap::new(),
             memory_imports: BTreeMap::new(),

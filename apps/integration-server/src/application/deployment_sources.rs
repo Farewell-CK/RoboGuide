@@ -8,6 +8,8 @@ use std::path::Path;
 /// Frozen, validated deployment observations, retaining exact provenance and default-off options.
 #[derive(Debug, Clone)]
 pub(super) struct FrozenFeasibilitySnapshot {
+    /// Exact original bytes interpretation, before stripping the validated content digest.
+    pub(super) source_document: serde_json::Value,
     /// Digest covering all source identity and endpoint restrictions.
     pub(super) digest: String,
     /// Exact-intent compatibility observations; unknown is never negative evidence.
@@ -40,8 +42,21 @@ impl FrozenFeasibilitySnapshot {
         if raw.is_empty() || raw.len() > 1024 * 1024 {
             return Err("deployment feasibility artifact is empty or exceeds 1 MiB".into());
         }
-        let mut document: serde_json::Value =
+        let document: serde_json::Value =
             serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
+        Self::from_document(document)
+    }
+
+    /// Validates exactly the same bounded document for authenticated online publication.
+    pub(super) fn from_document(mut document: serde_json::Value) -> Result<Self, String> {
+        let original = document.clone();
+        if serde_json::to_vec(&document)
+            .map_err(|e| e.to_string())?
+            .len()
+            > 1024 * 1024
+        {
+            return Err("deployment feasibility artifact exceeds 1 MiB".into());
+        }
         let object = document
             .as_object_mut()
             .ok_or("deployment feasibility artifact must be an object")?;
@@ -409,6 +424,7 @@ impl FrozenFeasibilitySnapshot {
             })
             .transpose()?;
         Ok(Self {
+            source_document: original,
             digest,
             entries,
             identity: body["identity"].clone(),

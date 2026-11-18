@@ -3,12 +3,19 @@
 use crate::*;
 use domain::{SafetyStopIdentity, SafetyStopPhase, SafetyStopRecord, TaskRef, TimestampMs};
 
+mod settlement;
+use settlement::StopSettlement;
+pub(crate) use settlement::{ReconciliationRequest, reconcile_manual};
+
 /// Reads existing retained stop purposes without confirming, expiring or releasing any authority.
 pub(crate) fn metrics(controller: &ControllerState, now: TimestampMs) -> (usize, usize, usize) {
     let mut pending = 0;
     let mut manual = 0;
     let mut overdue = 0;
     for purpose in controller.safety_stops.values() {
+        if purpose.settlement.is_some() {
+            continue;
+        }
         if purpose.record.phase == SafetyStopPhase::ManualEscalation {
             manual += 1;
         }
@@ -45,6 +52,9 @@ struct SafeStateObservation {
     /// Original local terminal state, retained without rewriting it as Cancelled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     terminal_state: Option<String>,
+    /// Original task's retained no-dispatch witness, legal only in explicit v0.4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    task_effects: Option<settlement::TaskEffectsWitness>,
     /// Provider-observed safe state, separate from command acceptance.
     safe_state: bool,
     /// Software-process observations cannot establish device stopping.
@@ -179,6 +189,9 @@ struct SafetyObservationProof {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SafetyStopPurpose {
+    /// Versioned resource settlement, separate from immutable physical stop history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    settlement: Option<StopSettlement>,
     /// Generic stop state machine and immutable execution/policy identity.
     record: SafetyStopRecord,
     /// Exact current physical owner.
@@ -213,6 +226,30 @@ pub(crate) struct SafetyStopPurpose {
 }
 
 impl SafetyStopPurpose {
+    /// Detects an existing immutable settlement before an idempotent HTTP replay.
+    pub(crate) fn is_settled(&self) -> bool {
+        self.settlement.is_some()
+    }
+    /// New task-only authority cannot be smuggled into any historical wrapper generation.
+    pub(crate) fn uses_task_settlement_contract(&self) -> bool {
+        self.settlement.is_some()
+            || self.export.as_ref().is_some_and(|export| {
+                export.payload_schema() == domain::TASK_EFFECT_OBSERVATION_SCHEMA
+            })
+            || self
+                .support
+                .as_ref()
+                .is_some_and(|support| support.assurance == domain::SafetyAssurance::NoEffects)
+    }
+    /// Returns the digest frozen by an explicit administrator reconciliation request.
+    pub(crate) fn record_digest(&self) -> Result<String, String> {
+        digest(&self.record)
+    }
+
+    /// Resource settlement cannot be used as physical stopping or continuation permission.
+    fn release_settled(&self) -> bool {
+        self.record.may_release_ownership() || self.settlement.is_some()
+    }
     /// Prevents older wrappers from acquiring original-worker exit reconciliation authority.
     pub(crate) fn uses_process_exit_contract(&self) -> bool {
         self.process_attempts.is_some()
@@ -276,6 +313,7 @@ pub(crate) fn deserialize_purposes<'de, D: serde::Deserializer<'de>>(
             Ok((
                 id.clone(),
                 SafetyStopPurpose {
+                    settlement: None,
                     record,
                     node_id: legacy.node_id,
                     session_id: Some(legacy.session_id),
@@ -341,10 +379,17 @@ pub(super) fn safety_declaration(
                 && export.semantic() == domain::StateSemantic::Observed
                 && matches!(
                     export.payload_schema(),
-                    domain::SAFE_STATE_OBSERVATION_SCHEMA | domain::PROCESS_EXIT_OBSERVATION_SCHEMA
+                    domain::SAFE_STATE_OBSERVATION_SCHEMA
+                        | domain::PROCESS_EXIT_OBSERVATION_SCHEMA
+                        | domain::TASK_EFFECT_OBSERVATION_SCHEMA
                 )
         })?
         .clone();
+    if (support.assurance == domain::SafetyAssurance::NoEffects)
+        != (export.payload_schema() == domain::TASK_EFFECT_OBSERVATION_SCHEMA)
+    {
+        return None;
+    }
     let mut policy = state::DecisionEvidencePolicy::new(
         format!("safety:{}:{}", owner, support.operation),
         1,
@@ -574,6 +619,7 @@ pub(crate) fn admit(
         controller.safety_stops.insert(
             attempt.execution_id().into(),
             SafetyStopPurpose {
+                settlement: None,
                 record,
                 node_id: command.node_id().clone(),
                 session_id,
@@ -624,6 +670,7 @@ pub(crate) fn receipt(
     };
     if purpose.record.phase.confirms_stop()
         || purpose.record.phase == SafetyStopPhase::ManualEscalation
+        || purpose.settlement.is_some()
     {
         return Ok(());
     }
@@ -727,7 +774,29 @@ fn safe_proof(
     {
         return None;
     }
-    if export.payload_schema() == domain::PROCESS_EXIT_OBSERVATION_SCHEMA {
+    if export.payload_schema() != domain::TASK_EFFECT_OBSERVATION_SCHEMA
+        && observation.task_effects.is_some()
+    {
+        return None;
+    }
+    if export.payload_schema() == domain::TASK_EFFECT_OBSERVATION_SCHEMA {
+        let proof = SafetyObservationProof {
+            record: record.clone(),
+            key: record.key().clone(),
+            source_epoch: session.into(),
+            received_at: record.received_at(),
+            valid_for_ms: record.valid_for_ms(),
+            confidence_millionths: record.confidence_millionths(),
+            sequence: record.sequence(),
+            record_digest: digest(&record).ok()?,
+            observation: observation.clone(),
+        };
+        if !settlement::is_no_effects(&proof)
+            || observation.command_id.as_deref() != Some(purpose.command_id.as_str())
+        {
+            return None;
+        }
+    } else if export.payload_schema() == domain::PROCESS_EXIT_OBSERVATION_SCHEMA {
         let exited = observation.process_exit.as_ref()?;
         let expected = purpose.process_attempts.as_ref()?;
         let actual: BTreeSet<_> = exited.attempts.iter().cloned().collect();
@@ -749,7 +818,9 @@ fn safe_proof(
         {
             return None;
         }
-    } else if observation.process_exit.is_some()
+    } else if observation.task_effects.is_some()
+        || observation.assurance == domain::SafetyAssurance::NoEffects
+        || observation.process_exit.is_some()
         || observation.terminal_state.is_some()
         || observation.command_id.as_deref() != Some(purpose.command_id.as_str())
     {
@@ -775,6 +846,7 @@ pub(crate) fn tick(controller: &mut ControllerState, now: TimestampMs) -> Result
         let previous = &controller.safety_stops[&id];
         if previous.record.phase.confirms_stop()
             || previous.record.phase == SafetyStopPhase::ManualEscalation
+            || previous.settlement.is_some()
         {
             continue;
         }
@@ -783,10 +855,34 @@ pub(crate) fn tick(controller: &mut ControllerState, now: TimestampMs) -> Result
             == Some(orchestration::RemoteExecutionStatus::Cancelled))
         .then(|| controller.bridge.terminal_received_at(&id))
         .flatten();
+        let cancellation_closure = controller
+            .orchestrator
+            .execution(previous.record.identity.task_ref.mission_id())
+            .is_some_and(|mission| {
+                mission.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling
+            });
         let purpose = controller
             .safety_stops
             .get_mut(&id)
             .expect("selected existing stop");
+        if let Some(ref proof) = proof
+            && settlement::is_no_effects(proof)
+        {
+            // Late terminal ingress is retained normally; only the original window may settle.
+            if let Some(terminal) = terminal.filter(|time| {
+                *time >= purpose.record.requested_at && *time < purpose.record.deadline
+            }) && purpose.accepted_at.is_some()
+                && cancellation_closure
+            {
+                settlement::settle_no_effects(purpose, proof.clone(), terminal)?;
+                continue;
+            }
+            if purpose.record.expire(now) {
+                purpose.reason =
+                    "no-effects settlement deadline expired; ownership retained".into();
+            }
+            continue;
+        }
         if let Some(terminal) = terminal
             .filter(|time| *time >= purpose.record.requested_at && *time < purpose.record.deadline)
         {
@@ -886,6 +982,16 @@ pub(crate) fn blocks_release(controller: &ControllerState, mission_id: &domain::
     })
 }
 
+/// Only final Mission cancellation may consume no-effects or explicit administrator settlement.
+pub(crate) fn blocks_cancellation_release(
+    controller: &ControllerState,
+    mission_id: &domain::MissionId,
+) -> bool {
+    controller.safety_stops.values().any(|purpose| {
+        purpose.record.identity.task_ref.mission_id() == mission_id && !purpose.release_settled()
+    })
+}
+
 /// Requires an actual retained independent confirmation for an exact handoff source attempt.
 pub(crate) fn attempt_confirmed(controller: &ControllerState, execution: &str) -> bool {
     controller
@@ -934,6 +1040,8 @@ fn validate_confirmation(purpose: &SafetyStopPurpose) -> Result<(), String> {
         .filter(|observation| observation.execution_id == identity.execution_id)
         .collect();
     if batch.observations.len() > 256
+        || proof.observation.task_effects.is_some()
+        || proof.observation.assurance == domain::SafetyAssurance::NoEffects
         || matches.len() != 1
         || matches[0] != &proof.observation
         || (!natural
@@ -1040,9 +1148,13 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<bool, St
             if &support.operation != command.intent().operation()
                 || support.safe_state_export_id != export.export_id()
                 || export.semantic() != domain::StateSemantic::Observed
+                || ((support.assurance == domain::SafetyAssurance::NoEffects)
+                    != (export.payload_schema() == domain::TASK_EFFECT_OBSERVATION_SCHEMA))
                 || !matches!(
                     export.payload_schema(),
-                    domain::SAFE_STATE_OBSERVATION_SCHEMA | domain::PROCESS_EXIT_OBSERVATION_SCHEMA
+                    domain::SAFE_STATE_OBSERVATION_SCHEMA
+                        | domain::PROCESS_EXIT_OBSERVATION_SCHEMA
+                        | domain::TASK_EFFECT_OBSERVATION_SCHEMA
                 )
                 || policy.object != *export.object()
                 || policy.channel_id != export.export_id()
@@ -1057,6 +1169,7 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<bool, St
         } else if purpose.record.phase != SafetyStopPhase::ManualEscalation {
             return Err("unverified stop checkpoint lacks a manual fence".into());
         }
+        settlement::validate_restored_settlement(purpose, &attempt, controller)?;
         if purpose.record.phase.confirms_stop() {
             if purpose.legacy_evidence.is_some() {
                 return Err("legacy evidence cannot grant stop confirmation".into());
@@ -1103,7 +1216,7 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<bool, St
     let held: Vec<_> = controller
         .safety_stops
         .values()
-        .filter(|purpose| !purpose.record.may_release_ownership())
+        .filter(|purpose| !purpose.release_settled())
         .map(|purpose| {
             (
                 purpose.record.identity.task_ref.mission_id().clone(),
@@ -1139,7 +1252,7 @@ pub(crate) fn restore_holds(controller: &mut ControllerState) -> Result<(), Stri
     let missions: BTreeMap<_, _> = controller
         .safety_stops
         .values()
-        .filter(|purpose| !purpose.record.may_release_ownership())
+        .filter(|purpose| !purpose.release_settled())
         .map(|purpose| {
             (
                 purpose.record.identity.task_ref.mission_id().clone(),

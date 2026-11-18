@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import re
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -14,7 +15,8 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import cast
 
-from mission.models import JSONObject
+from mission.models import JSONObject, JSONValue
+from mission.provider_mission_plan import HOST_OBJECTIVE_PROFILE
 from mission.submission_evidence import canonical_plan_digest
 
 PROVENANCE_SCHEMA = "roboguide.mission-provenance/v0.1"
@@ -81,11 +83,37 @@ def current_trace(request_id: str) -> ProviderTrace | None:
 def ensure_provider_budget() -> None:
     """Refuse an additional provider side effect before bounded evidence storage is exhausted."""
     trace = _TRACE.get()
-    if trace is not None and (
-        len(trace.calls) >= MAX_PROVIDER_CALLS
-        or sum(len(call.encode()) for call in trace.calls) + MAX_CALL_BYTES > MAX_TRACE_BYTES
-    ):
-        raise ValueError("provider provenance call limit exhausted before dispatch")
+    if trace is not None:
+        original_bytes = 0
+        for encoded in trace.calls:
+            call = json.loads(encoded)
+            call.pop("plan_assembly", None)
+            original_bytes += len(json.dumps(call, sort_keys=True, separators=(",", ":")).encode())
+        if (
+            len(trace.calls) >= MAX_PROVIDER_CALLS
+            or original_bytes + MAX_CALL_BYTES > MAX_TRACE_BYTES
+        ):
+            raise ValueError("provider provenance call limit exhausted before dispatch")
+        _trim_optional_assemblies(trace, MAX_CALL_BYTES)
+
+
+def _trim_optional_assemblies(trace: ProviderTrace, reserve_bytes: int) -> None:
+    """Spend only spare trace bytes on optional assembly observations, never original call slots.
+
+    Future snapshots may omit older optional observations; previously persisted
+    snapshots and original request/response metadata remain immutable.
+    """
+    total = sum(len(call.encode()) for call in trace.calls)
+    for index, encoded in enumerate(trace.calls):
+        if total + reserve_bytes <= MAX_TRACE_BYTES:
+            return
+        call = json.loads(encoded)
+        if "plan_assembly" not in call:
+            continue
+        del call["plan_assembly"]
+        compact = json.dumps(call, sort_keys=True, separators=(",", ":"))
+        total += len(compact.encode()) - len(encoded.encode())
+        trace.calls[index] = compact
 
 
 def provider_call(
@@ -115,6 +143,36 @@ def provider_call(
         "error_type": type(error).__name__ if error is not None else None,
     }
     trace.calls.append(json.dumps(evidence, sort_keys=True, separators=(",", ":")))
+
+
+def record_plan_assembly(
+    provider_output: JSONObject, assembled_plan: JSONObject, grounded_intent: JSONObject
+) -> None:
+    """Bind bounded original draft bytes to host assembly on this exact scoped Provider call.
+
+    Large drafts retain an explicit unavailable-content marker and their full digest.
+    No observation grants goal satisfaction or changes the existing per-call byte budget.
+    """
+    trace = _TRACE.get()
+    if trace is None or not trace.calls:
+        return
+    call = json.loads(trace.calls[-1])
+    raw = json.dumps(provider_output, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    raw_bytes = len(raw.encode("utf-8"))
+    call["plan_assembly"] = {
+        "schema_version": "roboguide.provider-plan-assembly/v0.1",
+        "profile": HOST_OBJECTIVE_PROFILE,
+        "grounded_intent_digest": canonical_plan_digest(grounded_intent),
+        "provider_output_digest": canonical_plan_digest(provider_output),
+        "assembled_plan_digest": canonical_plan_digest(assembled_plan),
+        "provider_output": provider_output
+        if raw_bytes <= MAX_CALL_BYTES // 2
+        else {"truncated": True, "byte_length": raw_bytes},
+    }
+    encoded = json.dumps(call, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    if len(encoded.encode("utf-8")) <= MAX_CALL_BYTES:
+        trace.calls[-1] = encoded
+        _trim_optional_assemblies(trace, 0)
 
 
 def snapshot(
@@ -166,3 +224,37 @@ def validate_snapshot(value: JSONObject) -> None:
             or type(call.get("finished_at_ms")) is not int
         ):
             raise ValueError("provenance provider call identity is invalid")
+        if "plan_assembly" in call:
+            _validate_plan_assembly(call["plan_assembly"])
+
+
+def _validate_plan_assembly(value: JSONValue) -> None:
+    """Refuse detached raw draft evidence while retaining explicit bounded unavailability."""
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {
+            "schema_version",
+            "profile",
+            "grounded_intent_digest",
+            "provider_output_digest",
+            "assembled_plan_digest",
+            "provider_output",
+        }
+        or value.get("schema_version") != "roboguide.provider-plan-assembly/v0.1"
+        or value.get("profile") != HOST_OBJECTIVE_PROFILE
+    ):
+        raise ValueError("invalid provider plan assembly evidence")
+    for key in ("grounded_intent_digest", "provider_output_digest", "assembled_plan_digest"):
+        digest = value[key]
+        if not isinstance(digest, str) or re.fullmatch(r"sha256:[a-f0-9]{64}", digest) is None:
+            raise ValueError("invalid provider plan assembly digest")
+    raw = value["provider_output"]
+    if not isinstance(raw, dict):
+        raise ValueError("invalid original provider plan output")
+    if raw.get("truncated") is True:
+        size = raw.get("byte_length")
+        if set(raw) != {"truncated", "byte_length"} or type(size) is not int or size <= 0:
+            raise ValueError("invalid truncated provider plan evidence")
+    elif canonical_plan_digest(raw) != value["provider_output_digest"]:
+        raise ValueError("provider plan assembly raw output digest mismatch")

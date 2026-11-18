@@ -17,6 +17,10 @@ pub enum ControllerStorageFormat {
     Legacy,
     /// Mandatory original tables and exact read-only legacy views fence earlier writers.
     V1,
+    /// Standalone original Catalog recovery projection, atomically maintained with event appends.
+    V2,
+    /// Verified lossless telemetry bodies with original per-observation envelopes.
+    V3,
 }
 
 /// Actual SQL connection drops before these original writer descriptors are unlocked.
@@ -174,6 +178,12 @@ pub(super) fn is_fenced(connection: &Connection) -> Result<bool, SqliteEventLogE
     Ok(version != 0
         || object(connection, "controller_storage_format")?.is_some()
         || object(connection, "controller_v1_events")?.is_some()
+        || object(connection, "controller_v3_events")?.is_some()
+        || object(connection, "telemetry_bodies")?.is_some()
+        || object(connection, "catalog_recovery_head")?.is_some()
+        || object(connection, "retention_policy")?.is_some()
+        || object(connection, "retention_reference_head")?.is_some()
+        || object(connection, "telemetry_storage_metrics")?.is_some()
         || object(connection, "events")?.is_some_and(|(kind, _)| kind != "table"))
 }
 
@@ -199,7 +209,10 @@ pub(super) fn drain(connection: &mut Connection) -> Result<(), SqliteEventLogErr
 }
 
 /// Atomically fences old startup paths while retaining every original event row and application field.
-pub(super) fn upgrade(connection: &mut Connection) -> Result<(), SqliteEventLogError> {
+pub(super) fn upgrade(
+    connection: &mut Connection,
+    format: ControllerStorageFormat,
+) -> Result<(), SqliteEventLogError> {
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Exclusive)?;
     transaction.execute_batch("ALTER TABLE events RENAME TO controller_v1_events;
         DROP INDEX IF EXISTS idx_events_timestamp;
@@ -218,14 +231,32 @@ pub(super) fn upgrade(connection: &mut Connection) -> Result<(), SqliteEventLogE
           json_extract(payload_json, '$.ArtifactCatalogReferenceTransition.record.selector.revision_id'),sequence
         ) WHERE payload_schema='domain.EventPayload.json/v29';")?;
     validate(&transaction)?;
+    if matches!(
+        format,
+        ControllerStorageFormat::V2 | ControllerStorageFormat::V3
+    ) {
+        super::catalog_checkpoint::initialize(&transaction)?;
+    }
+    if format == ControllerStorageFormat::V3 {
+        super::telemetry_storage::initialize(&transaction)?;
+    }
     transaction.commit()?;
     Ok(())
 }
 
 /// Requires the complete durable generation before replay or writes; missing evidence never bootstraps.
 pub(super) fn validate(connection: &Connection) -> Result<(), SqliteEventLogError> {
+    validate_version(connection, 1)
+}
+
+/// Checks the common exact original SQL layout plus its explicit version-specific marker.
+pub(super) fn validate_version(
+    connection: &Connection,
+    expected_version: u64,
+) -> Result<(), SqliteEventLogError> {
     let version: u64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version != 1
+    if !matches!(expected_version, 1 | 2)
+        || version != expected_version
         || object(connection, "events")?
             != Some((
                 "view".into(),
@@ -257,7 +288,13 @@ pub(super) fn validate(connection: &Connection) -> Result<(), SqliteEventLogErro
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
         .collect::<Result<_, _>>()?;
     let forbidden: u64 = connection.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' OR name IN ('idx_events_timestamp','idx_events_correlation','idx_events_sequence','idx_artifact_reference_selector')",[],|row|row.get(0))?;
-    if rows != vec![(1, "roboguide.controller-storage/v1".into())] || forbidden != 0 {
+    if rows
+        != vec![(
+            expected_version,
+            format!("roboguide.controller-storage/v{expected_version}"),
+        )]
+        || forbidden != 0
+    {
         return Err(invalid(
             "Controller storage v1 marker or read-only old-writer fence differs",
         ));

@@ -345,6 +345,16 @@ pub(crate) fn flush_unisolated_commands(
 
 /// Rejects old wrappers carrying hold/generation fields that an older binary would silently ignore.
 pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> Result<(), String> {
+    if saved.schema != SERVER_CHECKPOINT_SCHEMA
+        && saved
+            .safety_stops
+            .values()
+            .any(|purpose| purpose.uses_task_settlement_contract())
+    {
+        return Err(
+            "historical wrapper cannot carry task cancellation settlement authority".into(),
+        );
+    }
     if matches!(
         saved.schema.as_str(),
         SERVER_CHECKPOINT_SCHEMA | PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA
@@ -604,6 +614,22 @@ pub(crate) fn validate_isolation_checkpoint_schema(saved: &ServerCheckpoint) -> 
         serde_json::from_str(&saved.orchestration_json).map_err(|error| error.to_string())?;
     let integration: serde_json::Value =
         serde_json::from_str(&saved.integration_json).map_err(|error| error.to_string())?;
+    if isolation_schema != SERVER_CHECKPOINT_SCHEMA
+        && integration
+            .get("control")
+            .and_then(|control| control.get("operator_authorization"))
+            .is_some_and(|profile| {
+                profile["schema_version"] == "roboguide.operator-authorization/v0.3"
+                    || profile
+                        .get("grants")
+                        .and_then(serde_json::Value::as_object)
+                        .is_some_and(|grants| {
+                            grants.values().any(|grant| grant["role"] == "verifier")
+                        })
+            })
+    {
+        return Err("legacy wrapper cannot contain restricted verifier authorization".into());
+    }
     if !matches!(
         isolation_schema,
         SERVER_CHECKPOINT_SCHEMA

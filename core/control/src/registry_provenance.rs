@@ -19,6 +19,10 @@ pub(crate) struct RegistryProvenance {
 }
 
 impl RegistryProvenance {
+    /// Returns the retained deployment watermark without exposing any current routing table.
+    pub(crate) const fn revision(&self) -> u64 {
+        self.highest_revision
+    }
     /// Hashes typed fields in entity order with explicit framing, independent of JSON formatting.
     pub(crate) fn from_snapshot(snapshot: &PhysicalEntityRegistrySnapshot) -> Self {
         let mut digest = Sha256::new();

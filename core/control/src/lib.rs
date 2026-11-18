@@ -10,6 +10,7 @@ mod calendar;
 mod capacity_calendar;
 mod coordination;
 mod decision_policy;
+mod deployment_publication;
 mod federation;
 mod group;
 mod initial_preferences;
@@ -112,6 +113,9 @@ pub struct ControlCheckpoint {
     /// Immutable original source-administration receipts; retries cannot reapply an update.
     #[serde(default)]
     registry_command_receipts: BTreeMap<String, domain::RegistryCommandReceipt>,
+    /// Original online deployment publication digests; never current physical routing.
+    #[serde(default)]
+    deployment_publication_history: BTreeMap<String, BTreeMap<u64, String>>,
     /// Complete immutable source interpretation history.
     #[serde(default)]
     semantic_verifier_history: BTreeMap<u64, domain::SemanticVerifierRegistry>,
@@ -501,6 +505,8 @@ pub struct ControlPlane {
     belief_policy_history: BTreeMap<u64, domain::BeliefPolicyRegistry>,
     /// Immutable original source-administration receipts; retries cannot reapply an update.
     registry_command_receipts: BTreeMap<String, domain::RegistryCommandReceipt>,
+    /// Bounded original administrator deployment publication digests.
+    deployment_publication_history: BTreeMap<String, BTreeMap<u64, String>>,
     /// Retained original source meanings used by earlier admission receipts.
     semantic_verifier_history: BTreeMap<u64, domain::SemanticVerifierRegistry>,
     /// Complete original evidence/timing retained after Task/Mission terminal outcomes.
@@ -928,6 +934,7 @@ impl ControlPlane {
             belief_policy_registry: None,
             belief_policy_history: BTreeMap::new(),
             registry_command_receipts: BTreeMap::new(),
+            deployment_publication_history: BTreeMap::new(),
             semantic_verifier_history: BTreeMap::new(),
             semantic_verifier_receipts: BTreeMap::new(),
             mission_verifier_sources: BTreeMap::new(),
@@ -977,6 +984,7 @@ impl ControlPlane {
             belief_policy_registry: self.belief_policy_registry.clone(),
             belief_policy_history: self.belief_policy_history.clone(),
             registry_command_receipts: self.registry_command_receipts.clone(),
+            deployment_publication_history: self.deployment_publication_history.clone(),
             semantic_verifier_history: self.semantic_verifier_history.clone(),
             semantic_verifier_receipts: self.semantic_verifier_receipts.clone(),
             mission_verifier_sources: self.mission_verifier_sources.clone(),
@@ -1279,6 +1287,7 @@ impl ControlPlane {
             belief_policy_registry: checkpoint.belief_policy_registry,
             belief_policy_history: checkpoint.belief_policy_history,
             registry_command_receipts: checkpoint.registry_command_receipts,
+            deployment_publication_history: checkpoint.deployment_publication_history,
             semantic_verifier_history: checkpoint.semantic_verifier_history,
             semantic_verifier_receipts: checkpoint.semantic_verifier_receipts,
             mission_verifier_sources: checkpoint.mission_verifier_sources,

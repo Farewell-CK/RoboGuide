@@ -158,6 +158,8 @@ struct ControlHttpRequest {
 /// Live process state sharing one Control authority with Mission orchestration.
 #[derive(Clone)]
 struct ControllerState {
+    /// Explicit original online deployment documents; current physical routing is never restored here.
+    published_deployments: Option<application::deployment_management::PublishedDeployments>,
     /// Original continuous hazard gates and their irreversible stop intents.
     hazards: application::hazards::HazardState,
     /// Durable participant policy and original Federation receipts, separate from remote decisions.
@@ -755,6 +757,9 @@ impl artifact_http::MemoryProviderAdmission for ControllerMemoryAdmission {
 /// Durable Phase 1 process checkpoint saved in the same event-log transaction.
 #[derive(Clone, Serialize, Deserialize)]
 struct ServerCheckpoint {
+    /// Original online feasibility publications, required whenever Control retains their receipts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    published_deployments: Option<application::deployment_management::PublishedDeployments>,
     /// Complete active-hazard history; only legacy wrappers may omit this table.
     #[serde(default)]
     hazards: Option<application::hazards::HazardState>,
@@ -1218,6 +1223,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => return Err("ROBOGUIDE_INITIAL_OPERATION_ASSESSMENT must be 0 or 1".into()),
     }
     let deployment_feasibility = deployment_feasibility.map(Arc::new);
+    let startup_node_identity_policy = node_identity_policy.clone();
     let bootstrap_identity_registry = match &node_identity_policy {
         NodeIdentityPolicy::CertificateLifecycle(registry) => Some(registry.clone()),
         _ => None,
@@ -1419,8 +1425,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             application::validate_isolation_checkpoint_schema(&saved)?;
+            application::deployment_management::validate_wrapper(&saved)?;
             application::federation::validate_wrapper(&saved)?;
             ControllerState {
+                published_deployments: saved.published_deployments,
                 federation: saved.federation,
                 mission_admissions: saved.mission_admissions,
                 memory_imports: saved.memory_imports,
@@ -1450,6 +1458,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .into());
         }
         None => ControllerState {
+            published_deployments: Default::default(),
             federation: Default::default(),
             mission_admissions: BTreeMap::new(),
             memory_imports: BTreeMap::new(),
@@ -1490,6 +1499,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             true
         }
         (None, None) => false,
+        (None, Some(saved))
+            if startup_node_identity_policy
+                .validate_registry_projection(saved)
+                .is_ok() =>
+        {
+            false
+        }
         _ => {
             return Err(
                 "restored Node identity registry requires its original lifecycle mTLS profile"
@@ -1508,6 +1524,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     application::hazards::validate_restored(&controller)?;
     application::memory_import::validate_restored(&controller)?;
     application::memory_handoff::validate_restored(&controller)?;
+    application::deployment_management::validate_restored(
+        &mut controller,
+        deployment_feasibility.as_deref(),
+    )?;
     application::plan_revision::attach_deployment(&mut controller, deployment_feasibility.clone())?;
     application::plan_revision::validate_restored(&controller)?;
     let restored_memory_fences =
@@ -1528,7 +1548,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut restored_localization_evidence = false;
     for (evidence, received_at) in artifact_catalog
-        .localization_evidence()
+        .take_restored_localization_evidence()
         .map_err(|error| format!("localization evidence replay failed: {error}"))?
     {
         restored_localization_evidence |= controller
@@ -1551,6 +1571,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .control_mut()
             .install_physical_entity_registry(snapshot)?;
     }
+    application::deployment_management::validate_physical_restore(&controller)?;
     controller
         .bridge
         .control()
@@ -1576,15 +1597,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &controller.orchestrator,
     )?;
     for restriction in controller.bridge.control().actor_candidate_restrictions() {
-        if deployment_feasibility
-            .as_ref()
-            .is_none_or(|snapshot| snapshot.digest() != restriction.evidence_digest())
-        {
-            return Err(
-                "restored actor candidate restriction lacks its original deployment evidence"
-                    .into(),
-            );
-        }
+        application::deployment_management::original(
+            &controller,
+            Some(restriction.evidence_digest()),
+            deployment_feasibility.as_deref(),
+        )?;
     }
     if initialize_checkpoint
         || adopted_initialization
@@ -1752,6 +1769,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let artifact_tls_for_server = artifact_tls.clone();
     let timer_diagnostics = diagnostic_handle.clone();
     let receiver_diagnostics = diagnostic_handle.clone();
+    if event_log.retention_policy().is_ok() {
+        let retention_events = event_log.clone();
+        let retention_gate = event_write_gate.clone();
+        let retention_clock = process_clock.clone();
+        let retention_controller = controller.clone();
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(Duration::from_millis(state::RETENTION_INTERVAL_MS));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut last_blockers = None;
+            loop {
+                interval.tick().await;
+                let events = retention_events.clone();
+                let gate = retention_gate.clone();
+                let clock = retention_clock.clone();
+                let result = application::retention_worker::cycle(
+                    retention_controller.clone(),
+                    events,
+                    gate,
+                    clock,
+                )
+                .await;
+                let blockers = match result {
+                    Ok(status) => status["archive_only"]["blockers"]
+                        .as_array()
+                        .map(|values| {
+                            values
+                                .iter()
+                                .filter_map(serde_json::Value::as_str)
+                                .map(str::to_string)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default(),
+                    Err(error) => vec![error],
+                };
+                if last_blockers.as_ref() != Some(&blockers) {
+                    eprintln!(
+                        "Controller retention assessment: {}",
+                        serde_json::json!({"blockers":blockers})
+                    );
+                    last_blockers = Some(blockers);
+                }
+            }
+        });
+    }
     tokio::spawn(async move {
         if let Err(error) = serve_http(
             http_address,

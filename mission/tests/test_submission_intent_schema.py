@@ -60,6 +60,19 @@ def local_contract(uri: str) -> Resource[object]:
     return Resource.from_contents(cast(object, json.loads(path.read_bytes())))
 
 
+def request_registry() -> Registry[object]:
+    """Load the closed current plan, grounding and nested origin schemas without network lookup."""
+    prefix = "https://roboguide.local/contracts/mission/"
+    resources = [f"{prefix}v0.{value}/mission-plan.schema.json" for value in range(3, 12)]
+    resources.extend(
+        f"{prefix}grounding-context-v0.{value}/grounding-context.schema.json" for value in (1, 2, 4)
+    )
+    resources.append(
+        "https://roboguide.local/contracts/memory/reported-origin-v0.1/reported-origin.schema.json"
+    )
+    return Registry().with_resources((uri, local_contract(uri)) for uri in resources)
+
+
 @pytest.mark.parametrize("version", ["v0.10", "v0.11"])
 def test_v05_contract_accepts_current_production_draft_without_granting_execution(
     tmp_path: Path, version: str
@@ -90,15 +103,7 @@ def test_v05_contract_accepts_current_production_draft_without_granting_executio
     schema = json.loads(
         Path("contracts/mission/request-v0.5/mission-request.schema.json").read_bytes()
     )
-    prefix = "https://roboguide.local/contracts/mission/"
-    resources = [f"{prefix}v0.{value}/mission-plan.schema.json" for value in range(3, 12)]
-    resources.extend(
-        f"{prefix}grounding-context-v0.{value}/grounding-context.schema.json" for value in (1, 2)
-    )
-    registry: Registry[object] = Registry().with_resources(
-        (uri, local_contract(uri)) for uri in resources
-    )
-    validator = Draft202012Validator(schema, registry=registry)
+    validator = Draft202012Validator(schema, registry=request_registry())
     validator.validate(raw)
     # Adding current closed versions never admits a future or merely relabelled plan.
     changed = cast(JSONObject, json.loads(json.dumps(raw)))

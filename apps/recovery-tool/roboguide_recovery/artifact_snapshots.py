@@ -37,6 +37,7 @@ SUPPORTED = {
     "roboguide.recovery-profile/v0.29",
     "roboguide.recovery-profile/v0.30",
     "roboguide.recovery-profile/v0.31",
+    "roboguide.recovery-profile/v0.32",
 }
 MAX_OPERATIONS = 4096
 MAX_INPUTS = 16_384
@@ -283,6 +284,7 @@ def operations(
                         "roboguide.recovery-profile/v0.29",
                         "roboguide.recovery-profile/v0.30",
                         "roboguide.recovery-profile/v0.31",
+                        "roboguide.recovery-profile/v0.32",
                     }
                     or owner["schema"] != "roboguide.artifact-storage/v5"
                 ):
@@ -380,7 +382,9 @@ def prepare(
     """Persist actual original-owner pins before any source content or authority copy."""
     descriptors = []
     for component in components:
-        if component["kind"] != "artifact":
+        if component["kind"] != "artifact" or artifact_layout.is_legacy(
+            component, profile["schema"]
+        ):
             continue
         root = Path(component["root"])
         owner = artifact_layout.validate_storage(root, profile["schema"])
@@ -460,6 +464,7 @@ def validate_bundle(bundle: Path, manifest: dict[str, Any], budget: OperationBud
         item["component_id"]
         for item in manifest["profile"]["components"]
         if item["kind"] == "artifact"
+        and not artifact_layout.is_legacy(item, manifest["profile"]["schema"])
     }
     if (
         not isinstance(descriptors, list)
@@ -541,7 +546,9 @@ def abort(
         raise ValueError("published Artifact Snapshot requires original bundle verification")
     receipts = []
     for component in components:
-        if component["kind"] != "artifact":
+        if component["kind"] != "artifact" or artifact_layout.is_legacy(
+            component, profile["schema"]
+        ):
             continue
         root = Path(component["root"])
         owner = artifact_layout.validate_storage(root, profile["schema"])

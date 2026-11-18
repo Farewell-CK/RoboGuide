@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import shlex
 import sys
 import uuid
+from contextlib import suppress
 from pathlib import Path
 
 from mission.config import current_environment
@@ -23,6 +26,11 @@ from roboguide_workbench.views import safe_text
 from roboguide_workbench.workspace import WorkbenchSession
 
 
+def _json_event(kind: str, **fields: str) -> None:
+    """Write and flush one complete machine-readable event, propagating output failures."""
+    print(json.dumps({"type": kind, **fields}, ensure_ascii=False), flush=True)
+
+
 def parser() -> argparse.ArgumentParser:
     """Declare CLI inputs without opening connections or reading model credentials."""
     root = argparse.ArgumentParser(
@@ -36,6 +44,8 @@ def parser() -> argparse.ArgumentParser:
         ("capabilities", "按能力或合同检索"),
         ("mission", "指定 Mission/Task 状态"),
         ("missions", "当前任务列表"),
+        ("state-fields", "发现设备可查询的状态字段"),
+        ("state", "读取设备电量、位置或姿态"),
         ("doctor", "检查连接与配置"),
         ("init", "配置全局工作台，之后任意目录可直接启动"),
     ):
@@ -47,7 +57,7 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--ca", type=Path)
         command.add_argument("--client-cert", type=Path)
         command.add_argument("--client-key", type=Path)
-        if name in {"chat", "missions", "doctor", "init"}:
+        if name in {"chat", "missions", "doctor", "init", "state", "state-fields"}:
             command.add_argument("--mission-service", default="http://127.0.0.1:8070")
             command.add_argument("--mission-timeout", type=float, default=60)
             command.add_argument("--mission-ca", type=Path)
@@ -60,11 +70,25 @@ def parser() -> argparse.ArgumentParser:
         if name in {"chat", "doctor", "init"}:
             command.add_argument("--config", type=Path, default=Path("config/mission.toml"))
             command.add_argument("--plain", action="store_true")
-            command.add_argument("--answer-mode", choices=["grounded", "facts"], default="grounded")
-            command.add_argument("--tool-limit", type=int, default=4)
-            command.add_argument("--call-limit", type=int, default=3)
-            command.add_argument("--turn-seconds", type=float, default=60)
+            command.add_argument(
+                "--answer-mode", choices=["agent", "grounded", "legacy", "facts"], default="agent"
+            )
+            command.add_argument("--tool-limit", type=int, default=12)
+            command.add_argument("--call-limit", type=int, default=8)
+            command.add_argument("--turn-seconds", type=float, default=120)
+            command.add_argument(
+                "--no-stream",
+                action="store_true",
+                help="使用单次 JSON 回复兼容不支持流式输出的模型服务",
+            )
             command.add_argument("--ask", help="执行一个问题后退出；支持 /nodes 等命令")
+            if name == "chat":
+                command.add_argument(
+                    "--output-format",
+                    choices=["text", "stream-json"],
+                    default="text",
+                    help="单次请求的文本或 JSON 事件输出；stream-json 需要 --ask",
+                )
             if name == "init":
                 command.add_argument("--base-url", help="Responses 兼容模型服务地址")
                 command.add_argument("--model", help="对话模型名称")
@@ -73,6 +97,14 @@ def parser() -> argparse.ArgumentParser:
                 command.add_argument("--output", type=Path, help="全局工作台配置输出路径")
         elif name in {"node", "mission", "capabilities"}:
             command.add_argument("target")
+        elif name in {"state", "state-fields"}:
+            command.add_argument(
+                "target", nargs="?" if name == "state-fields" else None, default=""
+            )
+            if name == "state":
+                command.add_argument(
+                    "fields", nargs="*", help="battery/position/posture 或中文字段名"
+                )
     return root
 
 
@@ -157,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
             return ResponsesRouter(settings, current_environment())
 
         session: Session = Session(reader, router_factory)
-        if arguments.command in {"chat", "missions", "doctor"}:
+        if arguments.command in {"chat", "missions", "doctor", "state", "state-fields"}:
             mission = ReadOnlyController(
                 arguments.mission_service,
                 timeout=arguments.mission_timeout,
@@ -190,15 +222,16 @@ def main(argv: list[str] | None = None) -> int:
             )
             if arguments.command == "chat":
                 session.answer_mode = arguments.answer_mode
-                if session.answer_mode not in {"grounded", "facts"}:
+                session.stream_enabled = not arguments.no_stream
+                if session.answer_mode not in {"agent", "grounded", "legacy", "facts"}:
                     raise WorkbenchError("未知 answer_mode。")
                 session.tool_limit = arguments.tool_limit
                 session.call_limit = arguments.call_limit
                 session.turn_seconds = arguments.turn_seconds
                 if not (
-                    1 <= session.tool_limit <= 4
-                    and 1 <= session.call_limit <= 3
-                    and 0 < session.turn_seconds <= 60
+                    1 <= session.tool_limit <= 32
+                    and 1 <= session.call_limit <= 16
+                    and 0 < session.turn_seconds <= 300
                 ):
                     raise WorkbenchError("查询预算超出范围。")
                 session.progress = lambda message: print(
@@ -214,6 +247,14 @@ def main(argv: list[str] | None = None) -> int:
             if arguments.command == "missions":
                 display_question(session, "/missions")
                 return 0
+            if arguments.command in {"state", "state-fields"}:
+                values = ([arguments.target] if arguments.target else []) + getattr(
+                    arguments, "fields", []
+                )
+                display_question(
+                    session, "/" + arguments.command + (" " + shlex.join(values) if values else "")
+                )
+                return 0 if session.query_status == "complete" else 2
         if arguments.command != "chat":
             command = {
                 "nodes": "/nodes",
@@ -227,15 +268,35 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         assert isinstance(session, ConversationSession)
+        if arguments.output_format == "stream-json" and arguments.ask is None:
+            raise WorkbenchError("stream-json 需要配合 --ask 使用。")
         if arguments.ask is not None:
             print(f"会话：{session_id}；恢复：--resume {session_id}", file=sys.stderr)
-            display_question(session, arguments.ask)
+            if arguments.output_format == "stream-json":
+                session.progress = lambda message: _json_event("turn.phase", message=message)
+                _json_event("turn.started", session_id=session_id)
+            try:
+                display_question(session, arguments.ask, output_format=arguments.output_format)
+            except (ValueError, OSError, KeyboardInterrupt) as error:
+                if arguments.output_format == "stream-json":
+                    with suppress(ValueError, OSError):
+                        _json_event(
+                            "turn.failed",
+                            status="failed",
+                            session_id=session.store.path.stem,
+                            message="本轮已中断；已发送操作不会因此撤销。"
+                            if isinstance(error, KeyboardInterrupt)
+                            else safe_text(str(error)),
+                        )
+                raise
             return 0 if session.query_status == "complete" else 2
-        print("RoboGuide · 对话工作台 v0.4")
-        print(f"会话：{session_id}；恢复：--resume {session_id}")
-        print(f"Controller：{safe_text(reader.endpoint)}")
-        print(f"tenant：{safe_text(reader.tenant or '由服务端身份确定')}")
-        print("查询、规划、执行共用此会话；/help 查看命令，/quit 退出。")
+        terminal_mode = not arguments.plain and sys.stdin.isatty() and sys.stdout.isatty()
+        if not terminal_mode:
+            print("RoboGuide · 对话工作台")
+            print(f"会话：{session_id}；恢复：--resume {session_id}")
+            print(f"Controller：{safe_text(reader.endpoint)}")
+            print(f"tenant：{safe_text(reader.tenant or '由服务端身份确定')}")
+            print("查询、规划、执行共用此会话；/help 查看命令，/quit 退出。")
         if arguments.resume:
             print(
                 "已恢复历史：Request="
@@ -244,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
                 + str(session.last_mission)
             )
             print("状态将重新查询，执行前需重新展示当前计划。")
-        if not arguments.plain and sys.stdin.isatty():
+        if terminal_mode:
             from roboguide_workbench.terminal import interactive as asynchronous_terminal
 
             return asyncio.run(asynchronous_terminal(session))
@@ -312,6 +373,8 @@ def interactive(session: Session) -> int:
             "/reset",
             "/quit",
             "/status",
+            "/state",
+            "/state-fields",
             "/sessions",
             "/new",
             "/resume",
@@ -336,15 +399,24 @@ def interactive(session: Session) -> int:
         discard_confirmation(session)
 
 
-def display_question(session: Session, question: str, prefix: str = "") -> None:
+def display_question(
+    session: Session, question: str, prefix: str = "", *, output_format: str = "text"
+) -> None:
     """Acknowledge a plain or one-shot result only after a complete write and actual flush."""
     if isinstance(session, WorkbenchSession):
         from roboguide_workbench.sessions import navigate
 
         switched = navigate(session, question)
         if switched is not None:
+            session.query_status = "complete"
             try:
-                print(prefix + switched, flush=True)
+                if output_format == "stream-json":
+                    _json_event("assistant.completed", text=switched)
+                    _json_event(
+                        "turn.completed", status="complete", session_id=session.store.path.stem
+                    )
+                else:
+                    print(prefix + switched, flush=True)
             except (ValueError, OSError) as error:
                 discard_confirmation(session)
                 raise DisplayPersistenceError(
@@ -352,12 +424,38 @@ def display_question(session: Session, question: str, prefix: str = "") -> None:
                 ) from error
             return
     turn = DisplayTurn(session)
+    previous_stream = getattr(session, "stream_output", None)
+    preview: list[str] = []
+
+    def emit_delta(delta: str) -> None:
+        """Show public draft text without acknowledging it as a completed Assistant turn."""
+        if output_format == "stream-json":
+            _json_event("assistant.delta", delta=safe_text(delta).replace("\\u000a", "\n"))
+        else:
+            if not preview:
+                print("RG · 生成中：", flush=True)
+            print(safe_text(delta).replace("\\u000a", "\n"), end="", flush=True)
+        preview.append(delta)
+
+    if isinstance(session, ConversationSession):
+        session.stream_output = emit_delta
     try:
         result = session.ask(question)
         turn.stage()
-        print(prefix + result, flush=True)
+        if output_format == "stream-json":
+            _json_event("assistant.completed", text=result)
+        else:
+            streamed = "".join(preview)
+            if streamed and result.startswith(streamed):
+                print(result[len(streamed) :], flush=True)
+            else:
+                print(("\n" if streamed else "") + prefix + result, flush=True)
         turn.acknowledge()
+        if output_format == "stream-json":
+            _json_event("turn.completed", status=getattr(session, "query_status", "complete"))
     finally:
+        if isinstance(session, ConversationSession):
+            session.stream_output = previous_stream
         turn.reject()
 
 

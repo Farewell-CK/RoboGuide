@@ -32,6 +32,15 @@ pub struct RecoveryDeploymentSupport {
 }
 
 impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
+    /// Checks the private candidate's transport projection before its authority is committed.
+    pub fn validate_node_identity_registry_projection(&self) -> Result<(), String> {
+        if let Some(registry) = self.control.node_identity_registry() {
+            self.router
+                .validate_identity_registry_projection(registry)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
     /// Publishes only the application-committed Control identity authority to the transport.
     pub fn publish_node_identity_registry(&self) -> Result<(), String> {
         if let Some(registry) = self.control.node_identity_registry() {

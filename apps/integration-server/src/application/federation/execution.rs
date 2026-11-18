@@ -653,6 +653,8 @@ fn prepare(
     if let Some(original) = controller.federation.executions.prepared.get(id) {
         return Ok(original.receipt.clone());
     }
+    let current_deployment = super::super::deployment_management::current(controller, deployment)?;
+    let deployment = current_deployment.as_deref();
     refresh_current_node_evidence(controller, now)?;
     let local = &probe.manifest.participants[domain];
     let plan = decode_mission_plan(&local.plan.to_string()).map_err(|error| error.to_string())?;

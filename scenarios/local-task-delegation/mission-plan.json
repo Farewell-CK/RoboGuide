@@ -1,0 +1,86 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "local-task-delegation-example",
+    "objective": "Read and report local posture and battery state.",
+    "actors": [
+      {
+        "id": "observer"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "capture-context",
+      "roles": [
+        {
+          "id": "observer",
+          "actor": "observer"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "independent"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "delegate-task",
+      "description": "Delegate a read-only query to the local operating system.",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "delegate-role",
+          "context_role": "observer",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "task",
+                  "name": "delegate",
+                  "version": "v1"
+                },
+                "constraints": [
+                  {
+                    "attribute": "task-profile",
+                    "operator": "equals",
+                    "value": "local-task-v1"
+                  }
+                ]
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "task",
+              "name": "delegate",
+              "version": "v1"
+            },
+            "objective": "只读取并报告本机当前姿态和电量。本任务为状态查询，保持机器狗当前姿态。",
+            "parameters": {
+              "profile": "local-task-v1"
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "context_id": "capture-context",
+      "coupling_mode": "independent",
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": 330000
+      },
+      "satisfaction": {
+        "expected_effect": "Robonix reports completion of the original read-only task, with the attributed result retained.",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}

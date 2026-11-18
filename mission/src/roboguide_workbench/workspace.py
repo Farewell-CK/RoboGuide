@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import copy
 import json
+import shlex
 import time
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,40 +17,53 @@ from mission.models import JSONObject, JSONValue
 from roboguide_workbench.actions import MissionActions, checked_request
 from roboguide_workbench.client import ReadOnlyController, WorkbenchError, identifier
 from roboguide_workbench.evidence import QueryStatus, ReadResult
+from roboguide_workbench.mission_views import render_mission_list
 from roboguide_workbench.persistence import SessionStore
+from roboguide_workbench.plan_view import LIFECYCLE_LABELS, plan_document, plan_overview
 from roboguide_workbench.routing import Query, Router
 from roboguide_workbench.session import HELP, Session
+from roboguide_workbench.state_queries import choices, discover, fields, read_state
+from roboguide_workbench.task_context import TaskDialogue
 from roboguide_workbench.views import inventory_view, render_mission, render_nodes, safe_text
 
-EXTRA_HELP = """
-第四版：
-  /status              当前集群、身份、模型、会话与任务
-  /sessions            当前连接身份范围内的本地会话
-  /new [名称]           新会话（未确定命令会阻止切换）
-  /resume 名称          恢复会话，原执行选择不继承
-  /check               检查已展示计划，既不提交也不授予执行权限
-  /cancel request ID   预览放弃规划 Request
-  /cancel mission ID   预览取消已运行的 Mission
-  /cancel confirm      确认已展示的精确取消目标
-  /feedback [目录]      本地保存脱敏日志与诊断包
-第二版：
+EXTRA_HELP = """可以直接提问：有哪些设备？dog2 还有多少电？它在哪里？当前有哪些任务？
+也可以直接说：让狗1巡检东区；先只规划；把目标改成门口；执行刚才的计划；取消该请求。
+Agent 会查能力、补问和调用 MI；原有权限、风险审批与执行准入照常检查。
+新计划与修改版本会完整展示；查询已展示且未变化的计划时显示简洁进度。
+直接说“展开计划”可再次查看完整参数。
+
+设备与状态（无需模型）：
+  /nodes、/node ID       查看节点；/node #2 查询上次展示的第二个节点
+  /capabilities 建图     检索能力；/compare 比较上次展示的节点
+  /state-fields [ID]     查看状态对象及可查询字段
+  /state ID 电量 位置    查询状态；也支持 battery/position/posture
+  /state #2 姿态         查询上次状态目录中的第二个对象；/state 重查当前对象
+
+任务与规划：
   /missions             当前身份可见的任务列表
-  /mission #2           查询列表中的第二项
-  /compare              比较上轮展示的节点（最多四个）
+  /missions active      仅显示当前 Running、Accepted、Cancelling 或 Unknown 任务
+  /mission ID 或 #2      查询任务及各步骤
   /explain ID 或 #2      组合读取任务、绑定与恢复依据
-  /watch [ID]           持续观察任务，Ctrl-C 仅停止观察
-  /plan 目标            只生成计划
-  /run 目标             按既有审批策略进入执行流程
+  /watch [ID]            后台跟踪；/watches 查看，/unwatch ID 停止跟踪
+  /plan 目标             只生成计划；/run 目标 按既有审批策略进入执行流程
   /request [ID]         刷新当前或指定的 Mission Request
-  /answer 内容          回答当前问题或修改当前草案
-  /answer-to 问题ID 内容 回答多个问题中的指定一个
-  /execute              授权当前已展示版本提交执行
-  /approve              对当前已展示版本进行风险审批（需要 approver 权限）
-  /choose plan|run      对刚才的自然语言提议作明确选择
-  /choose answer|execute|approve  确认对应提议
-  /observe              只读核对上一条命令，不重发
-  /reconcile            对账原命令日志，不重新执行原操作
-  /history              查看本会话最近的问答
+  /answer 内容          回答澄清或修改草案；/answer-to 问题ID 内容 指定问题
+  /plan-detail          展开计划；/check 检查当前版本
+  /execute              授权已展示版本；/approve 独立风险审批
+  /choose plan|run       旧提议协议的兼容确认；普通自然语言任务无需此步骤
+  /cancel request ID 或 /cancel mission ID  预览取消，/cancel confirm 确认
+
+会话与诊断：
+  /status、/sessions     查看当前连接与会话；/new [名称] 新建，/resume 名称 恢复
+  /history、/raw         查看历史；/reset 清除对象选择和待补充目标
+  /observe、/reconcile   核对原命令，不重发原操作
+  /feedback [目录]       本地保存脱敏诊断包
+  /queue、/dequeue 序号、/edit-queued 序号  查看、撤回或取回待发消息（交互终端）
+  /quit                 等原请求收尾后退出
+
+Enter 发送，Alt-Enter 换行，Tab 补全。Ctrl-C 停止显示和清空排队，取消任务请明确说出目标。
+Alt-Up 取回末条待发消息编辑；Alt-Backspace 撤回末条。处理轨迹留在对话区。
+设备状态缺失、过期或来源冲突会明确显示；历史记录不能代替当前读取。
 """
 
 
@@ -108,13 +124,21 @@ def diagnostic_text(title: str, raw: JSONObject, mission_id: str, group_id: str)
     return "原恢复评估：\n" + "\n".join(lines)
 
 
-def render_request(raw: JSONObject) -> str:
+def render_request(raw: JSONObject, *, include_plan: bool = True) -> str:
     """Show the exact reviewed draft and unanswered questions without claiming execution."""
     record = checked_request(raw)
     lines = [
-        f"Request {record.request_id}：{record.lifecycle.value}",
+        f"Request {record.request_id}：{LIFECYCLE_LABELS[record.lifecycle.value]}"
+        f"（{record.lifecycle.value}）",
         f"Mission：{record.mission_id}",
-        f"提交意图：{record.submission_intent.mode if record.submission_intent else '未知'}",
+        "提交方式："
+        + (
+            "仅规划（draft_only）"
+            if record.submission_intent and record.submission_intent.mode == "draft_only"
+            else "按审批策略进入执行流程（submit_when_ready）"
+            if record.submission_intent
+            else "未知"
+        ),
         f"计划版本：{record.draft_revision}；摘要：{record.draft_digest or '尚无草案'}",
     ]
     if record.assessment:
@@ -128,14 +152,14 @@ def render_request(raw: JSONObject) -> str:
             lines.append(f"问题 {turn.turn_id}：{safe_text(turn.content)}")
     if record.plan:
         plan = record.plan.to_json()
-        # The actual Task/Role/operation/parameter document is shown, not an LLM summary.
-        text = json.dumps(plan, ensure_ascii=False, indent=2)
+        lines.append(plan_overview(plan))
+        text = plan_document(plan)
         if len(text) > 64000:
             lines.append("计划超过显示上限；不会设置可执行选择。请缩小计划或使用正式审批界面。")
+        elif include_plan:
+            lines.append("计划任务与原始参数（完整计划）：\n" + text)
         else:
-            lines.append(
-                "计划任务与原始参数（完整计划）：\n" + safe_text(text).replace("\\u000a", "\n")
-            )
+            lines.append("计划内容未变，沿用上次完整展示的版本；说“展开计划”可再次查看完整参数。")
     lines.extend("提示：" + safe_text(issue) for issue in record.issues)
     if record.approval_required:
         lines.append("仍需风险审批：" + ", ".join(record.approval_reasons))
@@ -148,8 +172,22 @@ def render_request(raw: JSONObject) -> str:
     return "\n".join(lines)
 
 
+def draft_reference(raw: JSONObject | None) -> JSONObject | None:
+    """Copy the acknowledged plan identity without turning historical context into permission."""
+    return (
+        copy.deepcopy(
+            {
+                key: raw.get(key)
+                for key in ("draft_revision", "draft_digest", "lifecycle", "assessment")
+            }
+        )
+        if raw is not None
+        else None
+    )
+
+
 class WorkbenchSession(Session):
-    """Add durable scoped context while keeping model routing unable to invoke writes."""
+    """Own durable scope and commands used by direct input and closed native task tools."""
 
     query_status: QueryStatus = "complete"
     model_label = "未加载"
@@ -172,6 +210,8 @@ class WorkbenchSession(Session):
             raise WorkbenchError("会话上下文损坏。")
         self.displayed_nodes = self._ids(context.get("nodes", []))
         self.displayed_missions = self._ids(context.get("missions", []))
+        self.displayed_states = self._ids(context.get("states", []))
+        self.last_state = self._optional_id(context.get("last_state"))
         self.last_node = self._optional_id(context.get("last_node"))
         self.last_mission = self._optional_id(context.get("last_mission"))
         self.request_id = self._optional_id(context.get("request_id"))
@@ -180,9 +220,76 @@ class WorkbenchSession(Session):
             raise WorkbenchError("会话问题引用损坏。")
         self.previous_question = previous
         self.shown_draft: JSONObject | None = None
+        self.acknowledged_draft: JSONObject | None = None
         self.suggestion: tuple[str, str] | None = None
         self.pending_cancel: JSONObject | None = None
         self.reference_checkpoint: JSONObject | None = None
+        self.input_references: JSONObject | None = None
+        self.input_history: list[JSONObject] | None = None
+        self.input_turn_id: str | None = None
+        self.display_turn_id: str | None = None
+        if "task_dialogue" in context and context["task_dialogue"] is None:
+            raise WorkbenchError("待补充任务上下文损坏；未采用空值代替原始要求。")
+        self.task_dialogue = TaskDialogue.restore(context.get("task_dialogue"))
+        if "task_dialogue" not in context and not store.data.get("commands"):
+            messages = store.data.get("messages")
+            if isinstance(messages, list):
+                for row in messages:
+                    if not isinstance(row, dict) or row.get("role") != "user":
+                        continue
+                    text, turn_id = row.get("text"), row.get("turn_id")
+                    if (
+                        isinstance(text, str)
+                        and 0 < len(text) <= 4096
+                        and row.get("truncated") is not True
+                    ):
+                        self.task_dialogue.append(
+                            text, turn_id if isinstance(turn_id, str) else uuid.uuid4().hex
+                        )
+                    else:
+                        self.task_dialogue.incomplete = True
+                self.task_dialogue.sync_visible(messages)
+        historical = context.get("raw_query")
+        if historical is not None:
+            if not isinstance(historical, dict) or set(historical) != {"value", "read_at"}:
+                raise WorkbenchError("会话历史查询记录损坏。")
+            value, read_at = historical["value"], historical["read_at"]
+            if (
+                not isinstance(value, dict)
+                or not isinstance(read_at, str)
+                or len(json.dumps(historical, ensure_ascii=False).encode()) > 2 * 1024 * 1024
+            ):
+                raise WorkbenchError("会话历史查询记录无效或超过上限。")
+            self.last_raw, self.last_read_at = copy.deepcopy(value), read_at
+
+    def raw_query(self) -> JSONObject | None:
+        """Persist a complete bounded historical result, never a clipped value or fresh evidence."""
+        if self.last_raw is None or self.last_read_at is None:
+            return None
+        historical: JSONObject = {"value": self.last_raw, "read_at": self.last_read_at}
+        return (
+            copy.deepcopy(historical)
+            if len(json.dumps(historical, ensure_ascii=False).encode()) <= 2 * 1024 * 1024
+            else None
+        )
+
+    def query_references(self) -> JSONObject:
+        """Resolve queued questions against their original visible identities, never permission."""
+        references: JSONObject = {
+            "displayed_nodes": list(self.displayed_nodes),
+            "displayed_missions": list(self.displayed_missions),
+            "last_node": self.last_node,
+            "last_mission": self.last_mission,
+            "state_targets": list(self.displayed_states),
+            "last_state": self.last_state,
+            "previous_question": self.previous_question,
+            "request_id": self.request_id,
+            "draft": draft_reference(self.shown_draft),
+            "task_dialogue": self.task_dialogue.export(),
+        }
+        if self.input_references is not None:
+            references.update(self.input_references)
+        return references
 
     @staticmethod
     def _ids(value: JSONValue) -> list[str]:
@@ -211,12 +318,18 @@ class WorkbenchSession(Session):
             "missions": list(self.displayed_missions),
             "last_node": self.last_node,
             "last_mission": self.last_mission,
+            "states": list(self.displayed_states),
+            "last_state": self.last_state,
             "request_id": self.request_id,
             "previous_question": self.previous_question,
+            "raw_query": self.raw_query(),
+            "task_dialogue": self.task_dialogue.export(),
         }
         if self.reference_checkpoint is not None:
-            for field in ("nodes", "missions", "last_node", "last_mission"):
-                context[field] = self.reference_checkpoint[field]
+            for field in ("nodes", "missions", "last_node", "last_mission", "states", "last_state"):
+                if field in self.reference_checkpoint:
+                    context[field] = self.reference_checkpoint[field]
+            context["raw_query"] = self.reference_checkpoint.get("raw_query")
         self.store.data["context"] = context
         self.store.save()
 
@@ -228,24 +341,47 @@ class WorkbenchSession(Session):
         if question.startswith("/") and question.partition(" ")[0] != "/choose":
             self.suggestion = None
         self.query_status = "complete"
+        if not question.startswith("/"):
+            self.input_turn_id = self.display_turn_id or uuid.uuid4().hex
+            self.task_dialogue.sync_visible(self.store.data.get("messages"))
+            self.task_dialogue.append(question, self.input_turn_id)
+            # Original user limits must survive a process exit or a lost Provider response,
+            # including exits before the ordinary completed-turn history can be written.
+            self.checkpoint()
         try:
             result = self._turn(question)
         except (ValueError, OSError) as error:
             self.query_status = "failed"
             self._remember(question, "查询/操作未确定：" + str(error))
             raise
-        self._remember(question, result)
+        else:
+            self._remember(question, result)
+        finally:
+            self.input_turn_id = None
         return result
 
     def _remember(self, question: str, result: str) -> None:
-        """Keep bounded recent dialogue and every original mutation receipt independently."""
+        """Audit original dialogue before output; only DisplayTurn may acknowledge its reply."""
         messages = self.store.data.get("messages")
         if not isinstance(messages, list):
             raise WorkbenchError("会话消息记录损坏。")
+        turn_id = self.display_turn_id or self.input_turn_id or uuid.uuid4().hex
         messages.extend(
             [
-                {"role": "user", "text": question, "at": datetime.now(UTC).isoformat()},
-                {"role": "assistant", "text": result[:64000], "at": datetime.now(UTC).isoformat()},
+                {
+                    "role": "user",
+                    "text": question,
+                    "at": datetime.now(UTC).isoformat(),
+                    "turn_id": turn_id,
+                },
+                {
+                    "role": "assistant",
+                    "text": result[:64000],
+                    "at": datetime.now(UTC).isoformat(),
+                    "turn_id": turn_id,
+                    "displayed": False,
+                    "truncated": len(result) > 64000,
+                },
             ]
         )
         self.store.data["messages"] = messages[-40:]
@@ -257,34 +393,32 @@ class WorkbenchSession(Session):
         if not question.startswith("/cancel"):
             self.pending_cancel = None
         if question == "/help":
-            return HELP.replace("当前版本只查询；执行、取消和修改操作尚未接入。", "") + EXTRA_HELP
+            return EXTRA_HELP
         if question == "/history":
             return safe_text(
                 json.dumps(self.store.data.get("messages"), ensure_ascii=False, indent=2)
             ).replace("\\u000a", "\n")
+        if question == "/raw" and self.last_raw is None:
+            self.query_status = "failed"
+            return "尚无可恢复的完整查询原文；请先查询。超过保存上限的原文不会截断后冒充完整结果。"
         if question == "/reset":
             super().reset()
             self.displayed_missions = []
+            self.displayed_states = []
+            self.last_state = None
             self.request_id = None
             self.shown_draft = None
+            self.acknowledged_draft = None
             self.suggestion = None
-            return "已清除对象选择；命令回执和历史仍保留。"
+            self.task_dialogue.clear()
+            return "已清除对象选择和待补充目标；原任务、命令回执和历史仍保留。"
         if question.startswith("/"):
             return self._command(question)
         self.suggestion = None
         if self.router is None:
             self.router = self.router_factory()
-        query = self.router.route(
-            question,
-            {
-                "displayed_nodes": list(self.displayed_nodes),
-                "displayed_missions": list(self.displayed_missions),
-                "last_node": self.last_node,
-                "last_mission": self.last_mission,
-                "request_id": self.request_id,
-                "previous_question": self.previous_question,
-            },
-        )
+        references = self.query_references()
+        query = self.router.route(question, references)
         query = Query.parse(
             {
                 "kind": query.kind,
@@ -309,12 +443,23 @@ class WorkbenchSession(Session):
         if query.kind == "unsupported":
             return "此操作尚未开放，未发出命令。"
         if query.value and query.kind in {"node", "mission", "explain"}:
-            known = self.displayed_nodes if query.kind == "node" else self.displayed_missions
-            current = self.last_node if query.kind == "node" else self.last_mission
+            domain = "nodes" if query.kind == "node" else "missions"
+            known = cast(list[JSONValue], references["displayed_" + domain])
+            current = references["last_node" if query.kind == "node" else "last_mission"]
             if query.value not in known and query.value != current and query.value not in question:
                 raise WorkbenchError("对象 ID 没有用户输入或会话引用依据。")
+        if query.index is not None:
+            domain = "nodes" if query.kind == "node" else "missions"
+            known_ids = cast(list[str], references["displayed_" + domain])
+            if not 1 <= query.index <= len(known_ids):
+                raise WorkbenchError("原输入时没有这个已展示对象序号。")
+            query = Query(query.kind, value=known_ids[query.index - 1])
+        if query.kind == "compare":
+            return self.read_comparison(tuple(cast(list[str], references["displayed_nodes"])))
         if query.kind in {"missions", "compare"}:
             return self._command("/" + query.kind)
+        if query.kind == "active_missions":
+            return self.read_missions(active_only=True).text
         if query.kind in {"mission", "explain"}:
             target = (
                 self._mission_target("#" + str(query.index))
@@ -352,10 +497,7 @@ class WorkbenchSession(Session):
         self.last_raw = raw
         self.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
         self.shown_draft = (
-            raw
-            if record.plan
-            and len(json.dumps(record.plan.to_json(), ensure_ascii=False, indent=2)) <= 64000
-            else None
+            raw if record.plan and len(plan_document(record.plan.to_json())) <= 64000 else None
         )
         return rendered
 
@@ -368,6 +510,25 @@ class WorkbenchSession(Session):
         self.last_raw = raw
         self.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
         return result
+
+    def read_missions(self, active_only: bool = False) -> ReadResult:
+        """Read one current State cohort and render bounded host-owned Mission aggregates."""
+        raw = self.controller.missions()
+        result, complete, ids = render_mission_list(raw, active_only=active_only)
+        self.displayed_missions = ids
+        self.last_mission = ids[0] if len(ids) == 1 else None
+        self.last_node = None
+        self.last_raw = raw
+        self.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
+        component: JSONObject = {
+            "source": "current-mission-state",
+            "complete": complete,
+            "active_only": active_only,
+            "displayed_count": len(ids),
+            "display_truncated": "完整数量仍为上方聚合" in result,
+        }
+        self.query_status = "complete" if complete else "partial"
+        return ReadResult(result, complete, (component,))
 
     def read_explanation(self, target: str) -> ReadResult:
         """Retain each validated diagnostic read and its explicit availability independently."""
@@ -442,6 +603,63 @@ class WorkbenchSession(Session):
         """Dispatch explicit commands; model output never enters this method as a write."""
         command, _, argument = text.partition(" ")
         argument = argument.strip()
+        if command == "/plan-detail":
+            if argument or self.shown_draft is None:
+                raise WorkbenchError("请先读取当前请求，取得完整计划后再展开。")
+            record = checked_request(self.shown_draft)
+            if record.plan is None:
+                raise WorkbenchError("当前请求还没有计划。")
+            return (
+                f"已展示计划 · Request {record.request_id} · 第 {record.draft_revision} 版\n"
+                f"摘要：{record.draft_digest}\n"
+                "完整原始计划（未刷新执行状态）：\n" + plan_document(record.plan.to_json())
+            )
+        if command in {"/state", "/state-fields"}:
+            try:
+                values = shlex.split(argument)
+            except ValueError as error:
+                raise WorkbenchError('命令引号或转义不完整；例如 /state "设备ID" 电量。') from error
+            target = values[0] if values else "" if command == "/state-fields" else self.last_state
+            if target is None:
+                raise WorkbenchError("请先 /state-fields 查看设备，或使用 /state 设备ID battery。")
+            if target.startswith("#"):
+                try:
+                    index = int(target[1:])
+                except ValueError as error:
+                    raise WorkbenchError("请使用 /state #2 battery 这样的设备序号。") from error
+                if not 1 <= index <= len(self.displayed_states):
+                    raise WorkbenchError("上次展示的状态对象中没有这个序号，请先 /state-fields。")
+                target = self.displayed_states[index - 1]
+            if command == "/state-fields":
+                if len(values) > 1:
+                    raise WorkbenchError("用法：/state-fields [设备ID]。")
+                raw = self.controller.state_providers()
+                state_result, targets = discover(raw, target)
+                self.displayed_states = targets
+                self.last_state = targets[0] if len(targets) == 1 else None
+                self.last_raw = raw
+            else:
+                requested = fields(values[1:] or ["battery", "position", "posture"])
+                snapshot = read_state(self.controller, target, requested, self.controller.timeout)
+                state_result = snapshot.render()
+                selected_choices = choices(state_result)
+                if selected_choices:
+                    self.displayed_states = selected_choices
+                self.last_state = target
+                self.last_raw = {
+                    "providers": snapshot.catalog,
+                    "inventory": snapshot.inventory,
+                    "state": snapshot.state,
+                }
+            self.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
+            self.query_status = (
+                "complete"
+                if state_result.complete
+                else "partial"
+                if any(item.get("complete") is True for item in state_result.components)
+                else "failed"
+            )
+            return state_result.text
         if command == "/status":
             from roboguide_workbench.status import status_line
 
@@ -522,18 +740,16 @@ class WorkbenchSession(Session):
             if not argument:
                 raise WorkbenchError("请提供任务目标。")
             self.shown_draft = None
-            return self._show_request(
-                self.actions.command(
-                    "create",
-                    {
-                        "schema_version": "roboguide.mission-request-create/v0.2",
-                        "instruction": argument,
-                        "submission_mode": "draft_only"
-                        if command == "/plan"
-                        else "submit_when_ready",
-                    },
-                )
+            raw = self.actions.command(
+                "create",
+                {
+                    "schema_version": "roboguide.mission-request-create/v0.2",
+                    "instruction": argument,
+                    "submission_mode": "draft_only" if command == "/plan" else "submit_when_ready",
+                },
             )
+            self.task_dialogue.clear()
+            return self._show_request(raw)
         if command == "/request":
             target = argument or self.request_id
             if target is None:
@@ -568,7 +784,9 @@ class WorkbenchSession(Session):
                 body = {"draft_revision": old.draft_revision, "draft_digest": old.draft_digest}
                 action = command[1:]
             self.shown_draft = None
-            return self._show_request(self.actions.command(action, body, self.request_id))
+            raw = self.actions.command(action, body, self.request_id)
+            self.task_dialogue.clear()
+            return self._show_request(raw)
         if command in {"/observe", "/reconcile"}:
             from roboguide_workbench.cancellation import CancellationActions
 
@@ -592,39 +810,10 @@ class WorkbenchSession(Session):
                 return prefix + self._show_request(self.actions.get(original_request))
             return prefix + safe_text(json.dumps(observed, ensure_ascii=False))
         if command == "/missions":
-            records = state_records(self.controller.missions())
-            found: dict[str, tuple[str, str]] = {}
-            for record in records:
-                obj, value = record.get("object"), record.get("value")
-                if (
-                    not isinstance(obj, dict)
-                    or obj.get("object_type") != "mission"
-                    or not isinstance(value, dict)
-                ):
-                    raise WorkbenchError("任务列表包含无效对象。")
-                mission_id = identifier(cast(str, obj.get("object_id")))
-                objective, status = found.get(mission_id, ("目标未提供", "状态未知"))
-                if record.get("channel_id") == "accepted-plan" and isinstance(
-                    value.get("objective"), str
-                ):
-                    objective = cast(str, value["objective"])
-                if record.get("channel_id") == "mission-lifecycle" and isinstance(
-                    value.get("lifecycle"), str
-                ):
-                    status = cast(str, value["lifecycle"])
-                found[mission_id] = objective, status
-            self.displayed_missions = list(found)[:128]
-            self.last_mission = self.displayed_missions[0] if len(found) == 1 else None
-            return (
-                "当前身份可见 Mission："
-                + str(len(found))
-                + " 个（最多展示 128 个）\n"
-                + "\n".join(
-                    f"{i}. {safe_text(mid)}：{safe_text(found[mid][1])} "
-                    f"— {safe_text(found[mid][0])}"
-                    for i, mid in enumerate(self.displayed_missions, 1)
-                )
-            )
+            active_only = argument.strip().casefold() == "active"
+            if argument and not active_only:
+                raise WorkbenchError("/missions 仅支持可选参数 active。")
+            return self.read_missions(active_only=active_only).text
         if command == "/compare":
             if argument:
                 raise WorkbenchError("请先检索并展示 1–4 个节点，再 /compare。")

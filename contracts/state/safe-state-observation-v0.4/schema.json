@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Task-owned no-effects observation v0.4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["observations"],
+  "properties": {
+    "observations": {
+      "type": "array", "maxItems": 256,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["execution_id", "execution_generation", "command_id", "terminal_state", "safe_state", "assurance", "task_effects"],
+        "properties": {
+          "execution_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+          "execution_generation": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+          "command_id": {"type": "string", "minLength": 1, "maxLength": 2048},
+          "terminal_state": {"const": "CANCELLED"},
+          "safe_state": {"type": "boolean"},
+          "assurance": {"const": "no-effects"},
+          "process_exit": {"type": "null"},
+          "task_effects": {
+            "type": "object", "additionalProperties": false,
+            "required": ["native_session_id", "native_task_id", "disposition", "evidence_digest"],
+            "properties": {
+              "native_session_id": {"type": "string", "minLength": 1, "maxLength": 128},
+              "native_task_id": {"type": "string", "minLength": 1, "maxLength": 128},
+              "disposition": {"const": "no-effects"},
+              "evidence_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+            }
+          }
+        }
+      }
+    }
+  }
+}
