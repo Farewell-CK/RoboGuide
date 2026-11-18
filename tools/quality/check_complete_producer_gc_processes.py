@@ -146,9 +146,12 @@ def retire(config: dict[str, Any], cli: Processes, phase: str) -> None:
             )
 
 
-def leader(actors: dict[int, Actor], expected: int | None = None) -> int:
+def leader(
+    actors: dict[int, Actor], expected: int | None = None, *, deadline: float | None = None
+) -> int:
     """Wait only for an actual current metadata quorum; labels alone grant no readiness."""
-    deadline = time.monotonic() + 45
+    if deadline is None:
+        deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         for member, actor in actors.items():
             if expected is not None and member != expected:
@@ -162,6 +165,22 @@ def leader(actors: dict[int, Actor], expected: int | None = None) -> int:
                 return member
         time.sleep(0.1)
     raise ValueError("actual original infrastructure quorum unavailable within observation bound")
+
+
+def transfer_source(actors: dict[int, Actor], target: int, deadline: float) -> int:
+    """Observe the selected voter's actual acknowledged tail before any handoff effect."""
+    source = leader(actors, deadline=deadline)
+    progress = None
+    while time.monotonic() < deadline:
+        if source == target:
+            return source
+        progress = actors[source].ask({"action": "transfer-log-progress", "member": target})
+        if progress["caught_up"]:
+            return source
+        time.sleep(0.1)
+        if progress["progress"] is None:
+            source = leader(actors, deadline=deadline)
+    raise ValueError(f"actual transfer target {target} did not match source {source}: {progress}")
 
 
 def cluster(
@@ -214,16 +233,18 @@ def cluster(
             if compact:
                 while remaining:
                     target = min(remaining)
-                    source_member = current
-                    if target != current:
-                        actors[current].ask(
+                    transfer_deadline = time.monotonic() + 45
+                    source_member = transfer_source(actors, target, transfer_deadline)
+                    current = source_member
+                    if target != source_member:
+                        actors[source_member].ask(
                             {
                                 "action": "transfer-to",
                                 "member": target,
-                                "transfer_id": f"original-producer-gc-{current}-{target}",
+                                "transfer_id": f"original-producer-gc-{source_member}-{target}",
                             }
                         )
-                        current = leader(actors, target)
+                        current = leader(actors, target, deadline=transfer_deadline)
                         assert actors[target].ask({"action": "reconcile-transfer"})[
                             "original_transfer_reconciled"
                         ]
