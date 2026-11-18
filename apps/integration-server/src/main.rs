@@ -1918,7 +1918,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_concurrent_streams(Some(node_stream_limit as u32))
         .timeout(Duration::from_secs(30))
         .http2_keepalive_interval(Some(Duration::from_secs(5)))
-        .http2_keepalive_timeout(Some(Duration::from_secs(5)));
+        .http2_keepalive_timeout(Some(Duration::from_secs(10)));
     if let Some(tls) = node_tls {
         node_server = node_server.tls_config(tls.timeout(listener_capacity::HANDSHAKE_TIMEOUT))?;
     }
