@@ -60,13 +60,7 @@ fn continuous_ingress_renews_control_without_refreshing_health() {
     let (mut control, mut state, mut events, evidence) = fixture();
     assert!(
         control
-            .accept_session_liveness(
-                &state,
-                &evidence,
-                TimestampMs::new(22_000),
-                &trace(),
-                &mut events
-            )
+            .accept_session_liveness(&mut state, &evidence, TimestampMs::new(22_000),)
             .unwrap()
     );
     assert!(
@@ -144,13 +138,7 @@ fn queued_decision_must_recheck_expired_health_and_lease_without_renewal() {
     evidence.last_received_at = TimestampMs::new(2_000);
     evidence.maximum_gap_ms = 1_000;
     control
-        .accept_session_liveness(
-            &state,
-            &evidence,
-            TimestampMs::new(2_000),
-            &trace(),
-            &mut events,
-        )
+        .accept_session_liveness(&mut state, &evidence, TimestampMs::new(2_000))
         .unwrap();
     control
         .accept_received_heartbeat(
@@ -233,13 +221,7 @@ fn actual_unchanged_health_ingress_is_separate_from_liveness_and_does_not_renew_
             .unwrap()
     );
     control
-        .accept_session_liveness(
-            &state,
-            &evidence,
-            TimestampMs::new(22_000),
-            &trace(),
-            &mut events,
-        )
+        .accept_session_liveness(&mut state, &evidence, TimestampMs::new(22_000))
         .unwrap();
     assert!(
         control
@@ -295,7 +277,7 @@ fn actual_unchanged_health_ingress_is_separate_from_liveness_and_does_not_renew_
             .reported_status_received_at(),
         TimestampMs::new(21_000)
     );
-    assert_eq!(events.records.len(), count + 1);
+    assert_eq!(events.records.len(), count);
     assert!(
         control
             .accept_received_heartbeat(
@@ -324,13 +306,7 @@ fn raw_health_never_crosses_session_state_or_time_fences() {
         TimestampMs::new(21_000),
     ));
     control
-        .accept_session_liveness(
-            &state,
-            &evidence,
-            TimestampMs::new(22_000),
-            &trace(),
-            &mut events,
-        )
+        .accept_session_liveness(&mut state, &evidence, TimestampMs::new(22_000))
         .unwrap();
     let initial = state.node(&evidence.node_id).unwrap().clone();
     for damage in ["session", "future", "changed", "expired", "certificate"] {
@@ -392,13 +368,7 @@ fn continuity_rejections_and_expiry_are_atomic() {
         let count = events.records.len();
         assert!(
             !control
-                .accept_session_liveness(
-                    &state,
-                    &wrong,
-                    TimestampMs::new(22_000),
-                    &trace(),
-                    &mut events
-                )
+                .accept_session_liveness(&mut state, &wrong, TimestampMs::new(22_000),)
                 .unwrap()
         );
         assert_eq!(control.node_lease(&evidence.node_id), Some(&lease));
@@ -416,13 +386,7 @@ fn continuity_rejections_and_expiry_are_atomic() {
     );
     assert!(
         !control
-            .accept_session_liveness(
-                &state,
-                &evidence,
-                TimestampMs::new(22_000),
-                &trace(),
-                &mut events
-            )
+            .accept_session_liveness(&mut state, &evidence, TimestampMs::new(22_000),)
             .unwrap(),
         "committed expiry cannot be healed by a late summary"
     );
@@ -432,17 +396,11 @@ fn continuity_rejections_and_expiry_are_atomic() {
             .is_err(),
         "anchor API cannot clear the expiry fence"
     );
-    let (mut control, state, mut events, evidence) = fixture();
+    let (mut control, mut state, _events, evidence) = fixture();
     control.fence_node_session(&evidence.node_id);
     assert!(
         !control
-            .accept_session_liveness(
-                &state,
-                &evidence,
-                TimestampMs::new(22_000),
-                &trace(),
-                &mut events
-            )
+            .accept_session_liveness(&mut state, &evidence, TimestampMs::new(22_000),)
             .unwrap()
     );
 }
@@ -450,28 +408,16 @@ fn continuity_rejections_and_expiry_are_atomic() {
 /// Admission is monotonic and restart clears both lease/session without renewing old source evidence.
 #[test]
 fn session_evidence_watermark_and_restart_are_fenced() {
-    let (mut control, state, mut events, evidence) = fixture();
+    let (mut control, mut state, events, evidence) = fixture();
     assert!(
         control
-            .accept_session_liveness(
-                &state,
-                &evidence,
-                TimestampMs::new(22_000),
-                &trace(),
-                &mut events
-            )
+            .accept_session_liveness(&mut state, &evidence, TimestampMs::new(22_000),)
             .unwrap()
     );
     let count = events.records.len();
     assert!(
         !control
-            .accept_session_liveness(
-                &state,
-                &evidence,
-                TimestampMs::new(22_000),
-                &trace(),
-                &mut events
-            )
+            .accept_session_liveness(&mut state, &evidence, TimestampMs::new(22_000),)
             .unwrap()
     );
     assert_eq!(events.records.len(), count);
@@ -479,13 +425,7 @@ fn session_evidence_watermark_and_restart_are_fenced() {
     assert!(restored.node_lease(&evidence.node_id).is_none());
     assert!(
         !restored
-            .accept_session_liveness(
-                &state,
-                &evidence,
-                TimestampMs::new(22_000),
-                &trace(),
-                &mut events
-            )
+            .accept_session_liveness(&mut state, &evidence, TimestampMs::new(22_000),)
             .unwrap()
     );
 }

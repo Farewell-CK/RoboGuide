@@ -3,7 +3,7 @@
 use crate::{ControlError, ControlPlane};
 use domain::{
     CorrelationId, EventPayload, LeaseId, NodeHealthObservation, NodeHeartbeat, NodeId, NodeLease,
-    NodeLiveness, NodeSessionLivenessEvidence, TimestampMs,
+    NodeLiveness, NodeLivenessObservation, NodeSessionLivenessEvidence, TimestampMs,
 };
 use ports::{EventSink, SharedNodeStateReader, SharedNodeStateWriter};
 
@@ -135,14 +135,12 @@ impl ControlPlane {
         }
     }
 
-    /// Admits a continuous heartbeat interval in a caller-owned durable transaction, without health mutation.
-    pub fn accept_session_liveness<S: SharedNodeStateReader, E: EventSink>(
+    /// Renews current-process liveness from an admitted continuous receive interval.
+    pub fn accept_session_liveness<S: SharedNodeStateReader + SharedNodeStateWriter>(
         &mut self,
-        state: &S,
+        state: &mut S,
         evidence: &NodeSessionLivenessEvidence,
         decision_at: TimestampMs,
-        correlation_id: &CorrelationId,
-        events: &mut E,
     ) -> Result<bool, ControlError> {
         let Some(session) = self.node_sessions.get(&evidence.node_id) else {
             return Ok(false);
@@ -184,6 +182,20 @@ impl ControlPlane {
         if !extended.is_active_at(decision_at) {
             return Ok(false);
         }
+        if state
+            .node(&evidence.node_id)
+            .is_some_and(|node| evidence.last_received_at > node.liveness().observed_at())
+        {
+            state
+                .record_node_liveness(
+                    &evidence.node_id,
+                    NodeLivenessObservation::new(
+                        NodeLiveness::Reachable,
+                        evidence.last_received_at,
+                    ),
+                )
+                .map_err(ControlError::SharedState)?;
+        }
         if extended.expires_at() > lease.expires_at() {
             self.leases.insert(evidence.node_id.clone(), extended);
         }
@@ -193,22 +205,6 @@ impl ControlPlane {
             .expect("session validated without mutation above");
         session.accepted_sequence = evidence.last_sequence;
         session.accepted_received_at = evidence.last_received_at;
-        events.append(
-            evidence.last_received_at,
-            correlation_id,
-            None,
-            EventPayload::NodeSessionLivenessAccepted {
-                node_id: evidence.node_id.clone(),
-                session_id: evidence.session_id.clone(),
-                lease_id: evidence.lease_id.clone(),
-                first_sequence: evidence.first_sequence,
-                last_sequence: evidence.last_sequence,
-                activated_at: evidence.activated_at,
-                first_received_at: evidence.first_received_at,
-                last_received_at: evidence.last_received_at,
-                maximum_gap_ms: evidence.maximum_gap_ms,
-            },
-        );
         Ok(true)
     }
 
@@ -335,6 +331,10 @@ impl ControlPlane {
                             && received_at <= session.accepted_health_received_at
                     })
         });
+        let transition = state.node(heartbeat.node_id()).is_some_and(|node| {
+            node.reported_status().health() != heartbeat.status().health()
+                || node.liveness().liveness() != NodeLiveness::Reachable
+        });
         if !covered {
             state
                 .record_node_health(NodeHealthObservation::new(
@@ -347,15 +347,17 @@ impl ControlPlane {
         if let Some(renewed) = renewed {
             self.leases.insert(heartbeat.node_id().clone(), renewed);
         }
-        events.append(
-            received_at,
-            correlation_id,
-            None,
-            EventPayload::NodeHeartbeatAccepted {
-                node_id: heartbeat.node_id().clone(),
-                lease_id: heartbeat.lease_id().clone(),
-            },
-        );
+        if transition {
+            events.append(
+                received_at,
+                correlation_id,
+                None,
+                EventPayload::NodeHeartbeatAccepted {
+                    node_id: heartbeat.node_id().clone(),
+                    lease_id: heartbeat.lease_id().clone(),
+                },
+            );
+        }
         Ok(())
     }
 }

@@ -64,7 +64,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         let checkpoint = ControllerCheckpoint {
             schema: CONTROLLER_CHECKPOINT_SCHEMA.to_string(),
             control: self.control.checkpoint(),
-            nodes: self.state.snapshots(),
+            nodes: self.state.checkpoint_snapshots(),
             state_records: self.state_records.snapshots(),
             task_satisfaction: self.task_satisfaction.snapshots(),
             runtime: self.runtime.checkpoint(),
@@ -234,7 +234,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                 "ingress receive time exceeds decision time".into(),
             ));
         }
-        self.refresh_node_liveness(decision_at, correlation_id)?;
+        self.refresh_node_liveness(decision_at)?;
         self.runtime.refresh_peer_channel_deadlines(decision_at);
         match event {
             GrpcNodeEvent::Registered {

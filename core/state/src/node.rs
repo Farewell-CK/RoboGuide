@@ -14,20 +14,21 @@ use domain::{
 };
 use ports::{SharedNodeStateReader, SharedNodeStateWriter, SharedStateError};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// Deterministic current-state store for shared node facts.
 #[derive(Debug, Default, Clone)]
 pub struct InMemorySharedNodeState {
     /// Latest accepted node snapshots indexed in stable identity order.
     nodes: BTreeMap<NodeId, NodeStateSnapshot>,
+    /// Last registration or health/reachability transition for each node.
+    checkpoint_nodes: Arc<BTreeMap<NodeId, NodeStateSnapshot>>,
 }
 
 impl InMemorySharedNodeState {
     /// Creates an empty Shared Node State implementation.
-    pub const fn new() -> Self {
-        Self {
-            nodes: BTreeMap::new(),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Restores reported node facts while preserving health freshness and rebasing liveness.
@@ -53,12 +54,20 @@ impl InMemorySharedNodeState {
                 ));
             }
         }
-        Ok(Self { nodes })
+        Ok(Self {
+            checkpoint_nodes: Arc::new(nodes.clone()),
+            nodes,
+        })
     }
 
     /// Returns owned snapshots in deterministic node-identity order for persistence.
     pub fn snapshots(&self) -> Vec<NodeStateSnapshot> {
         self.nodes.values().cloned().collect()
+    }
+
+    /// Captures registration and transitions for recovery without persisting every receive clock.
+    pub fn checkpoint_snapshots(&self) -> Vec<NodeStateSnapshot> {
+        self.checkpoint_nodes.values().cloned().collect()
     }
 }
 
@@ -84,6 +93,8 @@ impl SharedNodeStateWriter for InMemorySharedNodeState {
                 snapshot.reported_status_received_at(),
             )?;
         }
+        Arc::make_mut(&mut self.checkpoint_nodes)
+            .insert(snapshot.node_id().clone(), snapshot.clone());
         self.nodes.insert(snapshot.node_id().clone(), snapshot);
         Ok(())
     }
@@ -113,10 +124,14 @@ impl SharedNodeStateWriter for InMemorySharedNodeState {
         } else {
             current.liveness()
         };
-        self.nodes.insert(
-            node_id.clone(),
-            NodeStateSnapshot::new(registration, status, observation.received_at(), liveness),
-        );
+        let changed = current.reported_status().health() != status.health()
+            || current.liveness().liveness() != liveness.liveness();
+        let next =
+            NodeStateSnapshot::new(registration, status, observation.received_at(), liveness);
+        if changed {
+            Arc::make_mut(&mut self.checkpoint_nodes).insert(node_id.clone(), next.clone());
+        }
+        self.nodes.insert(node_id.clone(), next);
         Ok(())
     }
 
@@ -137,15 +152,17 @@ impl SharedNodeStateWriter for InMemorySharedNodeState {
         )?;
         let registration = current.registration().clone();
         let reported_status = current.reported_status();
-        self.nodes.insert(
-            node_id.clone(),
-            NodeStateSnapshot::new(
-                registration,
-                reported_status,
-                current.reported_status_received_at(),
-                observation,
-            ),
+        let changed = current.liveness().liveness() != observation.liveness();
+        let next = NodeStateSnapshot::new(
+            registration,
+            reported_status,
+            current.reported_status_received_at(),
+            observation,
         );
+        if changed {
+            Arc::make_mut(&mut self.checkpoint_nodes).insert(node_id.clone(), next.clone());
+        }
+        self.nodes.insert(node_id.clone(), next);
         Ok(())
     }
 }

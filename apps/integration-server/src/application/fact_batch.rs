@@ -1,4 +1,4 @@
-//! Bounded durable Node-fact transactions; Integration only receives post-Commit dispositions.
+//! Bounded Node-fact transactions with dispositions after authoritative publication.
 
 use crate::*;
 use integration::{GrpcNodeEventCompletion, GrpcNodeEventDelivery};
@@ -193,6 +193,10 @@ impl<C: Clock> NodeFactDriver<'_, C> {
         drop(lock);
         let mut working = live.clone();
         drop(live);
+        let only_heartbeat = inputs.iter().all(|(event, _)| {
+            matches!(event, GrpcNodeEvent::NodeMessage { message, .. }
+                if matches!(message.message, Some(integration::grpc::v0_4::node_message::Message::Heartbeat(_))))
+        });
         let mut dispositions = Vec::with_capacity(inputs.len());
         let mut rejected_sessions = BTreeSet::new();
         let correlation = domain::CorrelationId::new("integration-server")?;
@@ -429,35 +433,41 @@ impl<C: Clock> NodeFactDriver<'_, C> {
             checkpoint.len() as u64,
             None,
         );
-        let save = StageObservation::start(
-            self.diagnostics,
-            DiagnosticKind::Other,
-            DiagnosticStage::Save,
-            None,
-        );
-        let event_sequence = self.events.current_batch_event_sequence()?;
-        let command = control_command_journal_entry_with_digest(
-            format!("node-fact-batch:{event_sequence}:{input_digest}"),
-            Some("integration.node-fact-batch".to_string()),
-            input_digest,
-            &checkpoint,
-            event_sequence,
-        );
-        self.events.save_checkpoint_with_class(
-            SERVER_CHECKPOINT_SCHEMA,
-            &checkpoint,
-            command,
-            state::CommandJournalClass::NodeFacts,
-        )?;
-        drop(save);
-        let commit = StageObservation::start(
-            self.diagnostics,
-            DiagnosticKind::Other,
-            DiagnosticStage::Commit,
-            None,
-        );
-        self.events.commit_batch()?;
-        drop(commit);
+        if !only_heartbeat
+            || !self
+                .events
+                .rollback_unchanged_internal_batch(SERVER_CHECKPOINT_SCHEMA, &checkpoint)?
+        {
+            let save = StageObservation::start(
+                self.diagnostics,
+                DiagnosticKind::Other,
+                DiagnosticStage::Save,
+                None,
+            );
+            let event_sequence = self.events.current_batch_event_sequence()?;
+            let command = control_command_journal_entry_with_digest(
+                format!("node-fact-batch:{event_sequence}:{input_digest}"),
+                Some("integration.node-fact-batch".to_string()),
+                input_digest,
+                &checkpoint,
+                event_sequence,
+            );
+            self.events.save_checkpoint_with_class(
+                SERVER_CHECKPOINT_SCHEMA,
+                &checkpoint,
+                command,
+                state::CommandJournalClass::NodeFacts,
+            )?;
+            drop(save);
+            let commit = StageObservation::start(
+                self.diagnostics,
+                DiagnosticKind::Other,
+                DiagnosticStage::Commit,
+                None,
+            );
+            self.events.commit_batch()?;
+            drop(commit);
+        }
         for (node, session) in rejected_sessions {
             self.router.fence_current_session(&node, &session)?;
         }
