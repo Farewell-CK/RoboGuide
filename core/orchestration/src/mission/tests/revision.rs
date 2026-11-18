@@ -137,6 +137,15 @@ fn revision_inherits_completed_task_and_rejects_renamed_repetition() {
     let mut nodes = InMemorySharedNodeState::new();
     let trace = CorrelationId::new("completed-revision-unit").unwrap();
     let mut events = InMemoryEventLog::new();
+    let original_carrier = domain::ActorId::new("carrier").unwrap();
+    let original_placement = domain::NodeId::new("retained-carrier-node").unwrap();
+    control
+        .set_actor_node_constraint(
+            mission.clone(),
+            original_carrier.clone(),
+            original_placement.clone(),
+        )
+        .unwrap();
     control
         .register_node(
             &mut nodes,
@@ -320,6 +329,13 @@ fn revision_inherits_completed_task_and_rejects_renamed_repetition() {
     let restored =
         MissionOrchestrator::restore_json(&orchestrator.checkpoint_json().unwrap()).unwrap();
     let restored_control = ControlPlane::restore(control.checkpoint()).unwrap();
+    assert_eq!(
+        restored_control
+            .actor_node_constraint(&mission, &original_carrier)
+            .unwrap()
+            .node_id(),
+        &original_placement,
+    );
     restored
         .validate_control_authority(&restored_control)
         .unwrap();
