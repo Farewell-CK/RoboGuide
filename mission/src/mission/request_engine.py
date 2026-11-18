@@ -267,6 +267,12 @@ class MissionRequestEngine:
             raise MissionRequestError(f"unknown Mission Request {request_id}")
         return record
 
+    def list_requests(
+        self, tenant_id: str, *, limit: int = 20
+    ) -> tuple[MissionRequestRecord, ...]:
+        """Return recent Mission Requests for one authenticated tenant."""
+        return self._store.list_requests(tenant_id, limit=limit)
+
     def request_for_mission(self, mission_id: str, tenant_id: str) -> str | None:
         """Resolve an original Request without deliberation, submission or tenant migration."""
         return self._store.request_for_mission(mission_id, tenant_id)
