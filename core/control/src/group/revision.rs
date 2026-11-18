@@ -159,11 +159,6 @@ impl ControlPlane {
             .retain(|(restricted_mission, actor_id), _| {
                 restricted_mission != &mission_id || !stale_actors.contains(actor_id)
             });
-        candidate
-            .actor_node_constraints
-            .retain(|(constrained_mission, actor_id), _| {
-                constrained_mission != &mission_id || !stale_actors.contains(actor_id)
-            });
         candidate.replace_mission_binding_semantics_for_revision(
             mission_id,
             target_plan.binding_semantics(),

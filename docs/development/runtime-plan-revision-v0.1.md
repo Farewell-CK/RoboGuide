@@ -44,7 +44,8 @@ namespace、倒退或不可读时不授予新工作。迁移到另一时钟域�
 只有原策略允许的 `local-execution-failed` 和原 Group 的当前实际失败 attempt 同时存在时，
 已 Review 的候选才可替换未完成 Task 的 Actor/ContextRole 绑定。手动切换、Unknown 和
 语义拒绝不能授权换绑。ContextRole 的身份、容量 envelope 和其他安全合同不变；已满足
-Task 的定义和绑定保持原样。恢复时重验原 switch trigger 和失败 attempt，不把 Review
+Task 的定义和绑定保持原样，部署配置的固定 Actor placement 也不撤销。恢复时重验原
+switch trigger 和失败 attempt，不把 Review
 或触发标签当作失败证据。
 
 旧 Group 标记已被替代并 Released，保留原 Task 状态和全部 Runtime history；旧 Group 的
