@@ -246,8 +246,16 @@ class ProjectionCheck:
         self.install(current, "actual-v1-install", "1", accepted=True)
         self.unchanged_rows(successor_rows, "actual-v1-install")
         assert self.database.stat().st_ino == self.inode
+        managed_rows = rows(self.database)
+        managed_digest = self.digest(self.database)
         refused = self.install(current, "v1-refuses-legacy-install", "legacy", accepted=False)
-        assert "requires the actual managed v1 writer" in refused["stderr"]
+        assert (
+            "Controller fenced storage requires its actual managed versioned writer"
+            in refused["stderr"]
+        ), refused
+        assert rows(self.database) == managed_rows
+        assert self.digest(self.database) == managed_digest
+        assert self.database.stat().st_ino == self.inode
 
         with closing(sqlite3.connect(self.database)) as sql, sql:
             sql.execute(
