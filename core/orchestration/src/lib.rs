@@ -43,7 +43,7 @@ pub use integration_bridge::{
     GroupSpatialVerification, GroupViewFreshness, IntegrationRuntimeBridge,
     IntegrationRuntimeError, MemoryDispatchPermit, ObservedTaskExecutionOutcome,
     ObservedTaskExecutionResult, RecoveryDeploymentSupport, RecoverySupportDisposition,
-    RemoteExecutionStatus,
+    RemoteExecutionStatus, TelemetryPersistencePolicy,
 };
 pub use mechanism_profile::SupportedMechanismProfile;
 pub use mission::isolation::{

@@ -34,6 +34,8 @@ mod ingestion;
 mod liveness;
 mod memory_preparation;
 mod relation_view;
+mod telemetry_persistence;
+pub use telemetry_persistence::TelemetryPersistencePolicy;
 
 use conversion::*;
 pub use dispatch::{RecoveryDeploymentSupport, RecoverySupportDisposition};
@@ -288,6 +290,10 @@ pub struct IntegrationRuntimeBridge<E: Clone> {
     state: InMemorySharedNodeState,
     /// Source-aware State records kept separate from typed authority projections.
     state_records: StateRecordProjection,
+    /// Startup policy for explicitly named periodic telemetry schemas.
+    telemetry_persistence: std::sync::Arc<TelemetryPersistencePolicy>,
+    /// Most recent durable records for keys whose live projection advanced without an event.
+    deferred_state: BTreeMap<domain::StateRecordKey, StateRecord>,
     /// Independently attributed Task satisfaction evidence projected by the State plane.
     task_satisfaction: InMemoryTaskSatisfactionState,
     /// Existing domain event sink used by Runtime/Control.

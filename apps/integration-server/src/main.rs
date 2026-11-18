@@ -1486,6 +1486,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     application::federation::validate_restored(&controller)?;
     application::federation::validate_startup_policy(&controller)?;
     controller.bridge.set_diagnostics(diagnostic_handle.clone());
+    if let Some(path) = std::env::var_os("ROBOGUIDE_TELEMETRY_PERSISTENCE_POLICY") {
+        controller.bridge.set_telemetry_persistence(
+            orchestration::TelemetryPersistencePolicy::from_json(&std::fs::read(path)?)?,
+        );
+    }
     let installed_identity_registry = match (
         bootstrap_identity_registry,
         controller.bridge.control().node_identity_registry(),

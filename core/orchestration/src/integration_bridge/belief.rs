@@ -13,8 +13,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             return Ok(());
         };
         let raw = self
-            .state_records
-            .records()
+            .decision_evidence_records()
             .into_iter()
             .filter(|record| self.control.belief_source_is_current(record, now))
             .collect::<Vec<_>>();

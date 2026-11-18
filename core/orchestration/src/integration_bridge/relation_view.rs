@@ -224,7 +224,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .filter(|task| task.continuity().context_id() == context_id)
             .map(|task| task.task_id())
             .collect::<BTreeSet<_>>();
-        let state_records = self.state_records.records();
+        let state_records = self.decision_evidence_records();
         let mut entries = Vec::new();
         for execution in group
             .task_executions()

@@ -230,7 +230,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         for record in &records {
             candidate.record_state(record.clone())?;
         }
-        self.state_records = candidate;
+        let previous = std::mem::replace(&mut self.state_records, candidate);
         for record in records {
             if record.payload_schema() == runtime::EXECUTION_PROGRESS_SCHEMA
                 && self
@@ -276,12 +276,14 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
                     }
                 }
             }
-            self.events.append(
-                received_at,
-                correlation_id,
-                None,
-                EventPayload::StateRecordObserved { record },
-            );
+            if self.retain_state_observation(&previous, &record) {
+                self.events.append(
+                    received_at,
+                    correlation_id,
+                    None,
+                    EventPayload::StateRecordObserved { record },
+                );
+            }
         }
         Ok(())
     }
