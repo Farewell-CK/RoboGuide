@@ -170,6 +170,9 @@ Reported Mapping response freshness never proves original localization quality o
 ADR-0232 adds cancel-only task settlement in application/safety_stop/settlement and the existing
 Robonix facade. Explicit no-effects State v0.4 and execution-safety v0.2 never grant physical stop,
 resume or handoff authority. Administrator reconciliation retains original history and clocks.
+Manual reconciliation accepts the cancelling Mission's current Cancelled or Failed attempt;
+retain the original Failed status through settlement and cold restore. Automatic no-effects
+settlement still requires Cancelled; a terminal failure alone never releases a safety hold.
 New nested closed settlement fields fence prior writers; historical wrapper downgrades refuse.
 Run task-settlement/Node/Domain tests, workspace Clippy and the real-process gate with a frozen
 prior Controller. The gate owns only isolated loopback software processes and private test SQL.

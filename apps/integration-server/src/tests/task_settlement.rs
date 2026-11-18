@@ -100,6 +100,51 @@ fn original_no_effects_settles_cancellation_without_physical_confirmation() {
     assert!(safety_stop::validate_restored(&fixture.controller).is_ok());
 }
 
+/// No-effects evidence cannot automatically settle Failed or restore it as a Cancelled-only proof.
+#[test]
+fn automatic_no_effects_settlement_still_requires_cancelled_attempt() {
+    let mut original = fixture_with_schema(domain::TASK_EFFECT_OBSERVATION_SCHEMA, "no-effects");
+    admit(&mut original);
+    receipt(&mut original);
+    request_cancel(&mut original);
+    original.fact(2, ExecutionPhase::Cancelled, 9);
+    let payload = observation(&original);
+    observe(
+        &mut original,
+        "s1",
+        10,
+        serde_json::json!({"observations":[payload]}),
+        None,
+    );
+    safety_stop::tick(&mut original.controller, domain::TimestampMs::new(11)).unwrap();
+    let mut failed = fixture_with_schema(domain::TASK_EFFECT_OBSERVATION_SCHEMA, "no-effects");
+    admit(&mut failed);
+    receipt(&mut failed);
+    request_cancel(&mut failed);
+    failed.fact(2, ExecutionPhase::Failed, 9);
+    let payload = observation(&failed);
+    observe(
+        &mut failed,
+        "s1",
+        10,
+        serde_json::json!({"observations":[payload]}),
+        None,
+    );
+    safety_stop::tick(&mut failed.controller, domain::TimestampMs::new(11)).unwrap();
+    let mission = failed.attempt.command().mission_id();
+    assert!(safety_stop::blocks_cancellation_release(
+        &failed.controller,
+        mission
+    ));
+    assert!(!failed.allocations().allocations().is_empty());
+    assert!(!safety_stop::blocks_cancellation_release(
+        &original.controller,
+        mission
+    ));
+    failed.controller.safety_stops = original.controller.safety_stops;
+    assert!(safety_stop::validate_restored(&failed.controller).is_err());
+}
+
 /// Incomplete, unrelated, late or device-labelled observations retain the original resource hold.
 #[test]
 fn no_effects_requires_complete_timely_original_evidence() {
@@ -255,11 +300,77 @@ fn no_effects_late_terminal_keeps_controller_writes_available() {
 /// An authenticated manual decision preserves expired physical history and is exact-command idempotent.
 #[test]
 fn manual_settlement_preserves_original_record_and_refuses_conflicts() {
+    check_manual_settlement(ExecutionPhase::Cancelled);
+}
+
+/// A failed current attempt can close cancellation without rewriting its original terminal outcome.
+#[test]
+fn manual_settlement_of_failed_attempt_releases_cancellation_and_survives_restore() {
+    check_manual_settlement(ExecutionPhase::Failed);
+}
+
+/// Reopens the real Runtime and Mission checkpoints without refreshing any stop evidence.
+fn restore_settlement_fixture(fixture: &mut stop_recovery::Fixture, restored_at: u64) {
+    let mut saved: ServerCheckpoint =
+        serde_json::from_str(&server_checkpoint_json(&fixture.controller).unwrap()).unwrap();
+    let original_schema = saved.schema.clone();
+    saved.schema = PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA.into();
+    assert!(application::validate_isolation_checkpoint_schema(&saved).is_err());
+    saved.schema = original_schema;
+    fixture.controller.bridge = IntegrationRuntimeBridge::restore_from_checkpoint(
+        &saved.integration_json,
+        fixture.events.clone(),
+        integration::GrpcNodeRouter::default(),
+        domain::TimestampMs::new(restored_at),
+    )
+    .unwrap();
+    fixture.controller.orchestrator =
+        MissionOrchestrator::restore_json(&saved.orchestration_json).unwrap();
+    fixture.controller.safety_stops = std::mem::take(&mut saved.safety_stops);
+    assert!(safety_stop::validate_restored(&fixture.controller).is_ok());
+}
+
+/// Exercises retained ownership, exact administrator settlement and cold recovery for each terminal.
+fn check_manual_settlement(phase: ExecutionPhase) {
     let mut fixture = stop_recovery::Fixture::new();
     admit(&mut fixture);
     request_cancel(&mut fixture);
-    fixture.fact(2, ExecutionPhase::Cancelled, 9);
+    fixture.fact(2, phase, 9);
     let id = fixture.attempt.execution_id().to_owned();
+    let mission = fixture.attempt.command().mission_id().clone();
+    let expected_status = if phase == ExecutionPhase::Failed {
+        orchestration::RemoteExecutionStatus::Failed
+    } else {
+        orchestration::RemoteExecutionStatus::Cancelled
+    };
+    application::apply_runtime_outcomes(
+        &mut fixture.controller,
+        domain::TimestampMs::new(10),
+        &fixture.correlation,
+        &mut fixture.events.clone(),
+    )
+    .unwrap();
+    application::apply_pending_cancellations(
+        &mut fixture.controller,
+        domain::TimestampMs::new(10),
+        &fixture.correlation,
+        &mut fixture.events.clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        fixture
+            .controller
+            .orchestrator
+            .execution(&mission)
+            .unwrap()
+            .lifecycle(),
+        orchestration::MissionExecutionLifecycle::Cancelling
+    );
+    assert!(!fixture.allocations().allocations().is_empty());
+    let purpose = serde_json::to_value(&fixture.controller.safety_stops).unwrap()[&id].clone();
+    assert_eq!(purpose["record"]["phase"], "manual_escalation");
+    assert!(purpose["support"].is_null());
+    assert!(purpose["policy"].is_null());
     let original =
         serde_json::to_value(&fixture.controller.safety_stops).unwrap()[&id]["record"].clone();
     let command = reconciliation(&fixture);
@@ -299,6 +410,13 @@ fn manual_settlement_preserves_original_record_and_refuses_conflicts() {
         original
     );
     assert!(!safety_stop::attempt_confirmed(&fixture.controller, &id));
+    restore_settlement_fixture(&mut fixture, 1000);
+    assert!(!fixture.allocations().allocations().is_empty());
+    assert!(safety_stop::blocks_release(&fixture.controller, &mission));
+    assert!(!safety_stop::blocks_cancellation_release(
+        &fixture.controller,
+        &mission
+    ));
     application::apply_pending_cancellations(
         &mut fixture.controller,
         domain::TimestampMs::new(1001),
@@ -307,25 +425,25 @@ fn manual_settlement_preserves_original_record_and_refuses_conflicts() {
     )
     .unwrap();
     assert!(fixture.allocations().allocations().is_empty());
-    assert!(safety_stop::validate_restored(&fixture.controller).is_ok());
-    let mut saved: ServerCheckpoint =
-        serde_json::from_str(&server_checkpoint_json(&fixture.controller).unwrap()).unwrap();
-    let original_schema = saved.schema.clone();
-    saved.schema = PRE_FEDERATION_EXECUTION_SERVER_CHECKPOINT_SCHEMA.into();
-    assert!(application::validate_isolation_checkpoint_schema(&saved).is_err());
-    saved.schema = original_schema;
-    fixture.controller.bridge = IntegrationRuntimeBridge::restore_from_checkpoint(
-        &saved.integration_json,
-        fixture.events.clone(),
-        integration::GrpcNodeRouter::default(),
-        domain::TimestampMs::new(3000),
-    )
-    .unwrap();
-    fixture.controller.orchestrator =
-        MissionOrchestrator::restore_json(&saved.orchestration_json).unwrap();
-    fixture.controller.safety_stops = std::mem::take(&mut saved.safety_stops);
-    assert!(safety_stop::validate_restored(&fixture.controller).is_ok());
+    restore_settlement_fixture(&mut fixture, 3000);
     assert!(fixture.allocations().allocations().is_empty());
+    assert_eq!(
+        fixture
+            .controller
+            .orchestrator
+            .execution(&mission)
+            .unwrap()
+            .lifecycle(),
+        orchestration::MissionExecutionLifecycle::Cancelled
+    );
+    assert_eq!(
+        fixture.controller.bridge.execution_status(&id),
+        Some(expected_status)
+    );
+    assert_eq!(
+        serde_json::to_value(&fixture.controller.safety_stops).unwrap()[&id]["record"],
+        original
+    );
     let mut corrupt = serde_json::to_value(&fixture.controller.safety_stops).unwrap();
     corrupt[&id].as_object_mut().unwrap().remove("settlement");
     fixture.controller.safety_stops = serde_json::from_value(corrupt).unwrap();
@@ -335,11 +453,22 @@ fn manual_settlement_preserves_original_record_and_refuses_conflicts() {
 /// Existing viewer/operator roles cannot gain reconciliation authority from a request header.
 #[tokio::test]
 async fn manual_settlement_public_route_is_authenticated_and_durable() {
+    check_manual_settlement_public_route(ExecutionPhase::Cancelled).await;
+}
+
+/// Failed terminals retain the public route's administrator, tenant and durable rollback fences.
+#[tokio::test]
+async fn failed_manual_settlement_public_route_is_authenticated_and_durable() {
+    check_manual_settlement_public_route(ExecutionPhase::Failed).await;
+}
+
+/// Drives the production HTTP handler and actual SQLite commits for the original terminal outcome.
+async fn check_manual_settlement_public_route(phase: ExecutionPhase) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut fixture = stop_recovery::Fixture::new();
     admit(&mut fixture);
     request_cancel(&mut fixture);
-    fixture.fact(2, ExecutionPhase::Cancelled, 9);
+    fixture.fact(2, phase, 9);
     let id = fixture.attempt.execution_id().to_owned();
     let body = reconciliation(&fixture).to_string();
     let controller = Arc::new(Mutex::new(fixture.controller.clone()));
@@ -482,6 +611,12 @@ fn no_effects_never_authorizes_running_mission_continuation() {
 /// Wrong scope, missing operator confirmation or forged identity fields cannot create a settlement.
 #[test]
 fn manual_settlement_refuses_incomplete_or_conflicting_original_evidence() {
+    check_manual_settlement_refusals(ExecutionPhase::Cancelled);
+    check_manual_settlement_refusals(ExecutionPhase::Failed);
+}
+
+/// Checks the same original-scope and Mission fences for each manually settleable terminal.
+fn check_manual_settlement_refusals(phase: ExecutionPhase) {
     for case in [
         "generation",
         "record",
@@ -489,12 +624,24 @@ fn manual_settlement_refuses_incomplete_or_conflicting_original_evidence() {
         "evidence",
         "forged-principal",
         "active",
+        "completed",
+        "running-mission",
     ] {
         let mut fixture = stop_recovery::Fixture::new();
         admit(&mut fixture);
-        request_cancel(&mut fixture);
+        if case != "running-mission" {
+            request_cancel(&mut fixture);
+        }
         if case != "active" {
-            fixture.fact(2, ExecutionPhase::Cancelled, 9);
+            fixture.fact(
+                2,
+                if case == "completed" {
+                    ExecutionPhase::Completed
+                } else {
+                    phase
+                },
+                9,
+            );
         }
         let before = server_checkpoint_json(&fixture.controller).unwrap();
         let mut command = reconciliation(&fixture);

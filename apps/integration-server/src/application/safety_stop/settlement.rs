@@ -244,7 +244,16 @@ pub(super) fn validate_restored_settlement(
 ) -> Result<(), String> {
     if let Some(value) = &purpose.settlement {
         validate_settlement(purpose, value)?;
-        if attempt.status() != runtime::ExecutionStatus::Cancelled
+        let terminal_matches_basis = match &value.basis {
+            SettlementBasis::Manual { .. } => matches!(
+                attempt.status(),
+                runtime::ExecutionStatus::Cancelled | runtime::ExecutionStatus::Failed
+            ),
+            SettlementBasis::AutomaticNoEffects { .. } => {
+                attempt.status() == runtime::ExecutionStatus::Cancelled
+            }
+        };
+        if !terminal_matches_basis
             || attempt.command().execution_generation()
                 != Some(purpose.record.identity.execution_generation)
             || !controller
@@ -258,7 +267,7 @@ pub(super) fn validate_restored_settlement(
                     )
                 })
         {
-            return Err("settled attempt is not the original cancelled generation".into());
+            return Err("settled attempt terminal or original generation is inconsistent".into());
         }
         if let SettlementBasis::AutomaticNoEffects { terminal_at, .. } = &value.basis
             && controller
@@ -303,13 +312,17 @@ pub(crate) fn reconcile_manual(
         return Err("reconciliation command identity already used".into());
     }
     let identity = &purpose.record.identity;
-    if controller.bridge.execution_status(execution_id)
-        != Some(orchestration::RemoteExecutionStatus::Cancelled)
-        || controller.bridge.current_task_attempt_id(
-            &identity.group_id,
-            &identity.task_ref,
-            &identity.role_id,
-        ) != Some(execution_id)
+    if !matches!(
+        controller.bridge.execution_status(execution_id),
+        Some(
+            orchestration::RemoteExecutionStatus::Cancelled
+                | orchestration::RemoteExecutionStatus::Failed
+        )
+    ) || controller.bridge.current_task_attempt_id(
+        &identity.group_id,
+        &identity.task_ref,
+        &identity.role_id,
+    ) != Some(execution_id)
         || controller.bridge.current_attempt_generation(
             &identity.group_id,
             &identity.task_ref,
@@ -323,7 +336,8 @@ pub(crate) fn reconcile_manual(
             })
     {
         return Err(
-            "reconciliation requires the current cancelled attempt of a cancelling Mission".into(),
+            "reconciliation requires the current cancelled or failed attempt of a cancelling Mission"
+                .into(),
         );
     }
     let value = StopSettlement {
