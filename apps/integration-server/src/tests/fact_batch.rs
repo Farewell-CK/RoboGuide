@@ -704,6 +704,92 @@ async fn idle_heartbeats_advance_live_time_without_writing_sql() {
     assert_eq!(node.reported_status_received_at().as_millis(), 7);
 }
 
+/// Duplicate configured telemetry updates the live source time without a SQLite write.
+#[tokio::test]
+async fn unchanged_telemetry_advances_live_projection_without_writing_sql() {
+    /// Adds a diagnostic channel to each original test peer.
+    fn with_diagnostics(index: usize) -> wire::NodeRegistration {
+        let mut node = registration(index);
+        node.state_exports.push(wire::StateExportDescriptor {
+            export_id: "diagnostic".into(),
+            local_system_id: "worker-runtime".into(),
+            object_class: wire::StateObjectClass::Node as i32,
+            object_type: "diagnostic".into(),
+            object_id: node.node_id.clone(),
+            semantic: wire::StateSemantic::Reported as i32,
+            payload_schema: "example.diagnostic/v1".into(),
+            valid_for_ms: 1000,
+        });
+        node
+    }
+    let mut fixture = Fixture::with_registration(with_diagnostics).await;
+    fixture
+        .controller
+        .lock()
+        .unwrap()
+        .bridge
+        .set_telemetry_persistence(
+            orchestration::TelemetryPersistencePolicy::from_json(
+                br#"{"schemas":{"example.diagnostic/v1":["observed_at_ns"]}}"#,
+            )
+            .unwrap(),
+        );
+    let sql = rusqlite::Connection::open(fixture.directory.path().join("events.sqlite3")).unwrap();
+    let version = || {
+        sql.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))
+            .unwrap()
+    };
+    let mut prior = None;
+    for (sequence, value) in [(1_u64, 0), (2, 0), (3, 1)] {
+        let at = 2 + sequence;
+        fixture.clock.0.store(at, Ordering::Relaxed);
+        let peer = &fixture.peers[0];
+        peer.sender
+            .send(wire::NodeMessage {
+                message: Some(NodePayload::StateObservationBatch(
+                    wire::StateObservationBatch {
+                        session_id: peer.session.clone(),
+                        sequence,
+                        observations: vec![wire::StateObservation {
+                            export_id: "diagnostic".into(),
+                            json_value: serde_json::to_vec(&serde_json::json!({
+                                "reading":value, "observed_at_ns":at
+                            }))
+                            .unwrap(),
+                            has_source_observed_at: true,
+                            source_observed_at_ms: at,
+                            ..Default::default()
+                        }],
+                    },
+                )),
+            })
+            .unwrap();
+        let delivery = fixture.next().await;
+        fixture.run(vec![delivery]).unwrap();
+        fixture.ack(0, sequence).await;
+        let current = (version(), fixture.events.latest_sequence().unwrap());
+        if let Some(previous) = prior {
+            if sequence == 2 {
+                assert_eq!(current, previous);
+            } else {
+                assert!(current.0 > previous.0 && current.1 > previous.1);
+            }
+        }
+        prior = Some(current);
+        assert_eq!(
+            fixture
+                .controller
+                .lock()
+                .unwrap()
+                .bridge
+                .state_records()
+                .records()[0]
+                .source_observed_at(),
+            Some(domain::TimestampMs::new(at))
+        );
+    }
+}
+
 /// Failed checkpoint writes leave both original input completions unavailable and live state unchanged.
 #[tokio::test]
 async fn checkpoint_failure_rolls_back_all_inputs_without_ack() {
