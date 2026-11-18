@@ -409,6 +409,7 @@ def run(
             def current(previous_pid: int | None = None) -> tuple[int, dict[str, Any]]:
                 """Poll actual status/health without restarting a failed supervisor."""
                 deadline = time.monotonic() + 60
+                samples: dict[int, dict[str, Any]] = {}
                 while time.monotonic() < deadline:
                     for process, record in owned:
                         if record.get("planned_shutdown"):
@@ -422,21 +423,43 @@ def run(
                                 f"actual supervisor exited: {record['member']}:{process.poll()}"
                             )
                         member = int(record["member"])
+                        sample: dict[str, Any] = {"supervisor_pid": process.pid}
+                        samples[member] = sample
                         try:
                             status = json.loads(
                                 (
                                     Path(configs[member]["storage_directory"]) / "status.json"
                                 ).read_bytes()
                             )
+                            sample["status"] = status
                             if status["epoch"] is not None and status["child_pid"] is not None:
                                 if status["child_pid"] == previous_pid:
                                     continue
-                                code, _ = request_http(configs[member]["http_address"], "/healthz")
+                                remaining = deadline - time.monotonic()
+                                if remaining <= 0:
+                                    break
+                                code, _ = request_http(
+                                    configs[member]["http_address"],
+                                    "/healthz",
+                                    timeout_seconds=remaining,
+                                )
+                                sample["health_http_status"] = code
                                 if code == 200:
                                     return member, status
-                        except (OSError, ValueError, http_client.HTTPException):
-                            pass
+                        except (OSError, ValueError, http_client.HTTPException) as error:
+                            sample["observation_error"] = f"{type(error).__name__}: {error}"[:512]
                     time.sleep(0.05)
+                for member, sample in samples.items():
+                    directory = Path(configs[member]["storage_directory"])
+                    path = directory / "content-initialization.json"
+                    try:
+                        sample["initialization"] = json.loads(path.read_bytes())
+                    except FileNotFoundError:
+                        sample["initialization"] = None
+                    except (OSError, ValueError) as error:
+                        reason = f"{type(error).__name__}: {error}"
+                        sample["initialization_read_error"] = reason[:512]
+                result["controller_health_timeout"] = {"budget_seconds": 60, "members": samples}
                 raise ValueError(
                     "actual runnable Controller did not become healthy within its bound"
                 )

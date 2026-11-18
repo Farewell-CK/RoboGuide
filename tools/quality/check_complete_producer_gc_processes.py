@@ -146,22 +146,72 @@ def retire(config: dict[str, Any], cli: Processes, phase: str) -> None:
             )
 
 
-def leader(actors: dict[int, Actor], expected: int | None = None) -> int:
+def leader(
+    actors: dict[int, Actor], expected: int | None = None, *, deadline: float | None = None
+) -> int:
     """Wait only for an actual current metadata quorum; labels alone grant no readiness."""
-    deadline = time.monotonic() + 45
+    if deadline is None:
+        deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         for member, actor in actors.items():
             if expected is not None and member != expected:
                 continue
-            status = actor.ask({"action": "status"})
+            status = actor.ask({"action": "status"}, deadline=deadline)
             if (
                 status["epoch"] is not None
                 and status["quorum"]
                 and status["readiness"]["content_ready"]
+                and time.monotonic() < deadline
             ):
                 return member
-        time.sleep(0.1)
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(0.1, remaining))
     raise ValueError("actual original infrastructure quorum unavailable within observation bound")
+
+
+def transfer_source(actors: dict[int, Actor], target: int, deadline: float) -> int:
+    """Observe the selected voter's actual acknowledged tail before any handoff effect."""
+    source = leader(actors, deadline=deadline)
+    progress = None
+    while time.monotonic() < deadline:
+        if source == target:
+            return source
+        progress = actors[source].ask(
+            {"action": "transfer-log-progress", "member": target}, deadline=deadline
+        )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        if progress["caught_up"]:
+            return source
+        time.sleep(min(0.1, remaining))
+        if progress["progress"] is None:
+            source = leader(actors, deadline=deadline)
+    raise ValueError(f"actual transfer target {target} did not match source {source}: {progress}")
+
+
+def transfer_leader(actors: dict[int, Actor], target: int, deadline: float) -> int:
+    """Use one observation deadline around at most one original handoff and verify its leader."""
+    source = transfer_source(actors, target, deadline)
+    if time.monotonic() >= deadline:
+        raise ValueError(
+            f"actual original transfer {source}->{target} observation deadline expired"
+        )
+    if source == target:
+        return source
+    actors[source].ask(
+        {
+            "action": "transfer-to",
+            "member": target,
+            "transfer_id": f"original-producer-gc-{source}-{target}",
+        },
+        send_before=deadline,
+    )
+    current = leader(actors, target, deadline=deadline)
+    for member in (target, source):
+        assert actors[member].ask({"action": "reconcile-transfer"})["original_transfer_reconciled"]
+    return current
 
 
 def cluster(
@@ -214,25 +264,14 @@ def cluster(
             if compact:
                 while remaining:
                     target = min(remaining)
-                    source_member = current
-                    if target != current:
-                        actors[current].ask(
-                            {
-                                "action": "transfer-to",
-                                "member": target,
-                                "transfer_id": f"original-producer-gc-{current}-{target}",
-                            }
-                        )
-                        current = leader(actors, target)
-                        assert actors[target].ask({"action": "reconcile-transfer"})[
-                            "original_transfer_reconciled"
-                        ]
-                        assert actors[source_member].ask({"action": "reconcile-transfer"})[
-                            "original_transfer_reconciled"
-                        ]
+                    transfer_deadline = time.monotonic() + 45
+                    current = transfer_leader(actors, target, transfer_deadline)
                     record_compaction(current)
                     remaining.remove(current)
             result["passed"] = True
+        except Exception as error:
+            result["failure"] = str(error)
+            raise
         finally:
             cleanup_errors = []
             for actor in reversed(owned):
@@ -252,7 +291,7 @@ def cluster(
                 result["passed"] = False
                 result["cleanup_errors"] = cleanup_errors
             save(output / f"{phase}.json", result)
-            if cleanup_errors:
+            if cleanup_errors and "failure" not in result:
                 raise ValueError(
                     "actual infrastructure cleanup failed: " + "; ".join(cleanup_errors)
                 )

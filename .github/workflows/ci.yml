@@ -598,6 +598,7 @@ jobs:
             ${{ runner.temp }}/roboguide-cargo-test.log
             /tmp/rg-ci-*/**/*.log
             /tmp/rg-ci-*/**/result.json
+            /tmp/rg-ci-*/**/actual-parent-retirement.json
             /tmp/rg-ci-*/*.sqlite3
             /tmp/rg-ci-*/*.sqlite3-wal
             /tmp/rg-ci-*/*.sqlite3-shm
@@ -605,6 +606,7 @@ jobs:
             /tmp/rg-ci-*/**/source-identity.json
             ${{ runner.temp }}/roboguide-*/**/result.json
             ${{ runner.temp }}/roboguide-*/**/*.log
+            ${{ runner.temp }}/roboguide-*/**/actual-parent-retirement.json
             ${{ runner.temp }}/roboguide-*/**/request-*.json
             ${{ runner.temp }}/roboguide-*/**/source-identity.json
             ${{ runner.temp }}/roboguide-federation-ha/**/*.json

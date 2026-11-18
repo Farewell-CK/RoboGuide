@@ -144,6 +144,28 @@ impl ReplicaNode {
             .validate_content_membership(membership.membership())
     }
 
+    /// Waits before admission for the original leader's applied membership, using its first clock.
+    async fn wait_for_initialization_membership(
+        &self,
+        epoch: ControllerEpoch,
+        clock: &ContentBudget,
+    ) -> Result<StoredMembership<u64, ReplicaMember>, String> {
+        loop {
+            clock.check()?;
+            if self.current_epoch() != Some(epoch) {
+                return Err(
+                    "original source initialization epoch changed before membership".into(),
+                );
+            }
+            let (_, membership) = self.store.observe_network_authority()?;
+            if let Some(membership) = membership {
+                self.initialization_authority(epoch, &membership)?;
+                return Ok(membership);
+            }
+            tokio::time::sleep(Duration::from_millis(clock.remaining_ms()?.min(25))).await;
+        }
+    }
+
     /// Requires actual parent9/exact policy on every requested current or proposed voter before effects.
     pub(crate) async fn require_initialization_members(
         &self,
@@ -151,6 +173,7 @@ impl ReplicaNode {
         epoch: ControllerEpoch,
         clock: &ContentBudget,
         permission: StreamPermission,
+        wait_for_bootstrap: bool,
     ) -> Result<(), String> {
         let Some(policy) = self.store.content_initialization_policy().cloned() else {
             return Ok(());
@@ -171,24 +194,34 @@ impl ReplicaNode {
             let clock = clock.clone();
             let caller = permission.clone();
             replies.spawn(async move {
-                clock.check()?;
-                caller()?;
-                let actual = transport::initialization_contract(
-                    &node,
-                    member,
-                    epoch,
-                    membership,
-                    clock.remaining_ms()?,
-                )
-                .await?;
-                clock.check()?;
-                caller()?;
-                if actual.as_ref() != Some(&expected) {
-                    return Err(format!(
-                        "actual member {member} lacks the exact original parent9 policy"
-                    ));
+                loop {
+                    clock.check()?;
+                    caller()?;
+                    let actual = transport::initialization_contract(
+                        &node,
+                        member,
+                        epoch,
+                        membership.clone(),
+                        clock.remaining_ms()?,
+                    )
+                    .await?;
+                    clock.check()?;
+                    caller()?;
+                    match actual {
+                        Some(actual) if actual == expected => return Ok::<(), String>(()),
+                        None if wait_for_bootstrap => {
+                            tokio::time::sleep(Duration::from_millis(
+                                clock.remaining_ms()?.min(25),
+                            ))
+                            .await;
+                        }
+                        _ => {
+                            return Err(format!(
+                                "actual member {member} lacks the exact original parent9 policy"
+                            ));
+                        }
+                    }
                 }
-                Ok::<(), String>(())
             });
         }
         while let Some(reply) = replies.join_next().await {
@@ -242,7 +275,9 @@ impl ReplicaNode {
             .current_epoch()
             .ok_or("original source member is not the actual current leader")?;
         self.check_epoch(epoch).await?;
-        let (_, membership) = self.store.try_network_authority()?;
+        let membership = self
+            .wait_for_initialization_membership(epoch, &clock)
+            .await?;
         let held = self.clone();
         let expected = membership.clone();
         let first_clock = clock.clone();
@@ -255,6 +290,7 @@ impl ReplicaNode {
             epoch,
             &clock,
             permission.clone(),
+            true,
         )
         .await?;
         let store = self.store.clone();

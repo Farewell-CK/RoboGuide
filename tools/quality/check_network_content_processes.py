@@ -17,7 +17,7 @@ import tempfile
 import time
 from contextlib import ExitStack, closing
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, NoReturn
 
 from check_replica_certificate_processes import create_ca, issue
 from check_replica_content_processes import Processes, digest, save
@@ -53,19 +53,26 @@ class Actor:
         assert ready["ready"] is True
         self.record["startup"] = ready
 
-    def receive(self) -> dict[str, Any]:
+    def _expire_response(self) -> NoReturn:
+        """Fence the uncorrelated control pipe after a response misses its deadline."""
+        self.record["response_deadline_expired"] = True
+        raise ValueError("actual network process response deadline expired")
+
+    def receive(self, *, deadline: float | None = None) -> dict[str, Any]:
         """Read a bounded actual response; EOF and timeout never imply success."""
         if self.process.stdout is None:
             raise ValueError("actual process output is unavailable")
         # Long retained histories may spend more than one election interval in local replay;
         # keep the startup wait bounded without mistaking a slow process for readiness.
-        deadline = time.monotonic() + 120
+        response_limit = time.monotonic() + 120
+        if deadline is not None:
+            response_limit = min(response_limit, deadline)
         with selectors.DefaultSelector() as selector:
             selector.register(self.process.stdout, selectors.EVENT_READ)
             while b"\n" not in self.buffer:
-                remaining = deadline - time.monotonic()
+                remaining = response_limit - time.monotonic()
                 if remaining <= 0 or not selector.select(remaining):
-                    raise ValueError("actual network process response deadline expired")
+                    self._expire_response()
                 chunk = os.read(
                     self.process.stdout.fileno(),
                     min(65536, 16 * 1024 * 1024 + 1 - len(self.buffer)),
@@ -80,15 +87,36 @@ class Actor:
         value: dict[str, Any] = json.loads(raw)
         if value.get("pid") != self.process.pid:
             raise ValueError("response does not belong to the original actual process")
+        if time.monotonic() >= response_limit:
+            self._expire_response()
         return value
 
-    def ask(self, request: dict[str, Any], *, required: bool = True) -> dict[str, Any]:
-        """Send one exact local command once; errors never automatically re-execute it."""
+    def ask(
+        self,
+        request: dict[str, Any],
+        *,
+        required: bool = True,
+        deadline: float | None = None,
+        send_before: float | None = None,
+    ) -> dict[str, Any]:
+        """Send once; a send-only cutoff does not change the command's response wait."""
+        if self.record.get("response_deadline_expired"):
+            raise ValueError("actual original control pipe has an expired response")
         if self.process.stdin is None or self.process.poll() is not None:
             raise ValueError("actual original control pipe is no longer live")
-        self.process.stdin.write(json.dumps(request).encode() + b"\n")
+        message = json.dumps(request).encode() + b"\n"
+        if deadline is not None and (send_before is None or deadline < send_before):
+            send_before = deadline
+        if send_before is not None and time.monotonic() >= send_before:
+            raise ValueError("actual network command deadline expired before sending")
+        self.process.stdin.write(message)
         self.process.stdin.flush()
-        response = self.receive()
+        try:
+            response = self.receive(deadline=deadline)
+        except ValueError:
+            if self.record.get("response_deadline_expired"):
+                self.record["request_without_timely_response"] = request
+            raise
         self.record["exchanges"].append({"request": request, "response": response})
         if required and "result" not in response:
             raise ValueError(f"actual original network command refused: {response}")
@@ -103,7 +131,9 @@ class Actor:
             return
         self.record["expected_native_kill"] = kill
         if self.process.poll() is None:
-            if kill:
+            if kill or self.record.get("response_deadline_expired"):
+                if not kill:
+                    self.record["forced_cleanup"] = True
                 self.process.kill()
             else:
                 self.ask({"action": "shutdown"})
