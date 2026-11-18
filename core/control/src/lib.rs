@@ -1697,6 +1697,18 @@ impl ControlPlane {
         Ok(())
     }
 
+    /// Replaces binding semantics while a validated plan revision creates its successor Group.
+    ///
+    /// The revision path checks completed-task continuity and stale Actor cleanup before calling
+    /// this method. Ordinary Group creation must continue to use the immutable registration above.
+    pub(crate) fn replace_mission_binding_semantics_for_revision(
+        &mut self,
+        mission_id: domain::MissionId,
+        semantics: domain::MissionBindingSemantics,
+    ) {
+        self.mission_binding_semantics.insert(mission_id, semantics);
+    }
+
     /// Returns the registry node a not-yet-bound actor is grounded to.
     ///
     /// Grounding is the strongest pre-binding authority after an existing
