@@ -18,11 +18,12 @@ use integration::grpc::v0_4::{
     StateExportDescriptor, StateObjectClass, StateObservation, StateObservationBatch,
     StateSemantic,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use std::time::Duration;
+use tokio::sync::{Notify, broadcast, mpsc};
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
 
 mod protocol_projection;
@@ -33,6 +34,62 @@ use protocol_projection::*;
 const MAX_STATE_BATCH_RECORDS: usize = 64;
 /// Maximum aggregate State JSON bytes carried by one management message.
 const MAX_STATE_BATCH_BYTES: usize = 512 * 1024;
+/// Connect timeout for establishing a Node Protocol transport channel.
+const NODE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Handshake timeout for opening the Node session and receiving Welcome/Registered.
+const NODE_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// HTTP/2 keepalive PING interval for detecting half-open sockets after Wi-Fi roaming.
+const NODE_HTTP2_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
+/// HTTP/2 keepalive PONG timeout, aligned with the 15s Node lease budget to survive single DHCP roams.
+const NODE_HTTP2_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
+/// OS TCP keepalive idle probe interval.
+const NODE_TCP_KEEPALIVE: Duration = Duration::from_secs(10);
+/// Bounded wire channel capacity feeding the gRPC outbound stream so backpressure coalesces stale state.
+const OUTBOUND_WIRE_CAPACITY: usize = 16;
+
+/// Coalesces periodic State snapshots by export_id so roam congestion never queues stale telemetry.
+#[derive(Default)]
+struct CoalescedStateOutbox {
+    /// Most recent queued fact for each configured export.
+    pending: std::sync::Mutex<BTreeMap<String, crate::StateExportFact>>,
+    /// Wakes the wire pump when new State facts arrive.
+    notify: Notify,
+}
+
+impl CoalescedStateOutbox {
+    /// Replace queued facts for the same export and wake the wire pump.
+    fn publish(&self, facts: Vec<crate::StateExportFact>) {
+        if facts.is_empty() {
+            return;
+        }
+        let mut pending = self.pending.lock().expect("state outbox lock");
+        for fact in facts {
+            pending.insert(fact.export_id.clone(), fact);
+        }
+        drop(pending);
+        self.notify.notify_one();
+    }
+
+    /// Drain one snapshot of queued State facts for batching by the wire pump.
+    fn take_all(&self) -> Vec<crate::StateExportFact> {
+        let mut pending = self.pending.lock().expect("state outbox lock");
+        std::mem::take(&mut *pending).into_values().collect()
+    }
+
+    /// Report whether at least one State export has a queued fact.
+    fn has_pending(&self) -> bool {
+        !self.pending.lock().expect("state outbox lock").is_empty()
+    }
+}
+
+/// Computes the application-level inbound stall timeout from the negotiated Welcome lease.
+fn inbound_liveness_timeout(welcome: &integration::grpc::v0_4::Welcome) -> Option<Duration> {
+    if welcome.lease_duration_ms == 0 {
+        return None;
+    }
+    let floor = welcome.heartbeat_interval_ms.saturating_mul(3);
+    Some(Duration::from_millis(welcome.lease_duration_ms.max(floor)))
+}
 
 /// Long-running, vendor-neutral node-side RoboGuide service.
 pub struct NodeService {
@@ -140,7 +197,18 @@ impl NodeService {
     async fn run_session_on(&self, endpoint: &str) -> Result<(), NodeServiceError> {
         let catalog = self.engine.catalog();
         let mut client = connect_node_client(endpoint).await?;
-        let (outbound, receiver) = mpsc::unbounded_channel();
+        let (outbound, priority_rx) = mpsc::unbounded_channel();
+        let (wire_tx, wire_rx) = mpsc::channel(OUTBOUND_WIRE_CAPACITY);
+        let management_sequence = Arc::new(tokio::sync::Mutex::new(0_u64));
+        let state_outbox = Arc::new(CoalescedStateOutbox::default());
+        let pump_session_id = Arc::new(std::sync::Mutex::new(None::<String>));
+        let pump_task = spawn_outbound_pump(
+            priority_rx,
+            wire_tx,
+            Arc::clone(&state_outbox),
+            Arc::clone(&management_sequence),
+            Arc::clone(&pump_session_id),
+        );
         outbound
             .send(NodeMessage {
                 message: Some(NodePayload::Hello(Hello {
@@ -150,25 +218,55 @@ impl NodeService {
                 })),
             })
             .map_err(|_| NodeServiceError::Closed)?;
-        let mut inbound = client
-            .node_session(UnboundedReceiverStream::new(receiver))
-            .await
-            .map_err(NodeServiceError::Status)?
-            .into_inner();
-        let welcome = next_server_payload(&mut inbound).await?;
-        let ServerPayload::Welcome(welcome) = welcome else {
-            return Err(NodeServiceError::Protocol("expected Welcome".to_string()));
+        let inbound_open = tokio::time::timeout(
+            NODE_HANDSHAKE_TIMEOUT,
+            client.node_session(ReceiverStream::new(wire_rx)),
+        )
+        .await;
+        let mut inbound = match inbound_open {
+            Ok(Ok(response)) => response.into_inner(),
+            Ok(Err(status)) => {
+                pump_task.abort();
+                return Err(NodeServiceError::Status(status));
+            }
+            Err(_) => {
+                pump_task.abort();
+                return Err(NodeServiceError::Protocol(
+                    "timed out opening Node session".to_string(),
+                ));
+            }
         };
+        let welcome =
+            match tokio::time::timeout(NODE_HANDSHAKE_TIMEOUT, next_server_payload(&mut inbound))
+                .await
+            {
+                Ok(Ok(ServerPayload::Welcome(welcome))) => welcome,
+                Ok(Ok(_)) => {
+                    pump_task.abort();
+                    return Err(NodeServiceError::Protocol("expected Welcome".to_string()));
+                }
+                Ok(Err(err)) => {
+                    pump_task.abort();
+                    return Err(err);
+                }
+                Err(_) => {
+                    pump_task.abort();
+                    return Err(NodeServiceError::Protocol(
+                        "timed out waiting for Welcome".to_string(),
+                    ));
+                }
+            };
         if welcome.selected_protocol_version != PROTOCOL_VERSION
             || welcome.selected_node_contract_version != catalog.node_contract_version()
         {
+            pump_task.abort();
             return Err(NodeServiceError::Protocol(
                 "server selected an unsupported protocol or contract".to_string(),
             ));
         }
         let initial_observation = self.engine.observe().await;
         let initial_readiness = readiness_snapshot(&initial_observation);
-        outbound
+        if outbound
             .send(NodeMessage {
                 message: Some(NodePayload::Register(Register {
                     registration: Some(registration_from_observation(
@@ -177,18 +275,47 @@ impl NodeService {
                     )),
                 })),
             })
-            .map_err(|_| NodeServiceError::Closed)?;
-        let registered = next_server_payload(&mut inbound).await?;
-        let ServerPayload::Registered(registered) = registered else {
-            return Err(NodeServiceError::Protocol(
-                "expected Registered".to_string(),
-            ));
+            .is_err()
+        {
+            pump_task.abort();
+            return Err(NodeServiceError::Closed);
+        }
+        let registered =
+            match tokio::time::timeout(NODE_HANDSHAKE_TIMEOUT, next_server_payload(&mut inbound))
+                .await
+            {
+                Ok(Ok(ServerPayload::Registered(registered))) => registered,
+                Ok(Ok(_)) => {
+                    pump_task.abort();
+                    return Err(NodeServiceError::Protocol(
+                        "expected Registered".to_string(),
+                    ));
+                }
+                Ok(Err(err)) => {
+                    pump_task.abort();
+                    return Err(err);
+                }
+                Err(_) => {
+                    pump_task.abort();
+                    return Err(NodeServiceError::Protocol(
+                        "timed out waiting for Registered".to_string(),
+                    ));
+                }
+            };
+        *pump_session_id.lock().expect("session id lock") = Some(registered.session_id.clone());
+        let _publication_session = match self.engine.publication_session(&registered.session_id) {
+            Ok(guard) => guard,
+            Err(err) => {
+                pump_task.abort();
+                return Err(err.into());
+            }
         };
-        let _publication_session = self.engine.publication_session(&registered.session_id)?;
         let mut local_events = self.engine.subscribe();
         let mut peer_readiness_events = self.engine.subscribe_peer_channel_readiness();
-        self.replay_snapshots(&registered.session_id, &outbound)?;
-        let management_sequence = Arc::new(tokio::sync::Mutex::new(0_u64));
+        if let Err(err) = self.replay_snapshots(&registered.session_id, &outbound) {
+            pump_task.abort();
+            return Err(err);
+        }
         let heartbeat_task = self.spawn_heartbeat(
             registered.session_id.clone(),
             registered.lease_id.clone(),
@@ -197,11 +324,7 @@ impl NodeService {
             initial_readiness,
             Arc::clone(&management_sequence),
         );
-        let state_task = self.spawn_state_observations(
-            registered.session_id.clone(),
-            outbound.clone(),
-            Arc::clone(&management_sequence),
-        );
+        let state_task = self.spawn_state_observations(Arc::clone(&state_outbox));
         let peer_observation_task = self.spawn_peer_channel_observations(
             registered.session_id.clone(),
             outbound.clone(),
@@ -212,6 +335,10 @@ impl NodeService {
         let mut use_pending =
             std::collections::BTreeMap::<(u8, String), domain::MemoryUseControl>::new();
         let mut query_pending = std::collections::BTreeMap::<String, domain::MemoryUseQuery>::new();
+        let inbound_timeout = inbound_liveness_timeout(&welcome);
+        let inbound_sleep =
+            tokio::time::sleep(inbound_timeout.unwrap_or(Duration::from_secs(3600)));
+        tokio::pin!(inbound_sleep);
         let session_result: Result<(), NodeServiceError> = async {
             loop {
                 while imports.len()<4 && let Some((_,command))=use_pending.pop_first() {
@@ -224,10 +351,21 @@ impl NodeService {
                     imports.spawn(async move {service.handle_memory_use_query(query,&session,&sender,&sequence).await});
                 }
                 tokio::select! {
+                    () = &mut inbound_sleep, if inbound_timeout.is_some() => {
+                        return Err(NodeServiceError::Protocol(
+                            "Controller session stalled without inbound acknowledgement within lease window"
+                                .to_string(),
+                        ));
+                    }
                     message = inbound.message() => {
                         let Some(message) = message.map_err(NodeServiceError::Status)? else {
                             return Ok(());
                         };
+                        if let Some(timeout) = inbound_timeout {
+                            inbound_sleep
+                                .as_mut()
+                                .reset(tokio::time::Instant::now() + timeout);
+                        }
                         if let Some(ServerPayload::MemoryUseQuery(frame))=&message.message {
                             if frame.session_id!=registered.session_id || frame.query_json.len()>16*1024 || !integration::grpc::v0_4::supports_memory_use_query(self.engine.catalog().node_contract_version()) {return Err(NodeServiceError::Protocol("readonly use query lacks current negotiated session/bounds".into()));}
                             let query:domain::MemoryUseQuery=serde_json::from_str(&frame.query_json).map_err(|e|NodeServiceError::Protocol(e.to_string()))?;
@@ -352,6 +490,7 @@ impl NodeService {
         state_task.abort();
         peer_observation_task.abort();
         memory_task.abort();
+        pump_task.abort();
         session_result
     }
 
@@ -392,9 +531,7 @@ impl NodeService {
     /// Periodically samples configured State channels without coupling failure to heartbeat health.
     fn spawn_state_observations(
         &self,
-        session_id: String,
-        outbound: mpsc::UnboundedSender<NodeMessage>,
-        sequence: Arc<tokio::sync::Mutex<u64>>,
+        state_outbox: Arc<CoalescedStateOutbox>,
     ) -> tokio::task::JoinHandle<()> {
         let engine = self.engine.clone();
         tokio::spawn(async move {
@@ -430,30 +567,8 @@ impl NodeService {
                     })
                     .collect::<BTreeSet<_>>();
                 let facts = engine.observe_state_exports(&due).await;
-                if facts.is_empty() {
-                    continue;
-                }
-                let batches = state_observation_batches(facts);
-                if batches.is_empty() {
-                    continue;
-                }
-                let mut sequence = sequence.lock().await;
-                for observations in batches {
-                    *sequence = sequence.saturating_add(1);
-                    if outbound
-                        .send(NodeMessage {
-                            message: Some(NodePayload::StateObservationBatch(
-                                StateObservationBatch {
-                                    session_id: session_id.clone(),
-                                    sequence: *sequence,
-                                    observations,
-                                },
-                            )),
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
+                if !facts.is_empty() {
+                    state_outbox.publish(facts);
                 }
             }
         })
@@ -1176,6 +1291,85 @@ impl NodeService {
     }
 }
 
+/// Applies client-side transport keepalive and connect timeouts so roaming half-open sockets recover.
+fn configure_node_endpoint(endpoint: Endpoint) -> Endpoint {
+    endpoint
+        .connect_timeout(NODE_CONNECT_TIMEOUT)
+        .tcp_keepalive(Some(NODE_TCP_KEEPALIVE))
+        .http2_keep_alive_interval(NODE_HTTP2_KEEPALIVE_INTERVAL)
+        .keep_alive_timeout(NODE_HTTP2_KEEPALIVE_TIMEOUT)
+        .keep_alive_while_idle(true)
+}
+
+/// Drains priority control/heartbeat frames ahead of coalesced latest-only State snapshots.
+fn spawn_outbound_pump(
+    mut priority_rx: mpsc::UnboundedReceiver<NodeMessage>,
+    wire_tx: mpsc::Sender<NodeMessage>,
+    state_outbox: Arc<CoalescedStateOutbox>,
+    management_sequence: Arc<tokio::sync::Mutex<u64>>,
+    session_id: Arc<std::sync::Mutex<Option<String>>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut pending_state_batches: VecDeque<Vec<StateObservation>> = VecDeque::new();
+        loop {
+            let Ok(permit) = wire_tx.reserve().await else {
+                return;
+            };
+            if let Ok(message) = priority_rx.try_recv() {
+                permit.send(message);
+                continue;
+            }
+            if !pending_state_batches.is_empty() || state_outbox.has_pending() {
+                let mut seq = management_sequence.lock().await;
+                if let Ok(message) = priority_rx.try_recv() {
+                    drop(seq);
+                    permit.send(message);
+                    continue;
+                }
+                if pending_state_batches.is_empty() {
+                    let facts = state_outbox.take_all();
+                    pending_state_batches.extend(state_observation_batches(facts));
+                }
+                if let Some(observations) = pending_state_batches.pop_front()
+                    && let Some(sid) = session_id.lock().expect("session id lock").clone()
+                {
+                    *seq = seq.saturating_add(1);
+                    let batch_seq = *seq;
+                    drop(seq);
+                    permit.send(NodeMessage {
+                        message: Some(NodePayload::StateObservationBatch(StateObservationBatch {
+                            session_id: sid,
+                            sequence: batch_seq,
+                            observations,
+                        })),
+                    });
+                    continue;
+                }
+                drop(seq);
+            }
+            let notified = state_outbox.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if !pending_state_batches.is_empty() || state_outbox.has_pending() {
+                drop(permit);
+                continue;
+            }
+            tokio::select! {
+                biased;
+                maybe = priority_rx.recv() => {
+                    let Some(message) = maybe else {
+                        return;
+                    };
+                    permit.send(message);
+                }
+                () = &mut notified => {
+                    drop(permit);
+                }
+            }
+        }
+    })
+}
+
 /// Connects a Node session with the optional certificate-bound mTLS profile.
 async fn connect_node_client(
     endpoint: &str,
@@ -1196,8 +1390,10 @@ async fn connect_node_client(
             "Node mTLS requires client cert, client key, server CA and domain".into(),
         ));
     }
-    let mut builder = Endpoint::from_shared(endpoint.to_string())
-        .map_err(|error| NodeServiceError::Protocol(error.to_string()))?;
+    let mut builder = configure_node_endpoint(
+        Endpoint::from_shared(endpoint.to_string())
+            .map_err(|error| NodeServiceError::Protocol(error.to_string()))?,
+    );
     if any {
         if !endpoint.starts_with("https://") {
             return Err(NodeServiceError::Protocol(
