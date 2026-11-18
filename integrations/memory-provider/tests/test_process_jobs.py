@@ -6,7 +6,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
-import select
+import selectors
 import signal
 import sqlite3
 import subprocess
@@ -51,6 +51,39 @@ def observations(jobs: ProcessFileJobs) -> list[dict[str, Any]]:
     assert isinstance(rows, list)
     assert all(isinstance(row, dict) for row in rows)
     return [dict(row) for row in rows]
+
+
+def worker_reply(descriptor: int, pending: bytearray) -> dict[str, Any]:
+    """Read one bounded reply without polling for bytes already received."""
+    deadline = time.monotonic() + 3
+    max_frame_bytes = 16384
+    with selectors.DefaultSelector() as selector:
+        selector.register(descriptor, selectors.EVENT_READ)
+        while (newline := pending.find(b"\n")) < 0:
+            assert len(pending) < max_frame_bytes, "worker reply exceeded its byte bound"
+            remaining = deadline - time.monotonic()
+            assert remaining > 0 and selector.select(remaining), "worker reply timed out"
+            chunk = os.read(descriptor, min(4096, max_frame_bytes - len(pending)))
+            assert chunk, "worker closed stdout before a complete reply"
+            pending.extend(chunk)
+    message = json.loads(pending[:newline])
+    del pending[: newline + 1]
+    assert isinstance(message, dict)
+    return message
+
+
+def test_worker_reply_retains_coalesced_frames() -> None:
+    """Both replies remain readable even when a single pipe read receives them."""
+    reader, writer = os.pipe()
+    try:
+        frames = b'{"kind":"os-quota"}\n{"kind":"permit"}\n'
+        assert os.write(writer, frames) == len(frames)
+        pending = bytearray()
+        assert worker_reply(reader, pending) == {"kind": "os-quota"}
+        assert worker_reply(reader, pending) == {"kind": "permit"}
+    finally:
+        os.close(writer)
+        os.close(reader)
 
 
 def test_actual_file_child_exit_and_independent_hash_survive_restart(tmp_path: Path) -> None:
@@ -367,14 +400,8 @@ def test_suspended_child_cannot_read_with_a_queued_expired_permit(tmp_path: Path
         },
     )
     assert process.stdin is not None and process.stdout is not None
-    reader = process.stdout
-
-    def reply() -> dict[str, Any]:
-        """Bound every read of the actual child control channel independently."""
-        assert select.select([reader], [], [], 3)[0]
-        message = json.loads(reader.readline(16385))
-        assert isinstance(message, dict)
-        return message
+    control_fd = process.stdout.fileno()
+    pending = bytearray()
 
     def fresh_permit() -> bytes:
         """Freeze an actual same-kernel read interval without changing the worker's clock."""
@@ -405,17 +432,17 @@ def test_suspended_child_cannot_read_with_a_queued_expired_permit(tmp_path: Path
         }
         process.stdin.write(canonical(start) + b"\n")
         process.stdin.flush()
-        assert reply() == {
+        assert worker_reply(control_fd, pending) == {
             "kind": "os-quota",
             "schema": "roboguide.file-worker-os-quota/v0.1",
             "pid": process.pid,
             "cpu_seconds": [30, 30],
             "address_space_bytes": [256 * 1024 * 1024, 256 * 1024 * 1024],
         }
-        assert reply() == {"kind": "permit"}
+        assert worker_reply(control_fd, pending) == {"kind": "permit"}
         process.stdin.write(fresh_permit())
         process.stdin.flush()
-        assert reply() == {"kind": "permit"}
+        assert worker_reply(control_fd, pending) == {"kind": "permit"}
         os.kill(process.pid, signal.SIGSTOP)
         until(
             lambda: (
@@ -430,7 +457,7 @@ def test_suspended_child_cannot_read_with_a_queued_expired_permit(tmp_path: Path
         process.stdin.flush()
         time.sleep(0.15)
         os.kill(process.pid, signal.SIGCONT)
-        assert reply() == {"kind": "permit"}
+        assert worker_reply(control_fd, pending) == {"kind": "permit"}
         assert os.lseek(descriptor, 0, os.SEEK_CUR) == 0
         process.stdin.close()
         process.wait(timeout=3)
@@ -466,9 +493,7 @@ def test_actual_worker_without_original_os_quota_fails_before_read_permit(
     )
     assert process.stdin is not None and process.stdout is not None
     try:
-        assert select.select([process.stdout], [], [], 3)[0]
-        message = json.loads(process.stdout.readline(16385))
-        assert message == {
+        assert worker_reply(process.stdout.fileno(), bytearray()) == {
             "kind": "error",
             "reason": "original file worker OS quota declaration is unavailable",
         }
