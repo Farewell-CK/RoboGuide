@@ -35,8 +35,10 @@ whole-transport watchdog closes only I/O; committed jobs retain their original j
 budgets and outcomes. Original worker permits remain held until handlers actually finish. The
 Robonix facade supports only literal loopback. Local `/v1/transport` observes only that process.
 
-Node's actual TCP wrapper also enforces a finite 15-second read-idle deadline after initial traffic,
-including authenticated TLS peers that never provide HTTP/2 setup. Real HTTP/2 keepalive and Node
-traffic may keep a transport alive; neither supplies a Node heartbeat, health or Control lease.
+Node initial traffic and Node and Artifact TLS handshakes have a 25-second deadline. The Node TCP
+wrapper enforces a 45-second read-idle deadline after initial traffic, including authenticated TLS
+peers that never provide HTTP/2 setup. The Controller waits up to 30 seconds for each HTTP/2
+keepalive response on the Node listener. Node health and the Control lease still depend on the
+Node Protocol heartbeat.
 Mission's default total transport limit is 35 seconds; local adapters use 30 seconds. Explicit
 positive limits up to 900 seconds remain deployment inputs, independent of model/job budgets.

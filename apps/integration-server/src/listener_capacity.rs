@@ -15,9 +15,9 @@ use tokio_stream::Stream;
 use tonic::transport::server::{Connected, TcpConnectInfo};
 
 /// Original initial-traffic and TLS handshake bound; it grants no application permission.
-pub(crate) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(25);
 /// Transport inactivity after first traffic; it never renews the independent Node lease.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(15);
+const IDLE_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Independent listener namespaces keep metrics bounded without peer or Node labels.
 #[derive(Clone, Copy)]
