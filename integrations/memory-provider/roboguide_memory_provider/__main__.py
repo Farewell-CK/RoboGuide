@@ -131,6 +131,10 @@ def handler_type(
                     )
                 elif leases is not None and self.path == "/v1/memory-use/query":
                     self._respond(200, leases.query(self._body()))
+                elif leases is not None and self.path == "/v1/memory-use/current":
+                    if not isinstance(self.server, UnixServer):
+                        raise ValueError("current Memory use requires the private Unix transport")
+                    self._respond(200, leases.observe_current(self._body()))
                 elif reclamation is not None and self.path == "/v1/content/reclamation":
                     if not isinstance(self.server, UnixServer):
                         raise ValueError(

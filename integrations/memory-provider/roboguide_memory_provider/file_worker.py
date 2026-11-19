@@ -1,4 +1,4 @@
-"""Hash only inherited readonly inputs, taking one parent permit before each bounded read."""
+"""Hash or privately copy inherited inputs under one parent permit per bounded chunk."""
 
 from __future__ import annotations
 
@@ -13,6 +13,10 @@ import sys
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
+
+PRIVATE_COPY_SCHEMA = "roboguide.file-private-copy-start/v0.1"
+PRIVATE_COPY_CHUNK_BYTES = 1024 * 1024
+MAX_PRIVATE_COPY_BYTES = 1024**3
 
 
 def emit(document: dict[str, Any]) -> None:
@@ -87,14 +91,113 @@ def permit() -> None:
             return
 
 
+def write_all(descriptor: int, chunk: bytes) -> None:
+    """Write one permitted chunk completely without accepting a silent short write."""
+    offset = 0
+    while offset < len(chunk):
+        written = os.write(descriptor, chunk[offset:])
+        if written <= 0:
+            raise OSError("private destination write made no progress")
+        offset += written
+
+
+def run_private_copy(command: dict[str, Any], quota: dict[str, object]) -> None:
+    """Copy one exact authorized input into a parent-owned private temporary descriptor."""
+    if set(command) != {"schema", "source", "destination_fd", "max_bytes"}:
+        raise ValueError("private copy start command is not closed")
+    source = command["source"]
+    destination = command["destination_fd"]
+    max_bytes = command["max_bytes"]
+    if (
+        not isinstance(source, dict)
+        or set(source) != {"fd", "digest", "size"}
+        or type(source["fd"]) is not int
+        or type(source["size"]) is not int
+        or type(destination) is not int
+        or type(max_bytes) is not int
+        or not 1 <= max_bytes <= MAX_PRIVATE_COPY_BYTES
+        or not 0 < source["size"] <= max_bytes
+        or not isinstance(source["digest"], str)
+        or re.fullmatch(r"sha256:[a-f0-9]{64}", source["digest"]) is None
+    ):
+        raise ValueError("private copy bounds or source evidence are invalid")
+    source_fd = source["fd"]
+    if source_fd <= 2 or destination <= 2 or source_fd == destination:
+        raise ValueError("private copy descriptors are invalid")
+
+    source_metadata = os.fstat(source_fd)
+    destination_metadata = os.fstat(destination)
+    source_flags = fcntl.fcntl(source_fd, fcntl.F_GETFL)
+    destination_flags = fcntl.fcntl(destination, fcntl.F_GETFL)
+    if (
+        not stat.S_ISREG(source_metadata.st_mode)
+        or source_metadata.st_size != source["size"]
+        or source_flags & os.O_ACCMODE != os.O_RDONLY
+    ):
+        raise ValueError("private copy source is not an exact readonly regular input")
+    if (
+        not stat.S_ISREG(destination_metadata.st_mode)
+        or destination_metadata.st_nlink != 0
+        or destination_metadata.st_size != 0
+        or destination_flags & os.O_ACCMODE not in (os.O_WRONLY, os.O_RDWR)
+        or destination_flags & os.O_APPEND
+        or os.lseek(destination, 0, os.SEEK_CUR) != 0
+        or (source_metadata.st_dev, source_metadata.st_ino)
+        == (destination_metadata.st_dev, destination_metadata.st_ino)
+    ):
+        raise ValueError("private copy destination is not an empty unlinked temporary output")
+    os.lseek(source_fd, 0, os.SEEK_SET)
+
+    emit(quota)
+    emit(
+        {
+            "kind": "ready",
+            "schema": PRIVATE_COPY_SCHEMA,
+            "digest": source["digest"],
+            "size": source["size"],
+        }
+    )
+    hashed = hashlib.sha256()
+    copied = 0
+    while copied < source["size"]:
+        permit()
+        chunk = os.read(
+            source_fd,
+            min(PRIVATE_COPY_CHUNK_BYTES, source["size"] - copied),
+        )
+        if not chunk:
+            raise ValueError("private copy source ended before its authorized size")
+        if copied + len(chunk) > max_bytes:
+            raise ValueError("private copy output exceeded its declared maximum")
+        write_all(destination, chunk)
+        hashed.update(chunk)
+        copied += len(chunk)
+    final_source = os.fstat(source_fd)
+    final_destination = os.fstat(destination)
+    digest = "sha256:" + hashed.hexdigest()
+    if (
+        final_source.st_size != source["size"]
+        or copied != source["size"]
+        or final_destination.st_size != copied
+        or digest != source["digest"]
+    ):
+        raise ValueError("private copy bytes differ from their authorized identity")
+    emit({"kind": "result", "digest": digest, "size": copied})
+
+
 def run() -> None:
-    """Perform real CPU hashing after the parent has durably recorded the original PID."""
+    """Run admitted hashing or private copy after the parent durably records its PID."""
     quota = apply_os_limits()
     raw = sys.stdin.buffer.readline(16385)
     if len(raw) > 16384 or not raw.endswith(b"\n"):
         raise ValueError("file worker requires a bounded original start command")
     command = json.loads(raw)
-    if not isinstance(command, dict) or set(command) != {"schema", "rounds", "inputs"}:
+    if not isinstance(command, dict):
+        raise ValueError("file worker start command is not closed")
+    if command.get("schema") == PRIVATE_COPY_SCHEMA:
+        run_private_copy(command, quota)
+        return
+    if set(command) != {"schema", "rounds", "inputs"}:
         raise ValueError("file worker start command is not closed")
     if (
         command["schema"] != "roboguide.file-process-start/v0.1"
