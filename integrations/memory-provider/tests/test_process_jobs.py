@@ -89,6 +89,8 @@ def test_worker_reply_retains_coalesced_frames() -> None:
     finally:
         os.close(writer)
         os.close(reader)
+
+
 def fresh_worker_permit() -> bytes:
     """Freeze one same-kernel read interval for an actual direct worker test."""
     boot, namespace, lower, _ = kernel_clock()

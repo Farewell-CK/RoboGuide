@@ -538,6 +538,7 @@ def compute(
         )
 
         def register_pair(first: int, second: int) -> dict[str, Any] | None:
+            """Measure one pair under the selected registration policy."""
             candidate = estimate(first, second)
             if candidate is None:
                 return None
@@ -560,6 +561,7 @@ def compute(
     else:
 
         def register_pair(first: int, second: int) -> dict[str, Any] | None:
+            """Measure one pair under the selected registration policy."""
             return register(np, points[first], points[second], job.policy)
 
     transforms, measurements = poses(np, points, job.policy, register_pair)

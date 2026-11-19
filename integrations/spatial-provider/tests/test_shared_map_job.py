@@ -103,13 +103,14 @@ def source(role: str, frame: str) -> SharedMapSource:
     )
 
 
-@pytest.fixture(autouse=True)  # type: ignore[untyped-decorator]
+@pytest.fixture(autouse=True)
 def windows_storage_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """Exercise the seam on Windows while production keeps the original no-follow storage."""
     if hasattr(os, "O_NOFOLLOW"):
         return
 
     def immutable(path: Path, content: bytes) -> None:
+        """Write exact test bytes once while refusing conflicting identities."""
         if path.is_symlink():
             raise ValueError("test source must not be a symlink")
         try:
@@ -124,6 +125,7 @@ def windows_storage_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
             os.fsync(stream.fileno())
 
     def read_source(root: Path, relative: str, maximum: int) -> bytes:
+        """Read bounded regular test bytes without following symlinks."""
         path = root / relative
         if path.is_symlink() or not path.is_file():
             raise ValueError("test source is not a regular file")
@@ -245,6 +247,7 @@ def test_stage_run_replay_and_export_preserve_unknown(tmp_path: Path) -> None:
     }
 
     def run(request: dict[str, Any], source_root: Path, store: Path) -> dict[str, Any]:
+        """Record the exact staged inputs and return the retained test bundle."""
         calls.append(source_root)
         assert [item["source_id"] for item in request["inputs"]] == ["n", "m"]
         assert (source_root / "n.occupancy.json").read_bytes() == assembly.n.normalized.content
@@ -253,6 +256,7 @@ def test_stage_run_replay_and_export_preserve_unknown(tmp_path: Path) -> None:
         return result
 
     def observe(path: Path) -> dict[str, Any]:
+        """Return the retained result for the original test job."""
         assert path == directory
         return result
 

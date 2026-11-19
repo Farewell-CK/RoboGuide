@@ -30,7 +30,7 @@ def feature_registration(
     # Resolve the native extension used by the Python package.
     native_path = Path(cv._native.__file__).resolve()
     if not any(
-        distribution.locate_file(path).resolve() == native_path
+        Path(str(distribution.locate_file(path))).resolve() == native_path
         for path in distribution.files or ()
         if path.parts[0] == "cv2" and path.suffix in {".so", ".pyd"}
     ):
@@ -55,6 +55,7 @@ def feature_registration(
     matcher = cv.BFMatcher(cv.NORM_HAMMING)
 
     def distinct_matches(source: Any, target: Any) -> dict[int, int]:
+        """Select descriptor matches with a distinct nearest neighbour."""
         return {
             pair[0].queryIdx: pair[0].trainIdx
             for pair in matcher.knnMatch(source, target, k=2)
@@ -62,6 +63,7 @@ def feature_registration(
         }
 
     def estimate(first: int, second: int) -> Any | None:
+        """Estimate a metric rigid transform from mutual feature matches."""
         source_points, source_descriptors = features[first]
         target_points, target_descriptors = features[second]
         if source_descriptors is None or target_descriptors is None:

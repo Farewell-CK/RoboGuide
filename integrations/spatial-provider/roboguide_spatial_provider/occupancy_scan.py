@@ -584,9 +584,11 @@ def project_finite_planar_scan(
     interpolated_rays = 0
 
     def valid_range(value: float) -> bool:
+        """Check the original finite scan range bounds."""
         return policy.min_range_m <= value < policy.max_range_m
 
     def add_free_ray(angle_rad: float, endpoint_range_m: float) -> None:
+        """Trace bounded free coverage up to the configured endpoint margin."""
         free_end_m = endpoint_range_m - policy.free_range_margin_m
         if free_end_m <= start_range_m:
             return

@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-import jsonschema
+import jsonschema  # type: ignore[import-untyped]
 import pytest
 from roboguide_spatial_provider.__main__ import run
 from roboguide_spatial_provider.contracts import canonical, digest
