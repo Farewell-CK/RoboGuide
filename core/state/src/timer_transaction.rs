@@ -1,4 +1,4 @@
-//! Conservative rollback of an actually unchanged original internal timer transaction.
+//! Conservative rollback of an actually unchanged original internal transaction.
 
 use super::*;
 
@@ -38,19 +38,19 @@ impl SqliteEventLog {
     /// Rolls back only an untouched real batch with the exact original committed checkpoint.
     /// Callers retain the original application writer; external commands must keep their journals.
     /// False leaves the original transaction open for normal checkpoint/command/Commit handling.
-    pub fn rollback_unchanged_timer_batch(
+    pub fn rollback_unchanged_internal_batch(
         &self,
         schema: &str,
         checkpoint_json: &str,
     ) -> Result<bool, SqliteEventLogError> {
         self.require_writes_enabled()?;
         self.observe_write_result(
-            self.rollback_unchanged_timer_batch_inner(schema, checkpoint_json),
+            self.rollback_unchanged_internal_batch_inner(schema, checkpoint_json),
         )
     }
 
     /// Checks actual SQL changes, events, pending writes and original raw checkpoint before rollback.
-    fn rollback_unchanged_timer_batch_inner(
+    fn rollback_unchanged_internal_batch_inner(
         &self,
         schema: &str,
         checkpoint_json: &str,
@@ -61,7 +61,7 @@ impl SqliteEventLog {
             .map_err(|_| SqliteEventLogError::LockPoisoned)?;
         let start = batch.ok_or_else(|| {
             SqliteEventLogError::Codec(
-                "unchanged timer check requires an open original batch".into(),
+                "unchanged internal check requires an open original batch".into(),
             )
         })?;
         let mut changes = self
@@ -116,7 +116,7 @@ impl SqliteEventLog {
         let actual = checkpoint_store::read(&connection)?;
         if actual.as_ref().map(|stored| &stored.snapshot) != Some(&previous.snapshot) {
             return Err(SqliteEventLogError::Codec(
-                "unchanged timer actual checkpoint differs from original committed cache".into(),
+                "unchanged internal actual checkpoint differs from original committed cache".into(),
             ));
         }
         authority_journal::validate(&connection, Some(&previous.snapshot))?;

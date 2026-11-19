@@ -154,7 +154,7 @@ fn drive_application_timer_synchronous(
             checkpoint.len() as u64,
             None,
         );
-        if !event_log.rollback_unchanged_timer_batch(SERVER_CHECKPOINT_SCHEMA, &checkpoint)? {
+        if !event_log.rollback_unchanged_internal_batch(SERVER_CHECKPOINT_SCHEMA, &checkpoint)? {
             let save = StageObservation::start(
                 &diagnostics,
                 DiagnosticKind::Timer,

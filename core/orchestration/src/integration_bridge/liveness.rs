@@ -16,7 +16,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .map_err(IntegrationRuntimeError::Protocol)?;
         for evidence in evidence {
             self.control.accept_session_liveness(
-                &self.state,
+                &mut self.state,
                 &evidence,
                 now,
                 correlation_id,
@@ -45,7 +45,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             .map_err(IntegrationRuntimeError::Protocol)?;
         for evidence in evidence {
             self.control.accept_session_liveness(
-                &self.state,
+                &mut self.state,
                 &evidence,
                 decision_at,
                 correlation_id,

@@ -257,6 +257,18 @@ impl Fixture {
         sequence: u64,
         now: u64,
     ) -> integration::GrpcNodeEventDelivery {
+        self.heartbeat_with_health(index, sequence, now, "online")
+            .await
+    }
+
+    /// Sends an explicit health transition through the real transport for mixed-batch tests.
+    async fn heartbeat_with_health(
+        &mut self,
+        index: usize,
+        sequence: u64,
+        now: u64,
+        health: &str,
+    ) -> integration::GrpcNodeEventDelivery {
         self.clock.0.store(now, Ordering::Relaxed);
         let peer = &self.peers[index];
         peer.sender
@@ -266,7 +278,7 @@ impl Fixture {
                     lease_id: peer.lease.clone(),
                     sequence,
                     status: Some(wire::NodeStatus {
-                        health: "online".into(),
+                        health: health.into(),
                         detail: String::new(),
                     }),
                 })),
@@ -646,6 +658,52 @@ async fn single_and_multi_fact_batches_have_equivalent_durable_traces() {
     assert_eq!(trace(&one), trace(&many));
 }
 
+/// Idle heartbeats advance live clocks without writing events, checkpoints or Node fact receipts.
+#[tokio::test]
+async fn idle_heartbeats_advance_live_time_without_writing_sql() {
+    let mut fixture = Fixture::new().await;
+    let before_transition = fixture.events.latest_sequence().unwrap();
+    let first = fixture.heartbeat(0, 1, 3).await;
+    fixture.run(vec![first]).unwrap();
+    fixture.ack(0, 1).await;
+    let before = fixture.events.load_checkpoint().unwrap().unwrap();
+    assert!(
+        before.event_sequence > before_transition,
+        "Offline to Online is durable"
+    );
+    let sql = rusqlite::Connection::open(fixture.directory.path().join("events.sqlite3")).unwrap();
+    let version = || {
+        sql.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))
+            .unwrap()
+    };
+    let before_version = version();
+    for sequence in 2..=5 {
+        let next = fixture.heartbeat(0, sequence, 2 + sequence).await;
+        fixture.run(vec![next]).unwrap();
+        fixture.ack(0, sequence).await;
+    }
+    assert_eq!(
+        fixture.events.latest_sequence().unwrap(),
+        before.event_sequence
+    );
+    assert_eq!(fixture.events.load_checkpoint().unwrap().unwrap(), before);
+    assert_eq!(
+        version(),
+        before_version,
+        "unchanged heartbeat transactions perform no SQL writes"
+    );
+    let live = fixture.controller.lock().unwrap();
+    let node = live
+        .bridge
+        .state()
+        .nodes()
+        .into_iter()
+        .find(|node| node.reported_status().health() == domain::NodeHealth::Online)
+        .unwrap();
+    assert_eq!(node.liveness().observed_at().as_millis(), 7);
+    assert_eq!(node.reported_status_received_at().as_millis(), 7);
+}
+
 /// Failed checkpoint writes leave both original input completions unavailable and live state unchanged.
 #[tokio::test]
 async fn checkpoint_failure_rolls_back_all_inputs_without_ack() {
@@ -698,7 +756,7 @@ async fn rejected_owner_fact_does_not_discard_another_sessions_accepted_fact() {
             5,
         )
         .await;
-    let second = fixture.heartbeat(0, 2, 5).await;
+    let second = fixture.heartbeat_with_health(0, 2, 5, "degraded").await;
     let before = fixture.events.latest_sequence().unwrap();
     fixture.run(vec![first, second]).unwrap();
     fixture.ack(0, 2).await;

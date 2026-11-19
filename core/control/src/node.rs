@@ -211,7 +211,7 @@ impl ControlPlane {
     }
 
     /// Accepts a heartbeat, refreshes its health snapshot, and renews its lease.
-    pub fn accept_heartbeat<S: SharedNodeStateWriter, E: EventSink>(
+    pub fn accept_heartbeat<S: SharedNodeStateReader + SharedNodeStateWriter, E: EventSink>(
         &mut self,
         state: &mut S,
         heartbeat: NodeHeartbeat,
@@ -240,6 +240,10 @@ impl ControlPlane {
                     },
                     other => ControlError::InvalidLease(other.to_string()),
                 })?;
+        let transition = state.node(heartbeat.node_id()).is_some_and(|node| {
+            node.reported_status().health() != heartbeat.status().health()
+                || node.liveness().liveness() != NodeLiveness::Reachable
+        });
         state
             .record_node_health(NodeHealthObservation::new(
                 heartbeat.node_id().clone(),
@@ -248,15 +252,17 @@ impl ControlPlane {
             ))
             .map_err(ControlError::SharedState)?;
         *lease = renewed_lease;
-        events.append(
-            received_at,
-            correlation_id,
-            None,
-            EventPayload::NodeHeartbeatAccepted {
-                node_id: heartbeat.node_id().clone(),
-                lease_id: heartbeat.lease_id().clone(),
-            },
-        );
+        if transition {
+            events.append(
+                received_at,
+                correlation_id,
+                None,
+                EventPayload::NodeHeartbeatAccepted {
+                    node_id: heartbeat.node_id().clone(),
+                    lease_id: heartbeat.lease_id().clone(),
+                },
+            );
+        }
         Ok(())
     }
 

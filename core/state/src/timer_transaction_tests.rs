@@ -22,7 +22,7 @@ fn actual_durable_audit_does_not_force_an_unchanged_authority_commit() {
         .unwrap();
         log.begin_batch().unwrap();
         assert!(
-            log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+            log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
                 .unwrap()
         );
     }
@@ -61,7 +61,7 @@ fn audit_cannot_conceal_same_connection_schema_changes() {
     .unwrap();
     log.begin_batch().unwrap();
     assert!(
-        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        !log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     log.rollback_batch().unwrap();
@@ -86,7 +86,7 @@ fn audit_trigger_extra_authority_write_invalidates_unchanged_witness() {
     .unwrap();
     log.begin_batch().unwrap();
     assert!(
-        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        !log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     log.rollback_batch().unwrap();
@@ -119,7 +119,7 @@ fn audit_does_not_hide_prior_unaccounted_or_external_changes() {
     .unwrap();
     log.begin_batch().unwrap();
     assert!(
-        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        !log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     save(&log, "record-original-change", raw);
@@ -140,7 +140,7 @@ fn audit_does_not_hide_prior_unaccounted_or_external_changes() {
     .unwrap();
     log.begin_batch().unwrap();
     assert!(
-        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        !log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     log.rollback_batch().unwrap();
@@ -194,7 +194,7 @@ fn actual_unchanged_timer_never_replicates_or_erases_explicit_zero_event_command
     let raw = r#"{"value":1.00,"permission":"unchanged"}"#;
     log.begin_batch().unwrap();
     assert!(
-        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        !log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     save(&log, "first", raw);
@@ -202,7 +202,7 @@ fn actual_unchanged_timer_never_replicates_or_erases_explicit_zero_event_command
     for _ in 0..8 {
         log.begin_batch().unwrap();
         assert!(
-            log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+            log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
                 .unwrap()
         );
         assert_eq!(log.control_command_journal().unwrap(), original);
@@ -215,7 +215,7 @@ fn actual_unchanged_timer_never_replicates_or_erases_explicit_zero_event_command
     let changed = r#"{"value":1.0,"permission":"unchanged"}"#;
     log.begin_batch().unwrap();
     assert!(
-        !log.rollback_unchanged_timer_batch("timer-unit/v1", changed)
+        !log.rollback_unchanged_internal_batch("timer-unit/v1", changed)
             .unwrap()
     );
     save(&log, "exact-raw-byte-change", changed);
@@ -246,7 +246,7 @@ fn actual_sql_and_rolled_back_writes_cannot_be_hidden_by_equal_checkpoint_bytes(
         "INSERT INTO event_log_metadata(key,value) VALUES ('actual-zero-event-change','original')", [],
     ).unwrap();
     assert!(
-        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        !log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     save(&log, "actual-auxiliary-sql-change", raw);
@@ -267,19 +267,19 @@ fn actual_sql_and_rolled_back_writes_cannot_be_hidden_by_equal_checkpoint_bytes(
         "SAVEPOINT actual_original; UPDATE event_log_metadata SET value='changed' WHERE key='actual-zero-event-change'; ROLLBACK TO actual_original; RELEASE actual_original",
     ).unwrap();
     assert!(
-        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        !log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     log.rollback_batch().unwrap();
     log.begin_batch().unwrap();
     assert!(
-        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        !log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     save(&log, "actual-complete-after-rollback", raw);
     log.begin_batch().unwrap();
     assert!(
-        log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     assert_eq!(log.control_command_journal().unwrap().len(), 3);
@@ -299,7 +299,7 @@ fn actual_pending_command_and_event_each_refuse_timer_elision() {
     log.save_checkpoint_with_command("timer-unit/v1", raw, command)
         .unwrap();
     assert!(
-        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        !log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     log.commit_batch().unwrap();
@@ -315,7 +315,7 @@ fn actual_pending_command_and_event_each_refuse_timer_elision() {
     );
     assert!(log.take_error().unwrap().is_none());
     assert!(
-        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        !log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     save(&log, "actual-event-change", raw);
@@ -342,7 +342,7 @@ fn actual_prior_auxiliary_and_external_sql_changes_cannot_borrow_an_old_checkpoi
         .unwrap();
     log.begin_batch().unwrap();
     assert!(
-        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        !log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     save(&log, "actual-prior-auxiliary", raw);
@@ -356,13 +356,13 @@ fn actual_prior_auxiliary_and_external_sql_changes_cannot_borrow_an_old_checkpoi
     drop(external);
     log.begin_batch().unwrap();
     assert!(
-        !log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        !log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     save(&log, "actual-external-commit", raw);
     log.begin_batch().unwrap();
     assert!(
-        log.rollback_unchanged_timer_batch("timer-unit/v1", raw)
+        log.rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
     assert_eq!(log.control_command_journal().unwrap().len(), 3);
@@ -371,7 +371,7 @@ fn actual_prior_auxiliary_and_external_sql_changes_cannot_borrow_an_old_checkpoi
     restarted.begin_batch().unwrap();
     assert!(
         !restarted
-            .rollback_unchanged_timer_batch("timer-unit/v1", raw)
+            .rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap(),
         "restart invented a previously confirmed complete auxiliary baseline"
     );
@@ -379,7 +379,7 @@ fn actual_prior_auxiliary_and_external_sql_changes_cannot_borrow_an_old_checkpoi
     restarted.begin_batch().unwrap();
     assert!(
         restarted
-            .rollback_unchanged_timer_batch("timer-unit/v1", raw)
+            .rollback_unchanged_internal_batch("timer-unit/v1", raw)
             .unwrap()
     );
 }
