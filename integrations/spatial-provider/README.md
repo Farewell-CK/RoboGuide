@@ -5,11 +5,26 @@ It owns local file geometry, not Control, Mission semantics, map activation or c
 No robot, simulator or model is created. It implements CPU FPFH/RANSAC, ICP, pose-graph optimization,
 bidirectional overlap/residual checks, sparse voxel tiles and parent-anchored incremental revisions.
 The declared anchor is the first source's frame or an exactly verified parent's frame. The separate
-planar profile uses bounded correlative SE(2) search, rigid ICP and a fixed-anchor pose graph.
+planar profile supports a per-job fusion strategy with a fixed-anchor pose graph and conservative
+tile fusion.
 
 Use an independent Linux Python 3.11 environment with [requirements.txt](requirements.txt). Native
 dependencies stay outside the Mission Service environment. Quality gates, work limits,
 unit, frame and immutable source hash is explicit in the job; no device/name-specific behavior exists.
+
+Add `"strategy": "opencv-akaze"` to the existing occupancy job's `policy` to select feature
+registration. Omitting the field or specifying `"correlative-icp"` selects bounded correlative
+search and rigid ICP. The same field is supported by the shared-map job builder. Retain the rest of
+the policy, including the runtime and geometric limits. Correlative search steps, translation
+window and ICP refinement settings apply to `correlative-icp`. For `opencv-akaze`,
+`max_hypotheses` caps RANSAC iterations. A strategy change for a previously submitted job requires
+a new job ID.
+
+Install `opencv-python-headless==4.13.0.92` in the Spatial worker's Python environment to enable
+`opencv-akaze`. It estimates relative poses from mutual AKAZE matches and uses the same overlap,
+residual, graph and tile pipeline as the default strategy. A disconnected registration fails the
+job without producing a fused map. Incremental jobs with an existing parent bundle use
+`correlative-icp`. The output manifest records the selected algorithm and its native dependencies.
 
 ```sh
 PYTHONPATH=integrations/spatial-provider /absolute/spatial-venv/bin/python \

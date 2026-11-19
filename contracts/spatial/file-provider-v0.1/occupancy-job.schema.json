@@ -151,6 +151,9 @@
         "threads"
       ],
       "properties": {
+        "strategy": {
+          "enum": ["correlative-icp", "opencv-akaze"]
+        },
         "resolution_meters": {
           "type": "number",
           "minimum": 0.001,

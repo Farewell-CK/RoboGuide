@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from types import FrameType
@@ -22,7 +23,7 @@ from typing import Any
 from .__main__ import observe, parse_job
 from .bounded_transport import BoundedWorkers
 from .contracts import canonical, digest, exact, fields, integer
-from .geometry import code_digest, sdk
+from .geometry import code_digest, dependency_versions, sdk
 from .storage import read_json, read_source, save_json, sync_directory
 
 
@@ -56,6 +57,8 @@ class SpatialService:
         output_root: Path,
         configuration: dict[str, Any],
         readonly: bool = False,
+        *,
+        dependencies: Mapping[str, str] | None = None,
     ) -> None:
         """Freeze backend/config identity and rebuild original admissions without launching jobs."""
         raw = fields(configuration, {"schema_version", "max_jobs", "max_active", "profiles"})
@@ -63,6 +66,7 @@ class SpatialService:
             raise ValueError("unsupported spatial Local How service schema")
         self.max_jobs = integer(raw["max_jobs"], "max_jobs", 1, 4096)
         self.max_active = integer(raw["max_active"], "max_active", 1, 16)
+        self._dependencies = dependency_versions(dependencies)
         if not isinstance(raw["profiles"], list) or not 1 <= len(raw["profiles"]) <= 128:
             raise ValueError("one to 128 explicit immutable file profiles are required")
         self.profiles: dict[str, dict[str, Any]] = {}
@@ -411,18 +415,20 @@ class SpatialService:
                 (evidence / "cli.stdout").open("xb") as output,
                 (evidence / "cli.stderr").open("xb") as error,
             ):
+                command = [
+                    sys.executable,
+                    "-m",
+                    "roboguide_spatial_provider",
+                    "--request",
+                    str(job_path),
+                    "--source-root",
+                    str(self.source_root),
+                    "--store",
+                    str(store),
+                ]
+                command.extend(["--worker-dependencies", canonical(self._dependencies).decode()])
                 process = subprocess.Popen(
-                    [
-                        sys.executable,
-                        "-m",
-                        "roboguide_spatial_provider",
-                        "--request",
-                        str(job_path),
-                        "--source-root",
-                        str(self.source_root),
-                        "--store",
-                        str(store),
-                    ],
+                    command,
                     stdout=output,
                     stderr=error,
                     start_new_session=True,
@@ -608,6 +614,7 @@ def main() -> None:
     parser.add_argument("--readonly", action="store_true")
     parser.add_argument("--connection-limit", type=int, default=128)
     parser.add_argument("--connection-timeout-seconds", type=float, default=30.0)
+    parser.add_argument("--worker-dependencies", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if not 0 < args.connection_timeout_seconds <= 900:
         parser.error("--connection-timeout-seconds must be positive and at most 900")
@@ -615,13 +622,35 @@ def main() -> None:
         parser.error("--connection-limit must be an integer in 1..1024")
     signal.signal(signal.SIGTERM, termination_requested)
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    sdk()
+    dependencies = None
+    if args.worker_dependencies is not None:
+        try:
+            declared = json.loads(args.worker_dependencies)
+        except json.JSONDecodeError as error:
+            raise ValueError("worker dependency declaration is not JSON") from error
+        if not isinstance(declared, dict):
+            raise ValueError("worker dependency declaration is not an object")
+        dependencies = dependency_versions(declared)
+    configuration = read_json(args.config, 2 * 1024 * 1024)
+    profiles = configuration.get("profiles")
+    planar_only = (
+        isinstance(profiles, list)
+        and bool(profiles)
+        and all(
+            isinstance(profile, dict)
+            and isinstance(profile.get("job"), dict)
+            and profile["job"].get("schema_version") == "roboguide.spatial-occupancy-job/v0.1"
+            for profile in profiles
+        )
+    )
+    sdk(load_open3d=not planar_only, dependencies=dependencies)
     service = SpatialService(
         args.root,
         args.source_root,
         args.output_root,
-        read_json(args.config, 2 * 1024 * 1024),
+        configuration,
         args.readonly,
+        dependencies=dependencies,
     )
     socket_path = args.root / "local.sock"
     server: UnixServer | None = None
