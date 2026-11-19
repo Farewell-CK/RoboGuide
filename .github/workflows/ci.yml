@@ -701,22 +701,27 @@ jobs:
 
       - *native_failure
 
-  native-federation-ha:
-    name: Native Federation HA
+  native-federation-build:
+    name: Build Federation HA executables (${{ matrix.build }})
     runs-on: ubuntu-24.04
-    needs: native-build
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [current, previous]
     steps:
       - *checkout
 
       - *native_rust
 
-      - *native_uv
-
-      - *download_native
-
-      - *unpack_native
+      - name: Build optimized real HA processes for their declared transport budgets
+        if: matrix.build == 'current'
+        run: |
+          cargo build --release --locked -p integration-server -p controller-replica -p roboguide-node
+          tar --zstd -cf "${RUNNER_TEMP}/roboguide-federation-current.tar.zst" \
+            target/release/{integration-server,controller-replica,roboguide-node}
 
       - name: Build genuine previous Federation supervisor for explicit budget refusal
+        if: matrix.build == 'previous'
         env:
           FEDERATION_PREVIOUS_COMMIT: f961a69e409e9aeaa386f2a6209d750485747312
         run: |
@@ -726,9 +731,45 @@ jobs:
           git archive "${FEDERATION_PREVIOUS_COMMIT}" | tar -x -C "${RUNNER_TEMP}/roboguide-federation-previous-source"
           CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/target" cargo build --release --locked --manifest-path "${RUNNER_TEMP}/roboguide-federation-previous-source/Cargo.toml" -p controller-replica
           cp target/release/controller-replica "${RUNNER_TEMP}/roboguide-federation-previous-supervisor"
+          tar --zstd -cf "${RUNNER_TEMP}/roboguide-federation-previous.tar.zst" \
+            -C "${RUNNER_TEMP}" roboguide-federation-previous-supervisor
 
-      - name: Build optimized real HA processes for their declared transport budgets
-        run: cargo build --release --locked -p integration-server -p controller-replica -p roboguide-node
+      - name: Upload Federation HA executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: federation-${{ matrix.build }}-${{ github.sha }}
+          path: ${{ runner.temp }}/roboguide-federation-${{ matrix.build }}.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
+
+  native-federation-ha:
+    name: Native Federation HA
+    runs-on: ubuntu-24.04
+    needs: [native-build, native-federation-build]
+    env:
+      RUST_BACKTRACE: short
+    steps:
+      - *checkout
+
+      - *native_uv
+
+      - *download_native
+
+      - *unpack_native
+
+      - name: Download both Federation HA build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: federation-*-${{ github.sha }}
+          merge-multiple: true
+          path: ${{ runner.temp }}
+
+      - name: Unpack Federation HA executables
+        run: |
+          tar --zstd -xf "${RUNNER_TEMP}/roboguide-federation-current.tar.zst"
+          tar --zstd -xf "${RUNNER_TEMP}/roboguide-federation-previous.tar.zst" -C "${RUNNER_TEMP}"
 
       - name: Verify real independent HA domains, partition, certificates and complete recovery
         run: >-
