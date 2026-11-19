@@ -923,3 +923,199 @@ fn active_hazard_revocation_stops_under_its_original_policy() {
     ));
     application::hazards::validate_restored(&fixture.controller).unwrap();
 }
+
+/// Builds a sealed checkpoint fixture for a natural device failure without a synthetic Cancel receipt.
+fn sealed_natural_device_failure_fixture(
+    failed_phase: Option<wire::ExecutionPhase>,
+    terminal_state: Option<&str>,
+    command_id: Option<&str>,
+    safe_state: bool,
+    assurance: &str,
+) -> stop_recovery::Fixture {
+    let mut fixture =
+        fixture_with_schema(domain::SAFE_STATE_OBSERVATION_SCHEMA, "device-observation");
+    if let Some(phase) = failed_phase {
+        fixture.fact(2, phase, 5);
+    }
+    admit(&mut fixture);
+    let command = fixture.attempt.command();
+    let generation = fixture
+        .controller
+        .bridge
+        .current_attempt_generation(command.group_id(), command.task_ref(), command.role_id())
+        .unwrap();
+    let payload = serde_json::json!({"observations":[{
+        "execution_id": fixture.attempt.execution_id(),
+        "execution_generation": generation,
+        "command_id": command_id,
+        "safe_state": safe_state,
+        "assurance": assurance,
+        "terminal_state": terminal_state,
+    }]});
+    observe(&mut fixture, "s1", 9, payload, Some(900_000));
+    safety_stop::seal_natural_device_failure_for_test(
+        &mut fixture.controller,
+        fixture.attempt.execution_id(),
+        domain::TimestampMs::new(10),
+    )
+    .unwrap();
+    fixture
+}
+
+/// Retained natural device failure stop confirmations restore when bound to a Failed attempt.
+#[test]
+fn retained_natural_device_failure_confirmation_restores_strictly() {
+    let mut fixture = sealed_natural_device_failure_fixture(
+        Some(wire::ExecutionPhase::Failed),
+        Some("FAILED"),
+        None,
+        true,
+        "device-observation",
+    );
+    let saved = serde_json::to_value(&fixture.controller.safety_stops).unwrap();
+    fixture.controller.safety_stops = serde_json::from_value(saved).unwrap();
+    assert!(!safety_stop::validate_restored(&fixture.controller).unwrap());
+    let execution_id = fixture.attempt.execution_id().to_owned();
+    assert!(safety_stop::attempt_confirmed(
+        &fixture.controller,
+        &execution_id
+    ));
+    assert!(!safety_stop::blocks_release(
+        &fixture.controller,
+        fixture.attempt.command().mission_id()
+    ));
+}
+
+/// Mismatched runtime status or corrupted evidence on retained natural device failures fail closed.
+#[test]
+fn retained_natural_device_failure_confirmation_rejects_mismatched_or_tampered_records() {
+    for (phase, terminal_state, command_id, safe_state, assurance) in [
+        (None, Some("FAILED"), None, true, "device-observation"),
+        (
+            Some(wire::ExecutionPhase::Cancelled),
+            Some("FAILED"),
+            None,
+            true,
+            "device-observation",
+        ),
+        (
+            Some(wire::ExecutionPhase::Failed),
+            Some("COMPLETED"),
+            None,
+            true,
+            "device-observation",
+        ),
+        (
+            Some(wire::ExecutionPhase::Failed),
+            None,
+            None,
+            true,
+            "device-observation",
+        ),
+        (
+            Some(wire::ExecutionPhase::Failed),
+            Some("FAILED"),
+            Some("cancel-synthesized"),
+            true,
+            "device-observation",
+        ),
+        (
+            Some(wire::ExecutionPhase::Failed),
+            Some("FAILED"),
+            None,
+            false,
+            "device-observation",
+        ),
+        (
+            Some(wire::ExecutionPhase::Failed),
+            Some("FAILED"),
+            None,
+            true,
+            "software-process",
+        ),
+    ] {
+        let invalid = sealed_natural_device_failure_fixture(
+            phase,
+            terminal_state,
+            command_id,
+            safe_state,
+            assurance,
+        );
+        assert!(
+            safety_stop::validate_restored(&invalid.controller).is_err(),
+            "expected failure for phase={phase:?} terminal={terminal_state:?} cmd={command_id:?} safe={safe_state} assurance={assurance}"
+        );
+        assert!(!safety_stop::attempt_confirmed(
+            &invalid.controller,
+            invalid.attempt.execution_id()
+        ));
+    }
+
+    let mut base = sealed_natural_device_failure_fixture(
+        Some(wire::ExecutionPhase::Failed),
+        Some("FAILED"),
+        None,
+        true,
+        "device-observation",
+    );
+    let execution_id = base.attempt.execution_id().to_owned();
+    let original = serde_json::to_value(&base.controller.safety_stops).unwrap();
+    for fault in [
+        "source",
+        "accepted_at",
+        "receipt_digest",
+        "safe_at",
+        "stopped_at",
+        "session_id",
+        "last_evidence_digest",
+        "execution_generation",
+        "missing_proof",
+        "window",
+    ] {
+        let mut corrupt = original.clone();
+        let entry = corrupt[&execution_id].as_object_mut().unwrap();
+        match fault {
+            "source" => {
+                entry["record"]["last_evidence_source"] =
+                    serde_json::json!("terminal-cancel-and-independent-safe-state");
+            }
+            "accepted_at" => {
+                entry.insert("accepted_at".into(), serde_json::json!(8));
+            }
+            "receipt_digest" => {
+                entry.insert(
+                    "receipt_digest".into(),
+                    serde_json::json!(format!("sha256:{}", "a".repeat(64))),
+                );
+            }
+            "safe_at" => {
+                entry.insert("safe_at".into(), serde_json::json!(10));
+            }
+            "stopped_at" => {
+                entry.insert("stopped_at".into(), serde_json::json!(8));
+            }
+            "session_id" => {
+                entry.insert("session_id".into(), serde_json::json!("other-session"));
+            }
+            "last_evidence_digest" => {
+                entry["record"]["last_evidence_digest"] =
+                    serde_json::json!(format!("sha256:{}", "b".repeat(64)));
+            }
+            "execution_generation" => {
+                entry["record"]["identity"]["execution_generation"] = serde_json::json!(2);
+            }
+            "missing_proof" => {
+                entry.insert("safe_proof".into(), serde_json::Value::Null);
+            }
+            "window" => {
+                entry["record"]["requested_at"] = serde_json::json!(10);
+            }
+            _ => unreachable!(),
+        }
+        base.controller.safety_stops = serde_json::from_value(corrupt).unwrap();
+        assert!(
+            safety_stop::validate_restored(&base.controller).is_err(),
+            "expected validate_restored failure for fault={fault}"
+        );
+    }
+}
