@@ -326,8 +326,9 @@ def run(output: Path, binary: Path, monitoring_tools: Path | None = None) -> dic
                         "firing",
                         {"RoboGuideNodeCapacitySaturated", "RoboGuideArtifactCapacitySaturated"},
                     )
+                # Allow the 25-second handshake deadline plus scheduling slack.
                 result["actual_controller_pre_tls_closes"] = [
-                    wait_closed(stream, 7) for stream in held
+                    wait_closed(stream, 30) for stream in held
                 ]
             finally:
                 for stream in held:
@@ -344,7 +345,8 @@ def run(output: Path, binary: Path, monitoring_tools: Path | None = None) -> dic
                 socket.create_connection(("127.0.0.1", node_port), timeout=3),
                 server_hostname="localhost",
             ) as idle:
-                result["actual_authenticated_node_without_http2"] = wait_closed(idle, 20)
+                # The Node transport closes after 45 seconds without further reads.
+                result["actual_authenticated_node_without_http2"] = wait_closed(idle, 50)
             text = metrics_text(origin, context)
             for name in ("node", "artifact"):
                 assert f"roboguide_{name}_connections_limit 2" in text
