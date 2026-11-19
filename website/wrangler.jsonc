@@ -1,0 +1,12 @@
+// Dedicated NAVI Worker. Never use this source for the existing roboguide-docs Worker.
+{
+  "name": "roboguide-navi-docs",
+  "compatibility_date": "2026-11-19",
+  "workers_dev": true,
+  "preview_urls": true,
+  "assets": {
+    "directory": "./site",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  }
+}

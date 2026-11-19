@@ -1,0 +1,38 @@
+site_name: RoboGuide · NAVI 室内导航
+site_description: NAVI 手机端、视觉服务、室内障碍提醒与测试说明
+repo_url: https://github.com/Farewell-CK/RoboGuide
+repo_name: Farewell-CK/RoboGuide
+edit_uri: ""
+docs_dir: docs
+site_dir: site
+strict: true
+
+theme:
+  name: material
+  language: zh
+  font: false
+  features:
+    - navigation.sections
+    - navigation.footer
+    - content.code.copy
+  palette:
+    primary: teal
+    accent: teal
+
+plugins:
+  - search:
+      lang: zh
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+
+nav:
+  - 项目与源码: index.md
+  - 安装与首次使用: getting-started.md
+  - 导航与障碍提醒: navigation.md
+  - 后端与网络: deployment.md
+  - 同事测试流程: testing.md

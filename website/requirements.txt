@@ -1,0 +1,3 @@
+# Keep the documentation renderer aligned with the existing RoboGuide site.
+mkdocs==1.6.1
+mkdocs-material==9.7.7
