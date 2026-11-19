@@ -17,10 +17,11 @@ concurrency:
 
 jobs:
   rust:
-    name: Rust
+    name: Rust checks
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out repository
+      - &checkout
+        name: Check out repository
         uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -47,11 +48,81 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
-      - name: Set up uv for native deployment inspection
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Retain Rust test log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-test-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/roboguide-cargo-test.log
+
+  native-build:
+    name: Build native executables
+    runs-on: ubuntu-24.04
+    steps:
+      - *checkout
+
+      - &native_rust
+        name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.99.1"
+          cache-shared-key: rust
+          cache-save-if: false
 
       - name: Build the actual Controller composition
         run: cargo build --locked -p integration-server -p controller-replica -p roboguide-node
+
+      - name: Build current process probes
+        run: |
+          cargo build --locked -p artifact-store --example layout_probe --example reclamation_probe
+          cargo build --locked -p controller-replica --example projection_probe
+          cargo build --locked -p state --example controller_storage_probe --example replica_state_probe
+          cargo build --locked -p controller-replication \
+            --example replica_transport_probe --example content_store_probe --example content_stream_probe \
+            --example content_network_probe --example prepared_source_probe --example owned_content_source_probe \
+            --example content_snapshot_probe
+
+      - name: Package current executables with their permissions
+        run: |
+          tar --zstd -cf "${RUNNER_TEMP}/roboguide-native.tar.zst" \
+            target/debug/{integration-server,controller-replica,roboguide-node} \
+            target/debug/examples/{layout_probe,reclamation_probe,projection_probe,controller_storage_probe,replica_state_probe} \
+            target/debug/examples/{replica_transport_probe,content_store_probe,content_stream_probe,content_network_probe} \
+            target/debug/examples/{prepared_source_probe,owned_content_source_probe,content_snapshot_probe}
+
+      - name: Upload current native executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-executables-${{ github.sha }}
+          path: ${{ runner.temp }}/roboguide-native.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
+
+  native-controller:
+    name: Native Controller
+    runs-on: ubuntu-24.04
+    needs: native-build
+    steps:
+      - *checkout
+
+      - &native_uv
+        name: Set up uv for native process checks
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - &download_native
+        name: Download current native executables
+        uses: actions/download-artifact@v4
+        with:
+          name: native-executables-${{ github.sha }}
+          path: ${{ runner.temp }}
+
+      - &unpack_native
+        name: Unpack current native executables
+        run: tar --zstd -xf "${RUNNER_TEMP}/roboguide-native.tar.zst"
 
       - name: Fetch pinned native monitoring tools for owned loopback acceptance
         env:
@@ -96,6 +167,7 @@ jobs:
           uv run --frozen python tools/quality/check_state_verifier_processes.py
           --output "${RUNNER_TEMP}/roboguide-quantitative-resources"
           --skip-build --quantitative-resources
+
       - name: Verify original software Time calendar, overrun and active cold recovery
         run: >-
           uv run --frozen python tools/quality/check_state_verifier_processes.py
@@ -112,21 +184,10 @@ jobs:
           uv run --frozen python tools/quality/check_federation_execution_processes.py
           --output "${RUNNER_TEMP}/roboguide-federation-execution" --skip-build
 
-      - name: Build the actual Controller connection lifetime probe
-        run: cargo build --locked -p state --example controller_storage_probe
-
-      - name: Build the actual inactive Controller projection probes
-        run: |
-          cargo build --locked -p controller-replica --example projection_probe
-          cargo build --locked -p state --example replica_state_probe
-
       - name: Verify actual Controller original SQL installation and hardlink refusal
         run: >
           uv run --frozen python tools/quality/check_controller_projection_processes.py
           --output "${RUNNER_TEMP}/roboguide-controller-projection"
-
-      - name: Build the actual single-worker replica listener probe
-        run: cargo build --locked -p controller-replication --example replica_transport_probe
 
       - name: Verify actual bounded replica TCP and TLS lifetimes with zero Nodes
         run: >
@@ -156,12 +217,12 @@ jobs:
 
       - name: Verify Control quota policy with zero Nodes
         run: >
-          uv run --frozen python tools/quality/check_resource_quota_processes.py
+          uv run --frozen python tools/quality/check_resource_quota_processes.py --skip-build
           --output "${RUNNER_TEMP}/roboguide-resource-quota"
 
       - name: Verify two-domain Federation service with zero Nodes
         run: >
-          uv run --frozen python tools/quality/check_federation_service_processes.py
+          uv run --frozen python tools/quality/check_federation_service_processes.py --skip-build
           --output "${RUNNER_TEMP}/roboguide-federation-service"
 
       - name: Check retained actual Federation requests against closed schemas
@@ -185,39 +246,47 @@ jobs:
           --relocated-abort
           --output "${RUNNER_TEMP}/roboguide-snapshot-references"
 
-      - name: Build actual Artifact layout process probe
-        run: cargo build --locked -p artifact-store --example layout_probe
+      - &native_failure
+        name: Retain native gate failure observations
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-gate-failure-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            /tmp/rg-ci-*/**/*.log
+            /tmp/rg-ci-*/**/result.json
+            /tmp/rg-ci-*/**/actual-parent-retirement.json
+            /tmp/rg-ci-*/*.sqlite3
+            /tmp/rg-ci-*/*.sqlite3-wal
+            /tmp/rg-ci-*/*.sqlite3-shm
+            /tmp/rg-ci-*/**/*observed.json
+            /tmp/rg-ci-*/**/source-identity.json
+            ${{ runner.temp }}/roboguide-*/**/result.json
+            ${{ runner.temp }}/roboguide-*/**/*.log
+            ${{ runner.temp }}/roboguide-*/**/actual-parent-retirement.json
+            ${{ runner.temp }}/roboguide-*/**/request-*.json
+            ${{ runner.temp }}/roboguide-*/**/source-identity.json
+            ${{ runner.temp }}/roboguide-federation-ha/**/*.json
+            ${{ runner.temp }}/roboguide-federation-ha/**/*.sqlite3
+            ${{ runner.temp }}/roboguide-federation-ha/**/*.sqlite3-wal
+            ${{ runner.temp }}/roboguide-federation-ha/**/*.sqlite3-shm
 
-      - name: Build actual member-local content process probe
-        run: >
-          cargo build --locked -p controller-replication
-          --example content_store_probe --example content_stream_probe
-          --example content_network_probe --example prepared_source_probe
-          --example owned_content_source_probe
+  native-replica:
+    name: Native Replica and Catalog
+    runs-on: ubuntu-24.04
+    needs: native-build
+    steps:
+      - *checkout
 
-      - name: Build genuine previous Federation supervisor for explicit budget refusal
-        env:
-          FEDERATION_PREVIOUS_COMMIT: f961a69e409e9aeaa386f2a6209d750485747312
-        run: |
-          set -o pipefail
-          git fetch --no-tags origin "${FEDERATION_PREVIOUS_COMMIT}"
-          mkdir "${RUNNER_TEMP}/roboguide-federation-previous-source"
-          git archive "${FEDERATION_PREVIOUS_COMMIT}" | tar -x -C "${RUNNER_TEMP}/roboguide-federation-previous-source"
-          CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/target" cargo build --release --locked --manifest-path "${RUNNER_TEMP}/roboguide-federation-previous-source/Cargo.toml" -p controller-replica
-          cp target/release/controller-replica "${RUNNER_TEMP}/roboguide-federation-previous-supervisor"
+      - *native_rust
 
-      - name: Build optimized real HA processes for their declared transport budgets
-        run: cargo build --release --locked -p integration-server -p controller-replica -p roboguide-node
+      - *native_uv
 
-      - name: Verify real independent HA domains, partition, certificates and complete recovery
-        run: >-
-          uv run --frozen python tools/quality/check_federation_ha_processes.py
-          --output "${RUNNER_TEMP}/roboguide-federation-ha"
-          --supervisor target/release/controller-replica
-          --controller target/release/integration-server
-          --node target/release/roboguide-node
-          --storage-probe target/debug/examples/content_stream_probe
-          --previous-supervisor "${RUNNER_TEMP}/roboguide-federation-previous-supervisor"
+      - *download_native
+
+      - *unpack_native
 
       - name: Verify actual original owned Unix and State content commits with zero Nodes
         run: >
@@ -376,9 +445,6 @@ jobs:
           uv run --frozen python tools/quality/check_catalog_adoption_processes.py
           --from /tmp/rg-ci-legacy-catalog --output "${RUNNER_TEMP}/roboguide-catalog-adoption"
 
-      - name: Build actual readonly source reclamation observer
-        run: cargo build --locked -p artifact-store --example reclamation_probe
-
       - name: Verify source GC with actual original retirement and cold restore
         run: >
           uv run --frozen python tools/quality/check_artifact_reclamation_processes.py
@@ -401,10 +467,22 @@ jobs:
           uv run --frozen python tools/quality/check_artifact_snapshot_processes.py
           --skip-build --output "${RUNNER_TEMP}/roboguide-artifact-snapshot"
 
-      - name: Build complete original State materialization probe
-        run: |
-          cargo build --locked -p state --example replica_state_probe -p controller-replication --example content_snapshot_probe
-          cargo build --locked -p controller-replica --bin controller-replica
+      - *native_failure
+
+  native-archived-source:
+    name: Native archived-source recovery
+    runs-on: ubuntu-24.04
+    needs: native-build
+    steps:
+      - *checkout
+
+      - *native_rust
+
+      - *native_uv
+
+      - *download_native
+
+      - *unpack_native
 
       - name: Verify actual original content Archive with zero Nodes
         run: >
@@ -452,33 +530,6 @@ jobs:
           --old-probe "${RUNNER_TEMP}/roboguide-pre-parent9-target/debug/examples/content_network_probe"
           --source /tmp/rg-ci-catalog-archive
           --output "${RUNNER_TEMP}/roboguide-archived-initialization"
-
-      - name: Build genuine original v55 application and supervisor for rolling upgrades
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api repos/${{ github.repository }}/tarball/dbe7c1e7ad9c4b43b85909be4dff7b61676d55dd > "${RUNNER_TEMP}/roboguide-original-v55.tar.gz"
-          mkdir "${RUNNER_TEMP}/roboguide-original-v55"
-          tar -xzf "${RUNNER_TEMP}/roboguide-original-v55.tar.gz" --strip-components=1 -C "${RUNNER_TEMP}/roboguide-original-v55"
-          CARGO_TARGET_DIR="${RUNNER_TEMP}/roboguide-original-v55-target" cargo build --locked --manifest-path "${RUNNER_TEMP}/roboguide-original-v55/Cargo.toml" -p integration-server -p controller-replica
-
-      - name: Verify real rolling infrastructure and original to current application upgrades
-        run: >
-          uv run --frozen python tools/quality/check_application_upgrade_processes.py
-          --supervisor target/debug/controller-replica
-          --controller target/debug/integration-server
-          --old-supervisor "${RUNNER_TEMP}/roboguide-original-v55-target/debug/controller-replica"
-          --old-controller "${RUNNER_TEMP}/roboguide-original-v55-target/debug/integration-server"
-          --storage-probe target/debug/examples/content_stream_probe
-          --output "${RUNNER_TEMP}/roboguide-application-upgrade"
-
-      - name: Verify complete upgraded cold restore and all actual leaders
-        run: >
-          uv run --frozen python tools/quality/check_replica_content_recovery_processes.py
-          --source "${RUNNER_TEMP}/roboguide-application-upgrade"
-          --supervisor target/debug/controller-replica
-          --old-supervisor "${RUNNER_TEMP}/roboguide-original-v55-target/debug/controller-replica"
-          --output "${RUNNER_TEMP}/roboguide-application-upgrade-recovery"
 
       - name: Verify original Unknown and missed archived-source Log and Snapshot
         run: |
@@ -566,6 +617,67 @@ jobs:
           assert verify_recovery(evidence / "roboguide-complete-producer-gc", final)["passed"]
           PY
 
+      - *native_failure
+
+  native-upgrade:
+    name: Native rolling upgrades
+    runs-on: ubuntu-24.04
+    needs: native-build
+    steps:
+      - *checkout
+
+      - *native_rust
+
+      - *native_uv
+
+      - *download_native
+
+      - *unpack_native
+
+      - name: Build genuine original v55 application and supervisor for rolling upgrades
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${{ github.repository }}/tarball/dbe7c1e7ad9c4b43b85909be4dff7b61676d55dd > "${RUNNER_TEMP}/roboguide-original-v55.tar.gz"
+          mkdir "${RUNNER_TEMP}/roboguide-original-v55"
+          tar -xzf "${RUNNER_TEMP}/roboguide-original-v55.tar.gz" --strip-components=1 -C "${RUNNER_TEMP}/roboguide-original-v55"
+          CARGO_TARGET_DIR="${RUNNER_TEMP}/roboguide-original-v55-target" cargo build --locked --manifest-path "${RUNNER_TEMP}/roboguide-original-v55/Cargo.toml" -p integration-server -p controller-replica
+
+      - name: Verify real rolling infrastructure and original to current application upgrades
+        run: >
+          uv run --frozen python tools/quality/check_application_upgrade_processes.py
+          --supervisor target/debug/controller-replica
+          --controller target/debug/integration-server
+          --old-supervisor "${RUNNER_TEMP}/roboguide-original-v55-target/debug/controller-replica"
+          --old-controller "${RUNNER_TEMP}/roboguide-original-v55-target/debug/integration-server"
+          --storage-probe target/debug/examples/content_stream_probe
+          --output "${RUNNER_TEMP}/roboguide-application-upgrade"
+
+      - name: Verify complete upgraded cold restore and all actual leaders
+        run: >
+          uv run --frozen python tools/quality/check_replica_content_recovery_processes.py
+          --source "${RUNNER_TEMP}/roboguide-application-upgrade"
+          --supervisor target/debug/controller-replica
+          --old-supervisor "${RUNNER_TEMP}/roboguide-original-v55-target/debug/controller-replica"
+          --output "${RUNNER_TEMP}/roboguide-application-upgrade-recovery"
+
+      - *native_failure
+
+  native-archive:
+    name: Native coordinated Archive
+    runs-on: ubuntu-24.04
+    needs: native-build
+    steps:
+      - *checkout
+
+      - *native_rust
+
+      - *native_uv
+
+      - *download_native
+
+      - *unpack_native
+
       - name: Build genuine prior same-wrapper Archive writer
         env:
           GH_TOKEN: ${{ github.token }}
@@ -587,41 +699,76 @@ jobs:
           --network target/debug/examples/content_network_probe
           --previous "${RUNNER_TEMP}/roboguide-pre-online-archive-target/debug/integration-server"
 
-      - name: Retain native gate failure observations
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-gate-failure-${{ github.run_id }}-${{ github.run_attempt }}
-          retention-days: 7
-          if-no-files-found: ignore
-          path: |
-            ${{ runner.temp }}/roboguide-cargo-test.log
-            /tmp/rg-ci-*/**/*.log
-            /tmp/rg-ci-*/**/result.json
-            /tmp/rg-ci-*/**/actual-parent-retirement.json
-            /tmp/rg-ci-*/*.sqlite3
-            /tmp/rg-ci-*/*.sqlite3-wal
-            /tmp/rg-ci-*/*.sqlite3-shm
-            /tmp/rg-ci-*/**/*observed.json
-            /tmp/rg-ci-*/**/source-identity.json
-            ${{ runner.temp }}/roboguide-*/**/result.json
-            ${{ runner.temp }}/roboguide-*/**/*.log
-            ${{ runner.temp }}/roboguide-*/**/actual-parent-retirement.json
-            ${{ runner.temp }}/roboguide-*/**/request-*.json
-            ${{ runner.temp }}/roboguide-*/**/source-identity.json
-            ${{ runner.temp }}/roboguide-federation-ha/**/*.json
-            ${{ runner.temp }}/roboguide-federation-ha/**/*.sqlite3
-            ${{ runner.temp }}/roboguide-federation-ha/**/*.sqlite3-wal
-            ${{ runner.temp }}/roboguide-federation-ha/**/*.sqlite3-shm
+      - *native_failure
+
+  native-federation-ha:
+    name: Native Federation HA
+    runs-on: ubuntu-24.04
+    needs: native-build
+    steps:
+      - *checkout
+
+      - *native_rust
+
+      - *native_uv
+
+      - *download_native
+
+      - *unpack_native
+
+      - name: Build genuine previous Federation supervisor for explicit budget refusal
+        env:
+          FEDERATION_PREVIOUS_COMMIT: f961a69e409e9aeaa386f2a6209d750485747312
+        run: |
+          set -o pipefail
+          git fetch --no-tags origin "${FEDERATION_PREVIOUS_COMMIT}"
+          mkdir "${RUNNER_TEMP}/roboguide-federation-previous-source"
+          git archive "${FEDERATION_PREVIOUS_COMMIT}" | tar -x -C "${RUNNER_TEMP}/roboguide-federation-previous-source"
+          CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/target" cargo build --release --locked --manifest-path "${RUNNER_TEMP}/roboguide-federation-previous-source/Cargo.toml" -p controller-replica
+          cp target/release/controller-replica "${RUNNER_TEMP}/roboguide-federation-previous-supervisor"
+
+      - name: Build optimized real HA processes for their declared transport budgets
+        run: cargo build --release --locked -p integration-server -p controller-replica -p roboguide-node
+
+      - name: Verify real independent HA domains, partition, certificates and complete recovery
+        run: >-
+          uv run --frozen python tools/quality/check_federation_ha_processes.py
+          --output "${RUNNER_TEMP}/roboguide-federation-ha"
+          --supervisor target/release/controller-replica
+          --controller target/release/integration-server
+          --node target/release/roboguide-node
+          --storage-probe target/debug/examples/content_stream_probe
+          --previous-supervisor "${RUNNER_TEMP}/roboguide-federation-previous-supervisor"
+
+      - *native_failure
+
+  rust-required:
+    # The main ruleset requires this exact check name.
+    name: Rust
+    runs-on: ubuntu-24.04
+    needs:
+      - rust
+      - native-build
+      - native-controller
+      - native-replica
+      - native-archived-source
+      - native-upgrade
+      - native-archive
+      - native-federation-ha
+    if: ${{ always() }}
+    steps:
+      - name: Require every Rust and native job to succeed
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$JOB_RESULTS"
+          jq -e 'all(.[]; .result == "success")' <<< "$JOB_RESULTS"
 
   python:
     name: Python
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
+      - *checkout
 
       - name: Set up deployment compatibility Python
         uses: actions/setup-python@v7
