@@ -192,7 +192,7 @@ pub async fn serve_artifact_http(
                 tokio::spawn(async move {
                     let _permit = permit;
                     if let Some(profile) = tls {
-                        let Ok(accepted) = timeout(Duration::from_secs(5), profile.acceptor.accept(stream)).await else { return; };
+                        let Ok(accepted) = timeout(Duration::from_secs(25), profile.acceptor.accept(stream)).await else { return; };
                         match accepted {
                             Ok(mut tls_stream) => {
                                 let role = match run_blocking(|| profile.principal(&tls_stream).and_then(|p| shared_memory_admission.refresh_artifact_principal(&p))) {
