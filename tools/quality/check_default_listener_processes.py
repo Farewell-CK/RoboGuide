@@ -98,9 +98,16 @@ def run(output: Path, binary: Path, original: Path) -> dict[str, Any]:
             "actual default single-worker Controller",
             20,
         )
-        metrics = metrics_text(origins["operator"], credentials)
-        for name in numbers:
-            assert f"roboguide_{name}_connections_limit 128" in metrics
+        expected_limits = {f"roboguide_{name}_connections_limit 128" for name in numbers}
+
+        def sampled_defaults() -> str | None:
+            """Wait for all listeners to publish their actual configured defaults."""
+            metrics = metrics_text(origins["operator"], credentials)
+            return metrics if expected_limits.issubset(metrics.splitlines()) else None
+
+        # The Operator limit is published by a one-second sampler after binding.
+        metrics = wait_for(sampled_defaults, "actual default listener capacity metrics", 5)
+        (output / "default-metrics.prom").write_text(metrics)
         result["actual_default_capacity"] = {}
         for name, number in numbers.items():
             held = []
