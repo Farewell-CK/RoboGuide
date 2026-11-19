@@ -117,7 +117,7 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
         decision: state::DecisionKind,
         now: domain::TimestampMs,
     ) -> state::EvidenceEvaluation {
-        let records = self.state_records.records();
+        let records = self.decision_evidence_records();
         policy.evaluate(&records, decision, now)
     }
 
@@ -1070,11 +1070,9 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
     }
     /// Captures the current read-only federation for transaction-local policy decisions.
     pub fn decision_state(&self) -> state::DecisionStateSnapshot {
-        use ports::StateRecordReader;
         state::DecisionStateSnapshot::new(
             self.state.clone(),
-            self.state_records
-                .records()
+            self.decision_evidence_records()
                 .into_iter()
                 .filter(|record| self.verifier_state_is_current(record))
                 .collect(),

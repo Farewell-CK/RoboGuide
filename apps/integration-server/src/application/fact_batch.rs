@@ -193,9 +193,11 @@ impl<C: Clock> NodeFactDriver<'_, C> {
         drop(lock);
         let mut working = live.clone();
         drop(live);
-        let only_heartbeat = inputs.iter().all(|(event, _)| {
+        let only_periodic = inputs.iter().all(|(event, _)| {
             matches!(event, GrpcNodeEvent::NodeMessage { message, .. }
-                if matches!(message.message, Some(integration::grpc::v0_4::node_message::Message::Heartbeat(_))))
+                if matches!(message.message, Some(
+                    integration::grpc::v0_4::node_message::Message::Heartbeat(_)
+                    | integration::grpc::v0_4::node_message::Message::StateObservationBatch(_))))
         });
         let mut dispositions = Vec::with_capacity(inputs.len());
         let mut rejected_sessions = BTreeSet::new();
@@ -433,7 +435,7 @@ impl<C: Clock> NodeFactDriver<'_, C> {
             checkpoint.len() as u64,
             None,
         );
-        if !only_heartbeat
+        if !only_periodic
             || !self
                 .events
                 .rollback_unchanged_internal_batch(SERVER_CHECKPOINT_SCHEMA, &checkpoint)?
