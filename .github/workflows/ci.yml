@@ -65,6 +65,7 @@ jobs:
 
       - &native_rust
         name: Set up Rust toolchain
+        id: native_toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: "1.99.1"
@@ -469,20 +470,97 @@ jobs:
 
       - *native_failure
 
-  native-archived-source:
-    name: Native archived-source recovery
+  native-archive-history:
+    name: Build historical Archive executables
     runs-on: ubuntu-24.04
-    needs: native-build
     steps:
       - *checkout
 
       - *native_rust
+
+      - name: Fingerprint the native build environment
+        id: archive_build_environment
+        shell: bash
+        run: |
+          fingerprint=$(
+            {
+              cc --version
+              ld --version
+              printf '%s\n' "$ImageOS" "$RUSTFLAGS" "$CARGO_PROFILE_DEV_DEBUG" "$CARGO_INCREMENTAL"
+            } | sha256sum
+          )
+          echo "digest=${fingerprint%% *}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the exact historical Archive executables
+        id: archive_history_cache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ${{ runner.temp }}/roboguide-archive-history.tar.zst
+          # The workflow digest covers both pinned revisions, the build commands and their target paths.
+          key: archive-history-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.native_toolchain.outputs.cachekey }}-${{ steps.archive_build_environment.outputs.digest }}-${{ hashFiles('.github/workflows/ci.yml') }}
+
+      - name: Build the pinned actual parent8 and Root8 compatibility writer
+        if: steps.archive_history_cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${{ github.repository }}/tarball/faede53c3e149119406fa1b5bc064c7fa538db03 > "${RUNNER_TEMP}/roboguide-pre-parent9.tar.gz"
+          mkdir "${RUNNER_TEMP}/roboguide-pre-parent9"
+          tar -xzf "${RUNNER_TEMP}/roboguide-pre-parent9.tar.gz" --strip-components=1 -C "${RUNNER_TEMP}/roboguide-pre-parent9"
+          CARGO_TARGET_DIR="${RUNNER_TEMP}/roboguide-pre-parent9-target" cargo build --locked --manifest-path "${RUNNER_TEMP}/roboguide-pre-parent9/Cargo.toml" -p controller-replication --example content_network_probe
+
+      - name: Build genuine prior same-wrapper Archive writer
+        if: steps.archive_history_cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${{ github.repository }}/tarball/307b0a46d2c7402f6b016fdb478d006c4a05e9b4 > "${RUNNER_TEMP}/roboguide-pre-online-archive.tar.gz"
+          mkdir "${RUNNER_TEMP}/roboguide-pre-online-archive"
+          tar -xzf "${RUNNER_TEMP}/roboguide-pre-online-archive.tar.gz" --strip-components=1 -C "${RUNNER_TEMP}/roboguide-pre-online-archive"
+          CARGO_TARGET_DIR="${RUNNER_TEMP}/roboguide-pre-online-archive-target" cargo build --locked --manifest-path "${RUNNER_TEMP}/roboguide-pre-online-archive/Cargo.toml" -p integration-server
+
+      - name: Package historical Archive executables
+        if: steps.archive_history_cache.outputs.cache-hit != 'true'
+        run: |
+          tar --zstd -cf "${RUNNER_TEMP}/roboguide-archive-history.tar.zst" -C "${RUNNER_TEMP}" \
+            roboguide-pre-parent9-target/debug/examples/content_network_probe \
+            roboguide-pre-online-archive-target/debug/integration-server
+
+      - name: Upload historical Archive executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: archive-history-${{ github.sha }}
+          path: ${{ runner.temp }}/roboguide-archive-history.tar.zst
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
+
+  native-archived-source:
+    name: Native archived-source recovery
+    runs-on: ubuntu-24.04
+    needs: [native-build, native-archive-history]
+    env:
+      RUST_BACKTRACE: short
+    steps:
+      - *checkout
 
       - *native_uv
 
       - *download_native
 
       - *unpack_native
+
+      - &download_archive_history
+        name: Download historical Archive executables
+        uses: actions/download-artifact@v4
+        with:
+          name: archive-history-${{ github.sha }}
+          path: ${{ runner.temp }}
+
+      - &unpack_archive_history
+        name: Unpack historical Archive executables
+        run: tar --zstd -xf "${RUNNER_TEMP}/roboguide-archive-history.tar.zst" -C "${RUNNER_TEMP}"
 
       - name: Verify actual original content Archive with zero Nodes
         run: >
@@ -512,15 +590,6 @@ jobs:
         run: >
           uv run --frozen python tools/quality/check_catalog_archive_recovery_processes.py
           --from /tmp/rg-ci-catalog-archive --output "${RUNNER_TEMP}/roboguide-catalog-archive-recovery"
-
-      - name: Build the pinned actual parent8 and Root8 compatibility writer
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api repos/${{ github.repository }}/tarball/faede53c3e149119406fa1b5bc064c7fa538db03 > "${RUNNER_TEMP}/roboguide-pre-parent9.tar.gz"
-          mkdir "${RUNNER_TEMP}/roboguide-pre-parent9"
-          tar -xzf "${RUNNER_TEMP}/roboguide-pre-parent9.tar.gz" --strip-components=1 -C "${RUNNER_TEMP}/roboguide-pre-parent9"
-          CARGO_TARGET_DIR="${RUNNER_TEMP}/roboguide-pre-parent9-target" cargo build --locked --manifest-path "${RUNNER_TEMP}/roboguide-pre-parent9/Cargo.toml" -p controller-replication --example content_network_probe
 
       - name: Verify actual archived-source initialization before any application child
         run: >
@@ -666,11 +735,11 @@ jobs:
   native-archive:
     name: Native coordinated Archive
     runs-on: ubuntu-24.04
-    needs: native-build
+    needs: [native-build, native-archive-history]
+    env:
+      RUST_BACKTRACE: short
     steps:
       - *checkout
-
-      - *native_rust
 
       - *native_uv
 
@@ -678,14 +747,9 @@ jobs:
 
       - *unpack_native
 
-      - name: Build genuine prior same-wrapper Archive writer
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api repos/${{ github.repository }}/tarball/307b0a46d2c7402f6b016fdb478d006c4a05e9b4 > "${RUNNER_TEMP}/roboguide-pre-online-archive.tar.gz"
-          mkdir "${RUNNER_TEMP}/roboguide-pre-online-archive"
-          tar -xzf "${RUNNER_TEMP}/roboguide-pre-online-archive.tar.gz" --strip-components=1 -C "${RUNNER_TEMP}/roboguide-pre-online-archive"
-          CARGO_TARGET_DIR="${RUNNER_TEMP}/roboguide-pre-online-archive-target" cargo build --locked --manifest-path "${RUNNER_TEMP}/roboguide-pre-online-archive/Cargo.toml" -p integration-server
+      - *download_archive_history
+
+      - *unpack_archive_history
 
       - name: Verify complete online Archive, producer GC, member faults and original cold recovery
         env:
@@ -713,8 +777,18 @@ jobs:
 
       - *native_rust
 
+      - name: Set up sccache for the current Federation release build
+        if: matrix.build == 'current'
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.19.0
+
       - name: Build optimized real HA processes for their declared transport budgets
         if: matrix.build == 'current'
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
+          SCCACHE_GHA_VERSION: roboguide-federation-release-v1
         run: |
           cargo build --release --locked -p integration-server -p controller-replica -p roboguide-node
           tar --zstd -cf "${RUNNER_TEMP}/roboguide-federation-current.tar.zst" \
