@@ -119,6 +119,23 @@ fn natural_process_exit(proof: &SafetyObservationProof) -> bool {
         )
 }
 
+/// Retained evidence source recorded for natural device failures observed safe without Cancel.
+const NATURAL_DEVICE_FAILURE_SOURCE: &str = "natural-failure-and-independent-device-safe-state";
+
+/// Identifies a retained natural device failure proof closed without a synthetic Cancel receipt.
+fn natural_device_failure(purpose: &SafetyStopPurpose, proof: &SafetyObservationProof) -> bool {
+    purpose.record.last_evidence_source == NATURAL_DEVICE_FAILURE_SOURCE
+        && purpose.accepted_at.is_none()
+        && purpose.receipt_digest.is_none()
+        && proof.record.payload_schema() == domain::SAFE_STATE_OBSERVATION_SCHEMA
+        && proof.observation.assurance == domain::SafetyAssurance::DeviceObservation
+        && proof.observation.safe_state
+        && proof.observation.command_id.is_none()
+        && proof.observation.process_exit.is_none()
+        && proof.observation.task_effects.is_none()
+        && proof.observation.terminal_state.as_deref() == Some("FAILED")
+}
+
 /// One fixed State export may observe multiple independent local handles without changing its object key.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -998,7 +1015,13 @@ pub(crate) fn attempt_confirmed(controller: &ControllerState, execution: &str) -
         .safety_stops
         .get(execution)
         .is_some_and(|purpose| {
-            purpose.record.may_release_ownership() && validate_confirmation(purpose).is_ok()
+            purpose.record.may_release_ownership()
+                && validate_confirmation(purpose).is_ok()
+                && !purpose.safe_proof.as_ref().is_some_and(|proof| {
+                    natural_device_failure(purpose, proof)
+                        && controller.bridge.execution_status(execution)
+                            != Some(orchestration::RemoteExecutionStatus::Failed)
+                })
         })
 }
 
@@ -1009,7 +1032,9 @@ fn validate_confirmation(purpose: &SafetyStopPurpose) -> Result<(), String> {
         .safe_proof
         .as_ref()
         .ok_or("confirmed stop checkpoint lacks its observation proof")?;
-    let natural = natural_process_exit(proof);
+    let natural_process = natural_process_exit(proof);
+    let natural_device = natural_device_failure(purpose, proof);
+    let natural = natural_process || natural_device;
     let accepted = if natural {
         purpose.accepted_at.unwrap_or(proof.received_at)
     } else {
@@ -1062,7 +1087,18 @@ fn validate_confirmation(purpose: &SafetyStopPurpose) -> Result<(), String> {
         || proof.observation.execution_id != identity.execution_id
         || proof.observation.execution_generation != identity.execution_generation
         || (proof.observation.process_exit.is_none()
-            && proof.observation.command_id.as_deref() != Some(purpose.command_id.as_str()))
+            && !natural_device
+            && (proof.observation.terminal_state.is_some()
+                || proof.observation.command_id.as_deref() != Some(purpose.command_id.as_str())))
+        || (natural_device
+            && (purpose.safe_at != Some(proof.received_at)
+                || stopped != proof.received_at
+                || proof.observation.command_id.is_some()
+                || proof.record.payload_schema() != domain::SAFE_STATE_OBSERVATION_SCHEMA
+                || proof.observation.assurance != domain::SafetyAssurance::DeviceObservation
+                || proof.observation.terminal_state.as_deref() != Some("FAILED")
+                || proof.observation.process_exit.is_some()
+                || proof.observation.task_effects.is_some()))
         || (proof.observation.process_exit.is_some()
             && (proof.observation.command_id.is_some()
                 || proof.record.payload_schema() != domain::PROCESS_EXIT_OBSERVATION_SCHEMA
@@ -1209,6 +1245,16 @@ pub(crate) fn validate_restored(controller: &ControllerState) -> Result<bool, St
                     );
                 }
             }
+            if let Some(proof) = &purpose.safe_proof
+                && natural_device_failure(purpose, proof)
+                && (attempt.status() != runtime::ExecutionStatus::Failed
+                    || attempt.command().execution_generation()
+                        != Some(identity.execution_generation))
+            {
+                return Err(
+                    "restored natural device failure differs from original attempt failure".into(),
+                );
+            }
             validate_confirmation(purpose)?;
         }
     }
@@ -1273,5 +1319,77 @@ pub(crate) fn restore_holds(controller: &mut ControllerState) -> Result<(), Stri
             )
             .map_err(|error| error.to_string())?;
     }
+    Ok(())
+}
+
+/// Seals a retained `natural-failure-and-independent-device-safe-state` confirmation in tests.
+#[cfg(test)]
+pub(crate) fn seal_natural_device_failure_for_test(
+    controller: &mut ControllerState,
+    execution_id: &str,
+    now: TimestampMs,
+) -> Result<(), String> {
+    let purpose = controller
+        .safety_stops
+        .get(execution_id)
+        .ok_or_else(|| "missing stop purpose".to_string())?;
+    let session = purpose
+        .session_id
+        .as_deref()
+        .ok_or_else(|| "missing session_id".to_string())?
+        .to_owned();
+    let policy = purpose
+        .policy
+        .as_ref()
+        .ok_or_else(|| "missing policy".to_string())?;
+    let identity = purpose.record.identity.clone();
+    let records: Vec<_> = controller
+        .bridge
+        .state_records()
+        .records()
+        .into_iter()
+        .filter(|record| {
+            record.source_epoch() == Some(session.as_str())
+                && record.received_at() >= purpose.record.requested_at
+                && record.received_at() < purpose.record.deadline
+        })
+        .collect();
+    let record = policy
+        .evaluate(&records, state::DecisionKind::Readiness, now)
+        .record
+        .ok_or_else(|| "missing evaluated observation record".to_string())?;
+    let batch: SafeStateBatch =
+        serde_json::from_value(record.value().clone()).map_err(|error| error.to_string())?;
+    let observation = batch
+        .observations
+        .into_iter()
+        .find(|item| item.execution_id == identity.execution_id)
+        .ok_or_else(|| "missing observation for execution_id".to_string())?;
+    let proof = SafetyObservationProof {
+        record: record.clone(),
+        key: record.key().clone(),
+        source_epoch: session,
+        received_at: record.received_at(),
+        valid_for_ms: record.valid_for_ms(),
+        confidence_millionths: record.confidence_millionths(),
+        sequence: record.sequence(),
+        record_digest: digest(&record)?,
+        observation,
+    };
+    let stopped = proof.received_at;
+    let confirmation_digest = digest(&(&identity, &None::<String>, stopped, &proof))?;
+    let purpose = controller
+        .safety_stops
+        .get_mut(execution_id)
+        .ok_or_else(|| "missing stop purpose".to_string())?;
+    purpose.accepted_at = None;
+    purpose.receipt_digest = None;
+    purpose.stopped_at = Some(stopped);
+    purpose.safe_at = Some(proof.received_at);
+    purpose.record.confirmed_at = Some(proof.received_at);
+    purpose.record.phase = SafetyStopPhase::StopConfirmed;
+    purpose.record.last_evidence_source = NATURAL_DEVICE_FAILURE_SOURCE.into();
+    purpose.record.last_evidence_digest = confirmation_digest;
+    purpose.safe_proof = Some(proof);
     Ok(())
 }
