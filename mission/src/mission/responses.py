@@ -443,6 +443,7 @@ class _ResponsesClient:
         service_tier: str | None = None,
         cacheable_prefix: str | None = None,
         timeout_seconds: float | None = None,
+        reasoning_effort: str | None = None,
     ) -> JSONObject:
         """Send one bounded Responses request, optionally placing a breakpoint before input_text."""
         if not model.strip() or len(model) > 256:
@@ -457,7 +458,11 @@ class _ResponsesClient:
             "instructions": instructions,
             "input": input_text,
             "store": not self._settings.llm.disable_response_storage,
-            "reasoning": {"effort": self._settings.llm.reasoning_effort},
+            "reasoning": {
+                "effort": self._settings.llm.reasoning_effort
+                if reasoning_effort is None
+                else reasoning_effort
+            },
             "text": {
                 "format": {
                     "type": "json_schema",
@@ -661,6 +666,7 @@ class ResponsesMissionPlanner:
             schema_name="mission_plan_v0",
             schema=self._client._mission_plan_provider_schema(canonical_schema, mission_id),
             service_tier=self._settings.llm.planner_service_tier,
+            reasoning_effort=self._settings.llm.planner_reasoning_effort,
         )
         generated_at_ms = int(time.time() * 1000)
         provider_output = self._client._extract_output_json(response)

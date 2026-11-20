@@ -132,6 +132,11 @@ def provider_call(
     response_id = response.get("id") if response is not None else None
     requested_tier = payload.get("service_tier")
     observed_tier = response.get("service_tier") if response is not None else None
+    reasoning = payload.get("reasoning")
+    requested_effort = reasoning.get("effort") if isinstance(reasoning, dict) else None
+    text = payload.get("text")
+    response_format = text.get("format") if isinstance(text, dict) else None
+    schema_name = response_format.get("name") if isinstance(response_format, dict) else None
     evidence: JSONObject = {
         "ordinal": len(trace.calls) + 1,
         "call_id": f"{trace.trace_id}:{len(trace.calls) + 1}",
@@ -150,6 +155,10 @@ def provider_call(
     ):
         if isinstance(tier, str) and 0 < len(tier) <= 256:
             evidence[name] = tier
+    if isinstance(requested_effort, str) and 0 < len(requested_effort) <= 256:
+        evidence["requested_reasoning_effort"] = requested_effort
+    if isinstance(schema_name, str) and 0 < len(schema_name) <= 256:
+        evidence["response_schema_name"] = schema_name
     trace.calls.append(json.dumps(evidence, sort_keys=True, separators=(",", ":")))
 
 
@@ -232,7 +241,12 @@ def validate_snapshot(value: JSONObject) -> None:
             or type(call.get("finished_at_ms")) is not int
         ):
             raise ValueError("provenance provider call identity is invalid")
-        for name in ("requested_service_tier", "observed_service_tier"):
+        for name in (
+            "requested_reasoning_effort",
+            "response_schema_name",
+            "requested_service_tier",
+            "observed_service_tier",
+        ):
             setting = call.get(name)
             if name in call and (not isinstance(setting, str) or not 0 < len(setting) <= 256):
                 raise ValueError("provenance provider request settings are invalid")

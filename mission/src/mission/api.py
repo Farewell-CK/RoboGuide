@@ -198,6 +198,11 @@ def build_engine(
                 else {}
             ),
             **(
+                {"planner_reasoning_effort": planner_settings.llm.planner_reasoning_effort}
+                if planner_settings.llm.planner_reasoning_effort is not None
+                else {}
+            ),
+            **(
                 {
                     "planning_profile": {
                         "profile_id": planning_profile.profile_id,

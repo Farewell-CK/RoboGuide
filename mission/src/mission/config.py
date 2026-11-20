@@ -61,6 +61,7 @@ class LlmSettings:
     disable_response_storage: bool
     network_access: str
     timeout_seconds: float
+    planner_reasoning_effort: str | None = None
     review_static_prefix_cache: bool = False
     planner_service_tier: str | None = None
 
@@ -216,6 +217,11 @@ def load_settings(
             planner_service_tier=(
                 _string(llm, "planner_service_tier", "mission.llm")
                 if "planner_service_tier" in llm
+                else None
+            ),
+            planner_reasoning_effort=(
+                _string(llm, "planner_reasoning_effort", "mission.llm")
+                if "planner_reasoning_effort" in llm
                 else None
             ),
         ),

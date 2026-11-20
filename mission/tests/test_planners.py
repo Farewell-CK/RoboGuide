@@ -347,6 +347,53 @@ def _assert_strict_provider_objects(value: object, path: str = "schema") -> None
         _assert_strict_provider_objects(item, f"{path}.{key}")
 
 
+@pytest.mark.parametrize("override", [None, "medium"])
+def test_planner_effort_only_reaches_planner_and_regeneration(override: str | None) -> None:
+    """Keep the same canonical draft and shared effort for the other MI adapters."""
+    fixture = _v0_8_plan()
+    mission = cast(JSONObject, fixture["mission"])
+    mission_id = cast(str, mission["id"])
+    objective = cast(str, mission["objective"])
+    output = _provider_plan(fixture)
+    transport = FakeTransport(
+        [
+            _response(
+                {"objective": objective, "constraints": [], "assumptions": [], "open_questions": []}
+            ),
+            _response(output),
+            _response(output),
+            _response(_review_output()),
+            _response(output),
+        ]
+    )
+    original = _local_settings()
+    settings = replace(original, llm=replace(original.llm, planner_reasoning_effort=override))
+    environment = {"OPENAI_API_KEY": "test-only-key"}
+    grounding = _grounding()
+    intent = ResponsesMissionInterpreter(settings, environment, transport).interpret((), grounding)
+    grounded = intent.grounded_intent()
+    catalog = _current_catalog()
+    planner = ResponsesMissionPlanner(settings, environment, transport)
+    plan = planner.plan(mission_id, grounded, catalog, grounding)
+    regenerated = planner.regenerate(
+        mission_id, grounded, catalog, grounding, output, [{"message": "fixture rejection"}]
+    )
+    review = ResponsesMissionReviewer(settings, environment, transport).review(
+        grounded, regenerated, catalog, grounding
+    )
+    repaired = ResponsesMissionRepairer(settings, environment, transport).repair(
+        mission_id, grounded, regenerated, review, catalog, grounding
+    )
+    assert grounded == GroundedIntent(objective, (), ())
+    assert plan.to_json() == fixture and plan == regenerated == repaired
+    shared = settings.llm.reasoning_effort
+    expected_planner = shared if override is None else override
+    expected_efforts = (shared, expected_planner, expected_planner, shared, shared)
+    assert [payload["reasoning"] for _, _, payload, _ in transport.requests] == [
+        {"effort": effort} for effort in expected_efforts
+    ]
+
+
 def _grounding(
     dialogue: tuple[DialogueTurn, ...] = (),
 ) -> GroundingContextSnapshot:

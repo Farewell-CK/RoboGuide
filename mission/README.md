@@ -91,9 +91,21 @@ Controller/Node 和合成状态源，保留正、负验收及权限拒绝证据�
   v0.3-v0.6、当前输出 v0.6）和只读
   规划预检快照；旧 `v0/` 继续保留，避免静默改写已版本化合同。
 
-模型配置位于 `config/mission.toml`，服务/risk policy 位于 `config/mission-service.toml`，
-凭据只从 `OPENAI_API_KEY` 读取。远程明文 HTTP
+模型配置位于 `config/mission.toml`，服务/risk policy 位于 `config/mission-service.toml`。
+凭据从 Provider 的 `api_key_env` 环境变量读取，仓库示例使用 `OPENAI_API_KEY`。远程明文 HTTP
 默认拒绝；持续联调应使用 HTTPS 或通过 SSH 映射到 localhost。
+
+对 Operation、参数和 Task 边界明确的测试，可在独立配置的 `[mission.llm]` 表中加入
+`planner_reasoning_effort = "medium"`。它用于 Planner 首次生成和结构重生成。
+未填写时 Planner 读取 `model_reasoning_effort`，Interpreter、Reviewer 和 Repairer 始终读取该共享项。
+Request provenance 为各次调用记录请求的推理强度和输出 Schema 名称。
+
+长目标可通过 `[mission].provider_plan_profile = "host-objective-v1"` 让宿主从原
+GroundedIntent 组装计划目标。使用同一套 Schema、Catalog 和独立 Review 检查草稿。
+参见 [宿主组装目标](../docs/development/mi-host-objective-v0.1.md)。
+
+Workbench 在原规划或澄清请求等待期间显示已持久化的 MI 阶段。进度读和 `/observe`
+都使用原幂等键。完整草稿由该命令的正常响应或原命令回执取得。
 
 服务可用 `service.execution_profile_path` 选择启动时冻结的
 `roboguide.execution-profile/v0.1` 部署配置。它按 canonical operation 声明 resource
@@ -185,6 +197,5 @@ uv run mission validate \
 uv run pytest -q
 ```
 
-真实模型解释/规划会产生费用并访问外部网络，必须显式运行 `mission-service` 或
-`mission plan`。正常单元测试
-只使用 Fixture 和 Fake Transport，不访问模型服务。
+真实模型解释、规划和审查在 `mission-service`、`mission plan` 或 `mission review-draft`
+运行时访问配置的模型端点并可能产生费用。正常单元测试使用 Fixture 和 Fake Transport。

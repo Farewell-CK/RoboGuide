@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import cast
 
 from mission.models import JSONObject, JSONValue
+from mission.request_record import MissionRequestLifecycle
 
 from roboguide_workbench.actions import MissionActions, checked_request
 from roboguide_workbench.client import ReadOnlyController, WorkbenchError, identifier
@@ -599,6 +600,18 @@ class WorkbenchSession(Session):
         self.last_mission = None
         return rendered
 
+    def _request_progress(self) -> Callable[[MissionRequestLifecycle], None] | None:
+        """Use the active terminal or one-shot phase display for verified MI stages."""
+        notify = getattr(self, "progress", None)
+        if not callable(notify):
+            return None
+
+        def display(lifecycle: MissionRequestLifecycle) -> None:
+            """Emit the existing localized lifecycle label."""
+            notify("MI · " + LIFECYCLE_LABELS[lifecycle.value])
+
+        return display
+
     def _command(self, text: str) -> str:
         """Dispatch explicit commands; model output never enters this method as a write."""
         command, _, argument = text.partition(" ")
@@ -747,6 +760,7 @@ class WorkbenchSession(Session):
                     "instruction": argument,
                     "submission_mode": "draft_only" if command == "/plan" else "submit_when_ready",
                 },
+                progress=self._request_progress(),
             )
             self.task_dialogue.clear()
             return self._show_request(raw)
@@ -784,7 +798,9 @@ class WorkbenchSession(Session):
                 body = {"draft_revision": old.draft_revision, "draft_digest": old.draft_digest}
                 action = command[1:]
             self.shown_draft = None
-            raw = self.actions.command(action, body, self.request_id)
+            raw = self.actions.command(
+                action, body, self.request_id, progress=self._request_progress()
+            )
             self.task_dialogue.clear()
             return self._show_request(raw)
         if command in {"/observe", "/reconcile"}:

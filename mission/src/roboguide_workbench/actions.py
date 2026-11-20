@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 import uuid
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, nullcontext, suppress
 from datetime import datetime
+from threading import Event, Lock, Thread
 from typing import cast
 from urllib.parse import quote, urlsplit
 
 from mission.models import JSONObject
-from mission.request_record import MissionRequestRecord
+from mission.request_record import MissionRequestLifecycle, MissionRequestRecord
 from mission.submission_evidence import canonical_plan_digest
 from mission.submission_intent import INTENT_REQUEST_SCHEMA
 
@@ -139,7 +143,14 @@ class MissionActions:
         self.connection = connection
         self.store = store
 
-    def _post(self, path: str, body: JSONObject, key: str | None = None) -> JSONObject:
+    def _post(
+        self,
+        path: str,
+        body: JSONObject,
+        key: str | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> JSONObject:
         """Send one command or original observation, without automatic replay or new keys."""
         headers = {"Content-Type": "application/json"}
         if self.connection.tenant is not None:
@@ -151,7 +162,7 @@ class MissionActions:
             "POST",
             headers,
             json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(),
-            self.connection.timeout,
+            self.connection.timeout if timeout is None else timeout,
             self.connection.context,
             (200, 201, 202),
         )
@@ -164,7 +175,14 @@ class MissionActions:
             raise WorkbenchError("Mission Request 身份不匹配。")
         return raw
 
-    def command(self, action: str, body: JSONObject, request_id: str | None = None) -> JSONObject:
+    def command(
+        self,
+        action: str,
+        body: JSONObject,
+        request_id: str | None = None,
+        *,
+        progress: Callable[[MissionRequestLifecycle], None] | None = None,
+    ) -> JSONObject:
         """Persist the original command; unresolved commands block further mutations."""
         if action not in {"create", "messages", "execute", "approve", "cancel"}:
             raise WorkbenchError("未开放此 Mission 操作。")
@@ -195,7 +213,13 @@ class MissionActions:
         }
         commands.append(command)
         self.store.save()
-        raw = self._post(path, body, cast(str, command["idempotency_key"]))
+        watcher = (
+            self._watch_progress(command, progress)
+            if progress is not None and action in {"create", "messages"}
+            else nullcontext()
+        )
+        with watcher:
+            raw = self._post(path, body, cast(str, command["idempotency_key"]))
         record = checked_request(raw)
         if request_id is not None and record.request_id != request_id:
             raise WorkbenchError("命令响应属于另一个 Request；保留待核对状态。")
@@ -209,6 +233,101 @@ class MissionActions:
         self.store.save()
         return raw
 
+    @contextmanager
+    def _watch_progress(
+        self, command: JSONObject, notify: Callable[[MissionRequestLifecycle], None]
+    ) -> Iterator[None]:
+        """Display durable processing stages while the original response is pending."""
+        stopped = Event()
+        display_lock = Lock()
+        original = dict(command)
+        deadline = time.monotonic() + self.connection.timeout
+
+        def display(lifecycle: MissionRequestLifecycle) -> None:
+            """Order displays before the foreground command returns."""
+            with display_lock:
+                if not stopped.is_set() and time.monotonic() < deadline:
+                    notify(lifecycle)
+
+        watcher = Thread(
+            target=self._poll_progress,
+            args=(original, stopped, deadline, display),
+            name="roboguide-mission-progress",
+            daemon=True,
+        )
+        with suppress(RuntimeError):
+            watcher.start()
+        try:
+            yield
+        finally:
+            # An in-flight observation can drain independently of the final command receipt.
+            with display_lock:
+                stopped.set()
+
+    def _poll_progress(
+        self,
+        command: JSONObject,
+        stopped: Event,
+        deadline: float,
+        display: Callable[[MissionRequestLifecycle], None],
+    ) -> None:
+        """Read only the original command and discard incomplete progress evidence."""
+        request_id = command.get("request_id")
+        previous: MissionRequestLifecycle | None = None
+        delay = 0.2
+        while not stopped.wait(min(delay, max(0.0, deadline - time.monotonic()))):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            delay = 1.0
+            try:
+                raw = self._command_observation(command, timeout=min(remaining, 0.5))
+                if raw["status"] == "complete":
+                    return
+                candidate = raw.get("progress")
+                if raw.get("executing") is not True or not isinstance(candidate, dict):
+                    continue
+                record = checked_request(candidate)
+                if raw.get("request_id") != record.request_id or request_id not in {
+                    None,
+                    record.request_id,
+                }:
+                    return
+                request_id = record.request_id
+                if record.lifecycle != previous and record.lifecycle in {
+                    MissionRequestLifecycle.RECEIVED,
+                    MissionRequestLifecycle.INTERPRETING,
+                    MissionRequestLifecycle.DRAFTED,
+                    MissionRequestLifecycle.REVIEWING,
+                    MissionRequestLifecycle.REPAIRING,
+                    MissionRequestLifecycle.SUBMITTING,
+                }:
+                    display(record.lifecycle)
+                    previous = record.lifecycle
+            except (ValueError, OSError, RuntimeError):
+                # A failed observation leaves the original foreground command in charge.
+                continue
+
+    def _command_observation(
+        self, command: JSONObject, *, reconcile: bool = False, timeout: float | None = None
+    ) -> JSONObject:
+        """Qualify the authenticated original command envelope before using any receipt."""
+        path = "/v1/http-commands/reconcile" if reconcile else "/v1/http-commands/observe"
+        body: JSONObject = {
+            "method": "POST",
+            "path": command["path"],
+            "idempotency_key": command["idempotency_key"],
+        }
+        raw = self._post(path, body) if timeout is None else self._post(path, body, timeout=timeout)
+        if raw.get("schema_version") != "roboguide.http-command-observation/v0.1" or any(
+            raw.get(field) != command.get(field)
+            for field in ("path", "method", "idempotency_key", "request_digest")
+        ):
+            raise WorkbenchError("原命令观察身份不匹配。")
+        if raw.get("status") not in ("complete", "pending"):
+            raise WorkbenchError("原命令观察状态无效。")
+        return raw
+
     def observe(self, *, reconcile: bool = False) -> JSONObject:
         """Observe the last original command under its exact scope, body digest and key."""
         commands = self.store.data.get("commands")
@@ -219,21 +338,7 @@ class MissionActions:
             raise WorkbenchError(
                 "该原命令属于 Controller，请使用取消观察路径；不会发送到 Mission Service。"
             )
-        raw = self._post(
-            "/v1/http-commands/reconcile" if reconcile else "/v1/http-commands/observe",
-            {
-                "method": "POST",
-                "path": command["path"],
-                "idempotency_key": command["idempotency_key"],
-            },
-        )
-        if raw.get("schema_version") != "roboguide.http-command-observation/v0.1" or any(
-            raw.get(field) != command.get(field)
-            for field in ("path", "method", "idempotency_key", "request_digest")
-        ):
-            raise WorkbenchError("原命令观察身份不匹配。")
-        if raw.get("status") not in {"complete", "pending"}:
-            raise WorkbenchError("原命令观察状态无效。")
+        raw = self._command_observation(command, reconcile=reconcile)
         candidate = raw.get("response") if raw.get("status") == "complete" else raw.get("progress")
         if isinstance(candidate, dict) and candidate.get("schema_version") == INTENT_REQUEST_SCHEMA:
             record = checked_request(candidate)

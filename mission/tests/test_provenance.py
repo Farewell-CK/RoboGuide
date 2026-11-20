@@ -65,6 +65,8 @@ def test_actual_transport_model_is_retained_separately_from_requested_model() ->
         assert call["requested_model"] == "requested-alias"
         assert call["observed_model"] == "observed-route"
         assert call["response_id"] == "independent-response"
+        assert call["requested_reasoning_effort"] == _local_settings().llm.reasoning_effort
+        assert call["response_schema_name"] == "result"
         assert call["response_digest"] == canonical_plan_digest(response)
         assert "Authorization" not in trace.calls[0]
         assert current_trace("another-request") is None
@@ -80,6 +82,7 @@ def test_missing_model_and_failed_call_stay_explicitly_unavailable() -> None:
         trace = current_trace("request")
         assert trace is not None
         calls = [json.loads(call) for call in trace.calls]
+        assert "requested_reasoning_effort" not in calls[0]
         assert calls[0]["observed_model"] is None
         assert calls[1]["response_digest"] is None
         assert calls[1]["error_type"] == "OSError"

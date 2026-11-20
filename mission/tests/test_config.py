@@ -27,7 +27,25 @@ def test_repository_configuration_selects_luna_without_a_secret() -> None:
         Path.cwd() / "contracts/capability/v0.3/catalog.json"
     )
     assert settings.provider.api_key_env == "OPENAI_API_KEY"
+    assert settings.llm.planner_reasoning_effort is None
     assert "sk-" not in path.read_text(encoding="utf-8")
+
+
+def test_planner_reasoning_effort_is_an_explicit_llm_setting(tmp_path: Path) -> None:
+    """Load the Planner override independently from the shared model setting."""
+    source = Path("config/mission.toml").read_text(encoding="utf-8")
+    config = tmp_path / "mission.toml"
+    config.write_text(
+        source.replace("[mission.llm]", '[mission.llm]\nplanner_reasoning_effort = "medium"')
+    )
+    settings = load_settings(config, repository_root=Path.cwd())
+    assert settings.llm.planner_reasoning_effort == "medium"
+    assert settings.llm.reasoning_effort == "xhigh"
+    config.write_text(
+        source.replace("[mission.llm]", '[mission.llm]\nplanner_reasoning_effort = " "')
+    )
+    with pytest.raises(MissionConfigError, match="planner_reasoning_effort"):
+        load_settings(config, repository_root=Path.cwd())
 
 
 def test_review_static_prefix_cache_requires_explicit_boolean(tmp_path: Path) -> None:
