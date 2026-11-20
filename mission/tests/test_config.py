@@ -30,6 +30,25 @@ def test_repository_configuration_selects_luna_without_a_secret() -> None:
     assert "sk-" not in path.read_text(encoding="utf-8")
 
 
+def test_review_static_prefix_cache_requires_explicit_boolean(tmp_path: Path) -> None:
+    """Keep the Responses wire change opt-in and validate the configuration at load time."""
+    path = Path("config/mission.toml")
+    assert not load_settings(path, repository_root=Path.cwd()).llm.review_static_prefix_cache
+    source = path.read_text(encoding="utf-8")
+    config = tmp_path / "mission.toml"
+    config.write_text(
+        source.replace("[mission.llm]", "[mission.llm]\nreview_static_prefix_cache = true"),
+        encoding="utf-8",
+    )
+    assert load_settings(config, repository_root=Path.cwd()).llm.review_static_prefix_cache
+    config.write_text(
+        source.replace("[mission.llm]", '[mission.llm]\nreview_static_prefix_cache = "true"'),
+        encoding="utf-8",
+    )
+    with pytest.raises(MissionConfigError, match="review_static_prefix_cache"):
+        load_settings(config, repository_root=Path.cwd())
+
+
 def test_remote_plaintext_provider_is_rejected_by_default() -> None:
     """Credentials cannot cross a remote plaintext HTTP endpoint accidentally."""
     settings = load_settings(Path("config/mission.toml"), repository_root=Path.cwd())

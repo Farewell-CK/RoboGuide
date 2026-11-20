@@ -691,6 +691,49 @@ def test_responses_reviewer_returns_structured_findings_with_independent_model()
     }
 
 
+def test_review_static_prefix_cache_preserves_the_complete_review_input() -> None:
+    """Cache only stable reviewer instructions and catalog before the exact request evidence."""
+    settings = _local_settings()
+    environment = {"OPENAI_API_KEY": "test-only-key"}
+    plan = MissionPlan.from_json(_v0_8_plan())
+    grounded = GroundedIntent(plan.mission.objective, (), ())
+    catalog = _current_catalog()
+    context = _semantic_grounding()
+    runtime: JSONObject = {"review_purpose": "runtime-replan"}
+    plain = FakeTransport([_response(_review_output())])
+    cached = FakeTransport([_response(_review_output())])
+    cached_settings = replace(settings, llm=replace(settings.llm, review_static_prefix_cache=True))
+    original_review = ResponsesMissionReviewer(settings, environment, plain).review_runtime(
+        grounded, plan, catalog, context, runtime
+    )
+    cached_review = ResponsesMissionReviewer(cached_settings, environment, cached).review_runtime(
+        grounded, plan, catalog, context, runtime
+    )
+
+    assert cached_review == original_review
+    standard_payload = plain.requests[0][2]
+    cached_payload = cached.requests[0][2]
+    assert cached_payload["prompt_cache_options"] == {"mode": "explicit"}
+    developer, user = cast(list[JSONObject], cached_payload["input"])
+    assert developer == {
+        "role": "developer",
+        "content": [{"type": "input_text", "text": standard_payload["instructions"]}],
+    }
+    assert user["role"] == "user"
+    prefix, suffix = cast(list[JSONObject], user["content"])
+    assert prefix["prompt_cache_breakpoint"] == {"mode": "explicit"}
+    assert set(suffix) == {"type", "text"}
+    prefix_text = cast(str, prefix["text"])
+    assert json.loads(prefix_text.removesuffix(", ") + "}") == {
+        "capability_catalog": catalog.to_json()
+    }
+    assert json.loads(prefix_text + cast(str, suffix["text"])) == json.loads(
+        cast(str, standard_payload["input"])
+    )
+    for field in ("model", "store", "text", "reasoning"):
+        assert cached_payload[field] == standard_payload[field]
+
+
 def test_reviewer_and_repairer_receive_frozen_joint_goal_guidance() -> None:
     """Reviewer and Repairer receive the exact joint goal without changing MissionPlan fields."""
     plan_json = _v0_8_plan()

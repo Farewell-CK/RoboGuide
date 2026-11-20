@@ -440,9 +440,10 @@ class _ResponsesClient:
         input_text: str,
         schema_name: str,
         schema: JSONObject,
+        cacheable_prefix: str | None = None,
         timeout_seconds: float | None = None,
     ) -> JSONObject:
-        """Send one bounded, non-streaming Responses request with strict structured output."""
+        """Send one bounded Responses request, optionally placing a breakpoint before input_text."""
         if not model.strip() or len(model) > 256:
             raise MissionProviderError(
                 "requested model identity is invalid or too long", configuration_failure=True
@@ -465,6 +466,26 @@ class _ResponsesClient:
                 }
             },
         }
+        if cacheable_prefix is not None:
+            payload.pop("instructions")
+            payload["prompt_cache_options"] = {"mode": "explicit"}
+            payload["input"] = [
+                {
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": instructions}],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": cacheable_prefix,
+                            "prompt_cache_breakpoint": {"mode": "explicit"},
+                        },
+                        {"type": "input_text", "text": input_text},
+                    ],
+                },
+            ]
         ensure_provider_budget()
         started_at_ms = int(time.time() * 1000)
         try:
@@ -762,19 +783,20 @@ class ResponsesMissionReviewer:
                 "its grounded intent drops or changes any requested goal, scope, or constraint. "
                 "Keep request-level authorization separate from task execution objectives."
             )
+        review_input = _with_planning_world_evidence(review_payload, grounding_context)
+        cacheable_prefix = None
+        if self._settings.llm.review_static_prefix_cache:
+            # Keep the Catalog in user data and the request-specific evidence after the breakpoint.
+            catalog = {"capability_catalog": review_input.pop("capability_catalog")}
+            cacheable_prefix = json.dumps(catalog, ensure_ascii=False, sort_keys=True)[:-1] + ", "
+        input_text = json.dumps(review_input, ensure_ascii=False, sort_keys=True)
         response = self._client._request(
             model=self._settings.llm.review_model,
             instructions=instructions,
-            input_text=json.dumps(
-                _with_planning_world_evidence(
-                    review_payload,
-                    grounding_context,
-                ),
-                ensure_ascii=False,
-                sort_keys=True,
-            ),
+            input_text=input_text if cacheable_prefix is None else input_text[1:],
             schema_name="mission_review_v0",
             schema=_review_schema(),
+            cacheable_prefix=cacheable_prefix,
         )
         return MissionPlanReview.from_json(self._client._extract_output_json(response))
 

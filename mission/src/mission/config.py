@@ -61,6 +61,7 @@ class LlmSettings:
     disable_response_storage: bool
     network_access: str
     timeout_seconds: float
+    review_static_prefix_cache: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +207,11 @@ def load_settings(
             disable_response_storage=_boolean(llm, "disable_response_storage", "mission.llm"),
             network_access=_string(llm, "network_access", "mission.llm"),
             timeout_seconds=_positive_number(llm, "timeout_seconds", "mission.llm"),
+            review_static_prefix_cache=(
+                _boolean(llm, "review_static_prefix_cache", "mission.llm")
+                if "review_static_prefix_cache" in llm
+                else False
+            ),
         ),
         provider=ProviderSettings(
             name=_string(provider, "name", f"model_providers.{provider_name}"),

@@ -159,6 +159,15 @@ uv run mission review-draft --input draft.json --mission-id mission-demo \
   --objective '调用一次 system.ping@v1 验证软件执行路径' --output reviewed.json
 ```
 
+## Reviewer 前缀缓存
+
+在支持 Responses API 显式缓存断点的 Provider 上，可以给独立 Reviewer 开启固定前缀缓存。
+通过 `[mission.llm]` 下的 `review_static_prefix_cache = true` 启用。固定前缀包含
+Reviewer Prompt 和配置的 Catalog。草稿、用户原话、Grounding 和运行时证据进入同一次请求，
+排在缓存断点之后。推理强度沿用此模型的配置。
+可从 Provider 响应的 `usage.input_tokens_details.cached_tokens` 查看实际复用量。
+参见 [OpenAI Prompt Caching](https://developers.openai.com/api/docs/guides/prompt-caching)。
+
 ```bash
 uv sync --dev
 uv run mission-service
