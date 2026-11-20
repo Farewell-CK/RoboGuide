@@ -65,6 +65,8 @@ def test_actual_transport_model_is_retained_separately_from_requested_model() ->
         assert call["requested_model"] == "requested-alias"
         assert call["observed_model"] == "observed-route"
         assert call["response_id"] == "independent-response"
+        assert call["requested_reasoning_effort"] == _local_settings().llm.reasoning_effort
+        assert call["response_schema_name"] == "result"
         assert call["response_digest"] == canonical_plan_digest(response)
         assert "Authorization" not in trace.calls[0]
         assert current_trace("another-request") is None
@@ -80,10 +82,25 @@ def test_missing_model_and_failed_call_stay_explicitly_unavailable() -> None:
         trace = current_trace("request")
         assert trace is not None
         calls = [json.loads(call) for call in trace.calls]
+        assert "requested_reasoning_effort" not in calls[0]
         assert calls[0]["observed_model"] is None
         assert calls[1]["response_digest"] is None
         assert calls[1]["error_type"] == "OSError"
         assert len({call["call_id"] for call in calls}) == 2
+
+
+def test_service_tier_provenance_records_requested_and_observed_separately() -> None:
+    """Preserve the actual service tier, including fallback and unavailable responses."""
+    with trace_deliberation("request", "input"):
+        provider_call({"service_tier": "ultrafast"}, {"service_tier": "default"}, None, 4, 5)
+        provider_call({"service_tier": "ultrafast"}, None, OSError("transport lost"), 6, 7)
+        trace = current_trace("request")
+        assert trace is not None
+        fallback, unavailable = (json.loads(item) for item in trace.calls)
+        assert fallback["requested_service_tier"] == "ultrafast"
+        assert fallback["observed_service_tier"] == "default"
+        assert unavailable["requested_service_tier"] == "ultrafast"
+        assert "observed_service_tier" not in unavailable
 
 
 def test_provider_limit_refuses_before_an_unrecordable_call() -> None:
@@ -245,3 +262,87 @@ def test_live_prompt_change_is_rejected_before_transport(tmp_path: Path) -> None
     with pytest.raises(MissionProviderError, match="changed since startup"):
         client._load_prompt(prompt)
     assert transport.requests == []
+
+
+def test_token_usage_is_recorded_and_validated_when_present() -> None:
+    """Capture bounded token usage counts cleanly without breaking snapshots lacking usage."""
+    from mission.provenance import validate_snapshot
+
+    with trace_deliberation("request-usage", "input"):
+        provider_call(
+            {"model": "gpt-6.1-sol"},
+            {
+                "model": "gpt-6.1-sol",
+                "id": "resp-usage",
+                "status": "completed",
+                "usage": {
+                    "input_tokens": 1200,
+                    "output_tokens": 85,
+                    "total_tokens": 1285,
+                    "input_tokens_details": {"cached_tokens": 900, "cache_write_tokens": 256},
+                    "output_tokens_details": {"reasoning_tokens": 12},
+                },
+            },
+            None,
+            10,
+            20,
+        )
+        snap = snapshot("{}", "request-usage", "input", "sha256:" + "a" * 64, None, 1, "Drafted")
+        validate_snapshot(snap)
+        calls = cast(list[JSONObject], snap["provider_calls"])
+        assert calls[0]["token_usage"] == {
+            "input_tokens": 1200,
+            "output_tokens": 85,
+            "total_tokens": 1285,
+            "cached_tokens": 900,
+            "cache_write_tokens": 256,
+            "reasoning_tokens": 12,
+        }
+        calls[0]["token_usage"] = {"cached_tokens": -1}
+        with pytest.raises(ValueError, match="token_usage"):
+            validate_snapshot(snap)
+
+
+def test_cache_prefix_digest_ignores_request_suffix_and_tracks_schema_order() -> None:
+    """Record an order-sensitive prefix identity while omitting changing request data."""
+    from mission.provenance import validate_snapshot
+
+    def identify(dynamic: str, schema_keys: tuple[str, str]) -> str:
+        """Record a real request envelope under a fresh Request trace."""
+        payload: JSONObject = {
+            "model": "gpt-6.1-sol",
+            "text": {
+                "format": {
+                    "name": "mission_plan_v0",
+                    "schema": {key: "value" for key in schema_keys},
+                }
+            },
+            "input": [
+                {"role": "developer", "content": [{"type": "input_text", "text": "instructions"}]},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "catalog",
+                            "prompt_cache_breakpoint": {"mode": "explicit"},
+                        },
+                        {"type": "input_text", "text": dynamic},
+                    ],
+                },
+            ],
+        }
+        with trace_deliberation("request-prefix", "input"):
+            provider_call(payload, None, None, 10, 20)
+            snap = snapshot(
+                "{}", "request-prefix", "input", "sha256:" + "a" * 64, None, 1, "Drafted"
+            )
+            validate_snapshot(snap)
+            call = cast(list[JSONObject], snap["provider_calls"])[0]
+            assert call["stage"] == "planner"
+            assert dynamic not in json.dumps(call)
+            return cast(str, call["cache_prefix_digest"])
+
+    first = identify("dynamic-request-one", ("a", "b"))
+    assert first == identify("dynamic-request-two", ("a", "b"))
+    assert first != identify("dynamic-request-two", ("b", "a"))

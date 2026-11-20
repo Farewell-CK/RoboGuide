@@ -268,6 +268,7 @@ def run(args: argparse.Namespace) -> int:
             flags=re.MULTILINE,
         )
         settings = tomllib.loads(config)
+        llm = settings["mission"]["llm"]
         runtime_config = output / "mission-runtime.toml"
         runtime_config.write_text(config, encoding="utf-8")
         binary_root = args.binary_root.resolve()
@@ -279,9 +280,14 @@ def run(args: argparse.Namespace) -> int:
             "roboguide_commit": git(repo, "rev-parse", "HEAD"),
             "roboguide_status": git(repo, "status", "--short"),
             "coherent_commit": git(args.coherent_root, "rev-parse", "HEAD"),
-            "model": settings["mission"]["llm"]["model"],
-            "review_model": settings["mission"]["llm"]["review_model"],
-            "reasoning_effort": settings["mission"]["llm"]["model_reasoning_effort"],
+            "model": llm["model"],
+            "review_model": llm["review_model"],
+            "reasoning_effort": llm["model_reasoning_effort"],
+            **(
+                {"planner_reasoning_effort": llm["planner_reasoning_effort"]}
+                if "planner_reasoning_effort" in llm
+                else {}
+            ),
             "max_steps": max_steps,
             "max_planning_segments": args.max_segments,
             "ports": ports,
@@ -618,9 +624,7 @@ def run(args: argparse.Namespace) -> int:
                 json_write(output / "controller-events.json", controller_event_archive(api))
             except (OSError, ValueError) as error:
                 json_write(output / "controller-events-error.json", {"error": str(error)})
-            for route, filename in (
-                ("execution-attempts", "execution-attempts.json"),
-            ):
+            for route, filename in (("execution-attempts", "execution-attempts.json"),):
                 try:
                     _, body = http_json("GET", api + "/v1/" + route)
                     json_write(output / filename, body)

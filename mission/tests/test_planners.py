@@ -25,6 +25,7 @@ from mission.grounding_reader import EmptyMissionGroundingReader
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.planners import FixturePlanner
+from mission.planning_profile import DeploymentPlanningProfile
 from mission.provider_errors import MissionIdentityError, MissionProviderError
 from mission.provider_mission_plan import (
     ProviderMissionPlanError,
@@ -347,11 +348,106 @@ def _assert_strict_provider_objects(value: object, path: str = "schema") -> None
         _assert_strict_provider_objects(item, f"{path}.{key}")
 
 
+@pytest.mark.parametrize("override", [None, "medium"])
+def test_planner_effort_only_reaches_planner_and_regeneration(override: str | None) -> None:
+    """Keep the same canonical draft and shared effort for the other MI adapters."""
+    fixture = _v0_8_plan()
+    mission = cast(JSONObject, fixture["mission"])
+    mission_id = cast(str, mission["id"])
+    objective = cast(str, mission["objective"])
+    output = _provider_plan(fixture)
+    transport = FakeTransport(
+        [
+            _response(
+                {"objective": objective, "constraints": [], "assumptions": [], "open_questions": []}
+            ),
+            _response(output),
+            _response(output),
+            _response(_review_output()),
+            _response(output),
+        ]
+    )
+    original = _local_settings()
+    settings = replace(original, llm=replace(original.llm, planner_reasoning_effort=override))
+    environment = {"OPENAI_API_KEY": "test-only-key"}
+    grounding = _grounding()
+    intent = ResponsesMissionInterpreter(settings, environment, transport).interpret((), grounding)
+    grounded = intent.grounded_intent()
+    catalog = _current_catalog()
+    planner = ResponsesMissionPlanner(settings, environment, transport)
+    plan = planner.plan(mission_id, grounded, catalog, grounding)
+    regenerated = planner.regenerate(
+        mission_id, grounded, catalog, grounding, output, [{"message": "fixture rejection"}]
+    )
+    review = ResponsesMissionReviewer(settings, environment, transport).review(
+        grounded, regenerated, catalog, grounding
+    )
+    repaired = ResponsesMissionRepairer(settings, environment, transport).repair(
+        mission_id, grounded, regenerated, review, catalog, grounding
+    )
+    assert grounded == GroundedIntent(objective, (), ())
+    assert plan.to_json() == fixture and plan == regenerated == repaired
+    shared = settings.llm.reasoning_effort
+    expected_planner = shared if override is None else override
+    expected_efforts = (shared, expected_planner, expected_planner, shared, shared)
+    assert [payload["reasoning"] for _, _, payload, _ in transport.requests] == [
+        {"effort": effort} for effort in expected_efforts
+    ]
+
+
 def _grounding(
     dialogue: tuple[DialogueTurn, ...] = (),
 ) -> GroundingContextSnapshot:
     """Build one attributed empty snapshot for deterministic provider tests."""
     return EmptyMissionGroundingReader().capture("request-test", dialogue, 10)
+
+
+def test_planner_service_tier_applies_to_both_planner_attempts() -> None:
+    """Keep the tier opt-in scoped to first generation and its structural regeneration."""
+    fixture = _v0_8_plan()
+    plan = MissionPlan.from_json(fixture)
+    output = _provider_plan(fixture)
+    objective = plan.mission.objective
+    transport = FakeTransport(
+        [
+            _response(
+                {"objective": objective, "constraints": [], "assumptions": [], "open_questions": []}
+            ),
+            _response(output),
+            _response(output),
+            _response(_review_output()),
+            _response(output),
+        ]
+    )
+    original = _local_settings()
+    settings = replace(original, llm=replace(original.llm, planner_service_tier="ultrafast"))
+    environment = {"OPENAI_API_KEY": "test-only-key"}
+    context = _grounding()
+    catalog = _current_catalog()
+    assessment = ResponsesMissionInterpreter(settings, environment, transport).interpret(
+        (), context
+    )
+    intent = assessment.grounded_intent()
+    mission_id = plan.mission.mission_id
+    planner = ResponsesMissionPlanner(settings, environment, transport)
+    assert planner.plan(mission_id, intent, catalog, context) == plan
+    regenerated = planner.regenerate(
+        mission_id, intent, catalog, context, output, [{"message": "fixture rejection"}]
+    )
+    review = ResponsesMissionReviewer(settings, environment, transport).review(
+        intent, regenerated, catalog, context
+    )
+    repaired = ResponsesMissionRepairer(settings, environment, transport).repair(
+        mission_id, intent, regenerated, review, catalog, context
+    )
+    assert plan == regenerated == repaired
+    assert [payload.get("service_tier") for _, _, payload, _ in transport.requests] == [
+        None,
+        "ultrafast",
+        "ultrafast",
+        None,
+        None,
+    ]
 
 
 def _semantic_grounding() -> GroundingContextSnapshot:
@@ -691,6 +787,64 @@ def test_responses_reviewer_returns_structured_findings_with_independent_model()
     }
 
 
+def test_review_static_prefix_cache_preserves_the_complete_review_input() -> None:
+    """Cache frozen reviewer assets while preserving the exact request evidence."""
+    settings = _local_settings()
+    environment = {"OPENAI_API_KEY": "test-only-key"}
+    plan = MissionPlan.from_json(_v0_8_plan())
+    grounded = GroundedIntent(plan.mission.objective, (), ())
+    catalog = _current_catalog()
+    context = _semantic_grounding()
+    profile = DeploymentPlanningProfile.load(
+        Path("scenarios/e1-shared-world-episode-51/planning-profile.json")
+    )
+    runtime: JSONObject = {"review_purpose": "runtime-replan"}
+    plain = FakeTransport([_response(_review_output())])
+    cached = FakeTransport([_response(_review_output())])
+    cached_settings = replace(settings, llm=replace(settings.llm, review_static_prefix_cache=True))
+    original_review = ResponsesMissionReviewer(
+        settings, environment, plain, planning_profile=profile
+    ).review_runtime(grounded, plan, catalog, context, runtime)
+    cached_review = ResponsesMissionReviewer(
+        cached_settings, environment, cached, planning_profile=profile
+    ).review_runtime(grounded, plan, catalog, context, runtime)
+
+    assert cached_review == original_review
+    standard_payload = plain.requests[0][2]
+    cached_payload = cached.requests[0][2]
+    assert cached_payload["prompt_cache_options"] == {"mode": "explicit"}
+    developer, user = cast(list[JSONObject], cached_payload["input"])
+    assert developer == {
+        "role": "developer",
+        "content": [{"type": "input_text", "text": standard_payload["instructions"]}],
+    }
+    assert user["role"] == "user"
+    prefix, suffix = cast(list[JSONObject], user["content"])
+    assert prefix["prompt_cache_breakpoint"] == {"mode": "explicit"}
+    assert set(suffix) == {"type", "text"}
+    prefix_text = cast(str, prefix["text"])
+    assert json.loads(prefix_text.removesuffix(", ") + "}") == {
+        "capability_catalog": catalog.to_json(),
+        "deployment_planning_profile": profile.to_json(),
+        "satisfaction_policy": (
+            settings.satisfaction_policy.to_json() if settings.satisfaction_policy else None
+        ),
+    }
+    assert json.loads(prefix_text + cast(str, suffix["text"])) == json.loads(
+        cast(str, standard_payload["input"])
+    )
+    suffix_text = cast(str, suffix["text"])
+    dynamic = json.loads("{" + suffix_text)
+    assert "runtime_replanning_context" in dynamic
+    assert "grounding_context" in dynamic
+    assert (
+        suffix_text
+        == json.dumps(dynamic, ensure_ascii=False, sort_keys=True, separators=(",", ":"))[1:]
+    )
+    for field in ("model", "store", "text", "reasoning"):
+        assert cached_payload[field] == standard_payload[field]
+
+
 def test_reviewer_and_repairer_receive_frozen_joint_goal_guidance() -> None:
     """Reviewer and Repairer receive the exact joint goal without changing MissionPlan fields."""
     plan_json = _v0_8_plan()
@@ -937,3 +1091,364 @@ def test_responses_interpreter_preserves_open_questions_before_planning() -> Non
     schema = cast(JSONObject, response_format["schema"])
     properties = cast(JSONObject, schema["properties"])
     assert "blocking" in cast(str, cast(JSONObject, properties["open_questions"])["description"])
+
+
+def test_per_stage_model_effort_tier_and_prefix_cache_routing() -> None:
+    """Interpreter, Planner, Reviewer, and Repairer independently honor stage overrides."""
+    fixture = _v0_8_plan()
+    plan = MissionPlan.from_json(fixture)
+    output = _provider_plan(fixture)
+    objective = plan.mission.objective
+    transport = FakeTransport(
+        [
+            _response(
+                {"objective": objective, "constraints": [], "assumptions": [], "open_questions": []}
+            ),
+            _response(output),
+            _response(_review_output()),
+            _response(output),
+        ]
+    )
+    original = _local_settings()
+    settings = replace(
+        original,
+        llm=replace(
+            original.llm,
+            interpreter_model="interp-fast",
+            interpreter_reasoning_effort="minimal",
+            interpreter_service_tier="ultrafast",
+            interpreter_static_prefix_cache=True,
+            planner_model="plan-sol",
+            planner_reasoning_effort="low",
+            planner_service_tier="ultrafast",
+            planner_static_prefix_cache=True,
+            review_model="rev-fast",
+            review_reasoning_effort="low",
+            review_service_tier="priority",
+            review_static_prefix_cache=True,
+            repair_model="rep-sol",
+            repair_reasoning_effort="medium",
+            repair_service_tier="ultrafast",
+            repair_static_prefix_cache=True,
+        ),
+    )
+    environment = {"OPENAI_API_KEY": "test-only-key"}
+    grounding = _grounding()
+    catalog = _current_catalog()
+
+    intent = ResponsesMissionInterpreter(settings, environment, transport).interpret((), grounding)
+    grounded = intent.grounded_intent()
+    planned = ResponsesMissionPlanner(settings, environment, transport).plan(
+        plan.mission.mission_id, grounded, catalog, grounding
+    )
+    review = ResponsesMissionReviewer(settings, environment, transport).review(
+        grounded, planned, catalog, grounding
+    )
+    repaired = ResponsesMissionRepairer(settings, environment, transport).repair(
+        plan.mission.mission_id, grounded, planned, review, catalog, grounding
+    )
+    assert planned == plan == repaired
+
+    models = [p["model"] for _, _, p, _ in transport.requests]
+    efforts = [p["reasoning"] for _, _, p, _ in transport.requests]
+    tiers = [p.get("service_tier") for _, _, p, _ in transport.requests]
+    assert models == ["interp-fast", "plan-sol", "rev-fast", "rep-sol"]
+    assert efforts == [
+        {"effort": "minimal"},
+        {"effort": "low"},
+        {"effort": "low"},
+        {"effort": "medium"},
+    ]
+    assert tiers == ["ultrafast", "ultrafast", "priority", "ultrafast"]
+    # Every stage has explicit cache breakpoint enabled
+    assert all(
+        p.get("prompt_cache_options") == {"mode": "explicit"} for _, _, p, _ in transport.requests
+    )
+    # Interpreter puts breakpoint on developer instructions
+    interp_dev = cast(list[JSONObject], transport.requests[0][2]["input"])[0]
+    assert cast(list[JSONObject], interp_dev["content"])[0]["prompt_cache_breakpoint"] == {
+        "mode": "explicit"
+    }
+    # Planner & Repairer preserve lossless static + dynamic JSON split
+    for idx in (1, 3):
+        user = cast(list[JSONObject], transport.requests[idx][2]["input"])[1]
+        prefix, suffix = cast(list[JSONObject], user["content"])
+        assert prefix["prompt_cache_breakpoint"] == {"mode": "explicit"}
+        combined = json.loads(cast(str, prefix["text"]) + cast(str, suffix["text"]))
+        assert "capability_catalog" in combined and "grounding_context" in combined
+
+
+def test_compact_grounding_for_llm_preserves_semantics_without_mutating_snapshot() -> None:
+    """Compact LLM projection keeps battery, posture, and scene centers while stripping noise."""
+    import hashlib
+
+    from mission.grounding_context import (
+        GroundingContextSnapshot,
+        GroundingFreshness,
+        MemoryContentStatus,
+        MemoryGroundingEvidence,
+        StateGroundingEvidence,
+        dialogue_digest,
+        evidence_id,
+        grounding_selection_policy_ref,
+    )
+    from mission.origin_evidence import canonical_origin
+    from mission.responses import project_grounding_for_llm
+
+    scene_def = json.dumps(
+        {
+            "map_binding": {"map_id": "1101_visual_dog2", "mode": "localization"},
+            "regions": [
+                {
+                    "annotation_id": "anno.4c5ac08a",
+                    "kind": "region",
+                    "name": "王老师办公室门口",
+                    "points": [[7.0, -6.5], [8.0, -6.5], [8.0, -5.5], [7.0, -5.5]],
+                    "stale": False,
+                    "created_at": 1793584041.0,
+                }
+            ],
+        },
+        ensure_ascii=False,
+    )
+    phys_val: JSONObject = {
+        "physical_entity_id": "entity-lite3-dog2",
+        "posture": {
+            "availability": "reported_current",
+            "reported_posture": "down",
+            "aggregate_age_ms": 100.0,
+            "sample_received_at_ns": 1795078876487807064,
+        },
+        "battery": {
+            "availability": "reported_current",
+            "percent": 25.0,
+            "remaining_at_publisher_ms": 4800,
+        },
+        "mapping": {
+            "map_id": "1101_visual_dog2",
+            "mode": "localization",
+            "response_received_at_ns": 1795078875000000000,
+            "reported_pose": {"x": 1.23456, "y": -0.98765, "theta": 0.54321},
+        },
+    }
+    scene_val: JSONObject = {
+        "physical_entity_id": "entity-lite3-dog2",
+        "availability": "current",
+        "definition_json": scene_def,
+        "localization_verified": False,
+        "arrival_verified": False,
+        "reason": None,
+        "sample_started_at_ns": 1795078870000000000,
+        "source_documents": {"doc": "sha256:" + "0" * 64},
+    }
+    phys_ev = StateGroundingEvidence(
+        evidence_id("state", {"id": "phys"}),
+        "robot-physical-observation",
+        "entity-lite3-dog2",
+        "reported",
+        "node:lite3-dog2/physical-observer",
+        "physical-observation",
+        "roboguide.world.robot-physical-observation/v0.1",
+        phys_val,
+        1000,
+        1000,
+        5000,
+        GroundingFreshness.FRESH,
+        None,
+        "epoch-1",
+        1,
+    )
+    scene_ev = StateGroundingEvidence(
+        evidence_id("state", {"id": "scene"}),
+        "scene-targets",
+        "entity-lite3-dog2",
+        "reported",
+        "node:lite3-dog2/physical-observer",
+        "scene-targets",
+        "roboguide.world.scene-targets/v0.2",
+        scene_val,
+        1000,
+        1000,
+        15000,
+        GroundingFreshness.FRESH,
+        None,
+        "epoch-1",
+        2,
+    )
+    d_digest = dialogue_digest(())
+    policy_ref = grounding_selection_policy_ref(frozenset())
+    origin_content: JSONObject = {
+        "schema_version": "roboguide.reported-origin/v0.1",
+        "node_id": "lite3-dog2",
+        "memory_id": "origin-compact-1",
+        "captured_at_ns": 1794296015841507192,
+        "attempt_id": "attempt-1",
+        "source_mission_id": "mission-origin-1",
+        "source_task_id": "record-origin",
+        "source_execution_id": "exec-origin-1",
+        "position": {
+            "frame_basis": "local Mapping map; shared physical frame unverified",
+            "map_id": "1101_visual_dog2",
+            "map_revision": None,
+            "x_m": 0.48122513399,
+            "y_m": 1.03076049063,
+            "yaw_rad": -0.21670256745,
+        },
+        "mapping_observation": {
+            "availability": "current",
+            "age_ms": 150.0,
+            "freshness_basis": "verbose explanatory text",
+            "received_at_ns": 1794296015691507192,
+            "value": {
+                "has_backup": True,
+                "has_map": True,
+                "map_id": "1101_visual_dog2",
+                "mode": "localization",
+                "pose": {"x": 0.48122513399, "y": 1.03076049063, "theta": -0.21670256745},
+            },
+        },
+        "pose_measurement_time": None,
+        "localization_verified": False,
+        "motion_authorized": False,
+    }
+    origin_raw = canonical_origin(origin_content)
+    origin_ev = MemoryGroundingEvidence(
+        evidence_id=evidence_id("memory", {"memory_id": "origin-compact-1", "revision_id": "r1"}),
+        memory_id="origin-compact-1",
+        revision_id="r1",
+        kind="experience",
+        provider_id="reported-origins",
+        owner={"owner": "node", "node_id": "lite3-dog2", "local_system_id": "robot-observer"},
+        scope="global",
+        visibility="exchangeable",
+        payload_schema="roboguide.reported-origin/v0.1",
+        media_type="application/json",
+        artifact={
+            "content_digest": "sha256:" + hashlib.sha256(origin_raw).hexdigest(),
+            "byte_size": len(origin_raw),
+        },
+        source_mission_id="mission-origin-1",
+        source_execution_id="exec-origin-1",
+        source_task_ref={"mission_id": "mission-origin-1", "task_id": "record-origin"},
+        created_at_ms=1000,
+        content_status=MemoryContentStatus.VERIFIED_ORIGIN,
+        content=origin_content,
+    )
+    snap = GroundingContextSnapshot.create(
+        request_id="request-compact",
+        dialogue_digest=d_digest,
+        captured_at_ms=1000,
+        selection_policy_ref=policy_ref,
+        state_evidence=(phys_ev, scene_ev),
+        memory_evidence=(origin_ev,),
+        gaps=(),
+    )
+    states_by_type = {
+        cast(str, cast(JSONObject, s["object"])["object_type"]): s
+        for s in cast(list[JSONObject], project_grounding_for_llm(snap)["state_evidence"])
+    }
+    before_raw = snap.to_json()
+    projected = project_grounding_for_llm(snap)
+    assert snap.to_json() == before_raw  # snapshot immutable!
+    assert "state_evidence" in projected
+    p_val = cast(JSONObject, states_by_type["robot-physical-observation"]["value"])
+    assert p_val["battery"] == {"availability": "reported_current", "percent": 25.0}
+    assert p_val["posture"] == {"availability": "reported_current", "reported_posture": "down"}
+    assert "response_received_at_ns" not in cast(JSONObject, p_val["mapping"])
+    s_val = cast(JSONObject, states_by_type["scene-targets"]["value"])
+    assert "sample_started_at_ns" not in s_val
+    regions = cast(list[JSONObject], cast(JSONObject, s_val["scene"])["regions"])
+    assert regions[0]["name"] == "王老师办公室门口"
+    assert regions[0]["center_xy"] == [7.5, -6.0]
+    assert regions[0]["bounds_xy"] == [7.0, -6.5, 8.0, -5.5]
+    assert "points" not in regions[0]
+    mems = cast(list[JSONObject], projected["memory_evidence"])
+    m_content = cast(JSONObject, mems[0]["content"])
+    assert m_content["position"] == {
+        "frame_basis": "local Mapping map; shared physical frame unverified",
+        "map_id": "1101_visual_dog2",
+        "map_revision": None,
+        "x_m": 0.481,
+        "y_m": 1.031,
+        "yaw_rad": -0.217,
+    }
+    assert m_content["mapping_observation"] == {
+        "availability": "current",
+        "map_id": "1101_visual_dog2",
+        "mode": "localization",
+        "has_map": True,
+        "has_backup": True,
+    }
+    assert "captured_at_ns" not in m_content
+    assert mems[0]["media_type"] == "application/json"
+    assert mems[0]["visibility"] == "exchangeable"
+    assert mems[0]["provider_id"] == "reported-origins"
+
+
+def test_static_provider_schema_reuses_identical_schema_and_still_rejects_wrong_id() -> None:
+    """Static provider schema stays identical across Missions and still rejects ID drift."""
+    fixture_alpha = _v0_8_plan()
+    cast(JSONObject, fixture_alpha["mission"])["id"] = "mission-alpha"
+    plan_alpha = MissionPlan.from_json(fixture_alpha)
+    fixture_wrong = _v0_8_plan()
+    cast(JSONObject, fixture_wrong["mission"])["id"] = "mission-wrong-id"
+    transport = FakeTransport(
+        [_response(_provider_plan(fixture_alpha)), _response(_provider_plan(fixture_wrong))]
+    )
+    original = _local_settings()
+    settings = replace(original, llm=replace(original.llm, static_provider_schema=True))
+    planner = ResponsesMissionPlanner(settings, {"OPENAI_API_KEY": "test-only-key"}, transport)
+    intent = GroundedIntent(plan_alpha.mission.objective, (), ())
+    planned = planner.plan("mission-alpha", intent, _current_catalog(), _grounding())
+    assert planned.mission.mission_id == "mission-alpha"
+    with pytest.raises(MissionIdentityError, match="model changed the requested mission id"):
+        planner.plan("mission-beta", intent, _current_catalog(), _grounding())
+    schemas = [
+        cast(JSONObject, cast(JSONObject, p["text"])["format"])["schema"]
+        for _, _, p, _ in transport.requests
+    ]
+    assert len(schemas) == 2
+    assert schemas[0] == schemas[1]
+
+
+def test_compact_planner_uses_full_admission_and_refuses_wrong_mission_id() -> None:
+    """Exercise the opt-in Planner through transport, canonical assembly and identity rejection."""
+    canonical = _v0_8_plan()
+    mission = cast(JSONObject, canonical["mission"])
+    mission["id"] = "mission-compact"
+    intent = GroundedIntent(cast(str, mission["objective"]), (), ())
+    compact = _provider_plan(canonical)
+    compact["schema_version"] = "roboguide.mission-plan/v0.10"
+    compact["provider_profile"] = "host-objective-v1"
+    del cast(JSONObject, compact["mission"])["objective"]
+    for task in cast(list[JSONObject], compact["tasks"]):
+        if task.get("timing") == {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": None,
+            "completion_deadline_offset_ms": None,
+        }:
+            task["timing"] = None
+        satisfaction = cast(JSONObject, task["satisfaction"])
+        if satisfaction.get("basis") == "execution-report":
+            del satisfaction["verifier"]
+    wrong = deepcopy(compact)
+    cast(JSONObject, wrong["mission"])["id"] = "wrong-mission"
+    transport = FakeTransport([_response(compact), _response(wrong)])
+    original = _local_settings()
+    settings = replace(
+        original,
+        contract_version="roboguide.mission-plan/v0.10",
+        schema_path=Path("contracts/mission/v0.10/mission-plan.schema.json"),
+        provider_plan_profile="host-objective-v1",
+        llm=replace(original.llm, planner_compact_output=True, static_provider_schema=True),
+    )
+    planner = ResponsesMissionPlanner(settings, {"OPENAI_API_KEY": "test-only-key"}, transport)
+    plan = planner.plan("mission-compact", intent, _current_catalog(), _grounding())
+    canonical["schema_version"] = "roboguide.mission-plan/v0.10"
+    assert plan.to_json() == MissionPlan.from_json(canonical).to_json()
+    with pytest.raises(MissionIdentityError, match="model changed the requested mission id"):
+        planner.plan("mission-compact", intent, _current_catalog(), _grounding())
+    for _, _, payload, _ in transport.requests:
+        assert cast(JSONObject, cast(JSONObject, payload["text"])["format"])["name"] == (
+            "mission_plan_compact_v1"
+        )

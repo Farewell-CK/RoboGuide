@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import cast
 
@@ -10,10 +11,12 @@ import pytest
 from mission.contract_values import JSONObject, JSONValue, MissionPlanError
 from mission.models import MissionPlan
 from mission.provider_mission_plan import (
+    HOST_OBJECTIVE_PROFILE,
     ProviderMissionPlanError,
     build_mission_plan_provider_schema,
     normalize_mission_plan_provider_output,
 )
+from mission.submission_evidence import canonical_plan_digest
 
 FIXTURE = Path("scenarios/mission-front-half-v0.7/mission-plan.json")
 SCHEMA = Path("contracts/mission/v0.8/mission-plan.schema.json")
@@ -334,3 +337,182 @@ def test_malformed_non_null_optional_value_still_fails_canonical_validation(
 
     with pytest.raises(MissionPlanError, match="physical_entity must be nonblank text"):
         MissionPlan.from_json(normalized)
+
+
+def test_static_provider_schema_mode_stays_invariant_across_mission_ids() -> None:
+    """Unbound Mission ID keeps the strict provider schema identical across Missions."""
+    canonical = _canonical_schema()
+    first = build_mission_plan_provider_schema(
+        canonical, mission_id="mission-one", bind_mission_id=False
+    )
+    second = build_mission_plan_provider_schema(
+        canonical, mission_id="mission-two", bind_mission_id=False
+    )
+    assert first == second
+    id_schema = cast(
+        JSONObject,
+        cast(
+            JSONObject,
+            cast(JSONObject, cast(JSONObject, first["properties"])["mission"])["properties"],
+        )["id"],
+    )
+    assert id_schema == {"$ref": "#/$defs/id"}
+
+
+def _compact_fixture() -> tuple[JSONObject, JSONObject, JSONObject, str]:
+    """Build an equivalent four-task strict DTO pair with explicit safety constraints."""
+    canonical = cast(
+        JSONObject,
+        json.loads(Path("contracts/mission/v0.10/mission-plan.schema.json").read_bytes()),
+    )
+    legacy = _provider_plan()
+    legacy["schema_version"] = "roboguide.mission-plan/v0.10"
+    legacy["provider_profile"] = HOST_OBJECTIVE_PROFILE
+    objective = cast(str, cast(JSONObject, legacy["mission"]).pop("objective"))
+    tasks = cast(list[JSONObject], legacy["tasks"])
+    for index in range(len(tasks), 4):
+        task = deepcopy(tasks[-1])
+        task["depends_on"] = [tasks[-1]["id"]]
+        task["id"] = f"added-task-{index}"
+        tasks.append(task)
+    for task in tasks:
+        task["timing"] = {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": None,
+            "completion_deadline_offset_ms": None,
+        }
+        task["satisfaction"] = {
+            "expected_effect": "Task reports the requested effect",
+            "basis": "execution-report",
+            "verifier": None,
+        }
+        for role in cast(list[JSONObject], task["roles"]):
+            cast(JSONObject, role["requirements"])["memories"] = None
+
+    tasks[-1]["timing"] = {
+        "earliest_start_offset_ms": 2,
+        "latest_start_offset_ms": 40,
+        "completion_deadline_offset_ms": 60,
+    }
+    tasks[-1]["satisfaction"] = {
+        "expected_effect": "Independent evidence confirms the requested effect",
+        "basis": "verifier-evidence",
+        "verifier": {
+            "contract": {"namespace": "example", "name": "verification", "version": "v1"},
+            "predicate": "verified",
+            "max_evidence_age_ms": 1_000,
+        },
+    }
+    last_requirements = cast(
+        JSONObject, cast(list[JSONObject], tasks[-1]["roles"])[0]["requirements"]
+    )
+    last_requirements["memories"] = [
+        {
+            "selector": {"memory_id": "original-memory", "revision_id": "original-revision"},
+            "kind": "artifact",
+            "payload_schema": "actual-file/v1",
+            "media_type": "application/octet-stream",
+        }
+    ]
+    compact = deepcopy(legacy)
+    for index, task in enumerate(cast(list[JSONObject], compact["tasks"])):
+        if index != len(tasks) - 1:
+            task["timing"] = None
+            del cast(JSONObject, task["satisfaction"])["verifier"]
+        for role in cast(list[JSONObject], task["roles"]):
+            requirements = cast(JSONObject, role["requirements"])
+            if requirements["memories"] is None:
+                del requirements["memories"]
+    return canonical, legacy, compact, objective
+
+
+def test_compact_planner_output_preserves_canonical_plan_and_digest() -> None:
+    """Compact-only omissions preserve exact bindings, DAG and non-neutral requirements."""
+    canonical, legacy, compact, objective = _compact_fixture()
+
+    def normalize(value: JSONObject, use_compact: bool) -> JSONObject:
+        """Run the real provider normalization and canonical parser."""
+        return MissionPlan.from_json(
+            normalize_mission_plan_provider_output(
+                value,
+                canonical,
+                profile=HOST_OBJECTIVE_PROFILE,
+                objective=objective,
+                compact_planner_output=use_compact,
+            )
+        ).to_json()
+
+    legacy_plan = normalize(legacy, False)
+    compact_plan = normalize(compact, True)
+    assert compact_plan == legacy_plan
+    assert canonical_plan_digest(compact_plan) == canonical_plan_digest(legacy_plan)
+    assert len(json.dumps(compact, separators=(",", ":"))) < len(
+        json.dumps(legacy, separators=(",", ":"))
+    )
+    assert cast(list[JSONObject], compact["tasks"])[0]["timing"] is None
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        "verifier_conflict",
+        "verifier_missing",
+        "null_memories",
+        "missing_timing",
+        "broken_dependency",
+    ],
+)
+def test_compact_planner_output_does_not_mask_invalid_drafts(problem: str) -> None:
+    """Only explicit neutral timing and execution-report shorthand may be expanded."""
+    canonical, _, compact, objective = _compact_fixture()
+    tasks = cast(list[JSONObject], compact["tasks"])
+    first = tasks[0]
+    if problem == "verifier_conflict":
+        cast(JSONObject, first["satisfaction"])["verifier"] = None
+    elif problem == "verifier_missing":
+        del cast(JSONObject, tasks[-1]["satisfaction"])["verifier"]
+    elif problem == "null_memories":
+        role = cast(list[JSONObject], first["roles"])[0]
+        cast(JSONObject, role["requirements"])["memories"] = None
+    elif problem == "missing_timing":
+        del first["timing"]
+    else:
+        tasks[-1]["depends_on"] = ["missing-task"]
+
+    with pytest.raises((MissionPlanError, ProviderMissionPlanError)):
+        normalized = normalize_mission_plan_provider_output(
+            compact,
+            canonical,
+            profile=HOST_OBJECTIVE_PROFILE,
+            objective=objective,
+            compact_planner_output=True,
+        )
+        MissionPlan.from_json(normalized)
+
+
+def test_compact_planner_schema_uses_static_closed_variants() -> None:
+    """Static compact schemas preserve cache identity and the full reference schema."""
+    canonical, _, _, _ = _compact_fixture()
+    first = build_mission_plan_provider_schema(
+        canonical,
+        mission_id="mission-one",
+        profile=HOST_OBJECTIVE_PROFILE,
+        bind_mission_id=False,
+        compact_planner_output=True,
+    )
+    second = build_mission_plan_provider_schema(
+        canonical,
+        mission_id="mission-two",
+        profile=HOST_OBJECTIVE_PROFILE,
+        bind_mission_id=False,
+        compact_planner_output=True,
+    )
+    assert first == second
+    assert (
+        cast(JSONObject, first["$defs"])["satisfaction"]
+        != cast(JSONObject, canonical["$defs"])["satisfaction"]
+    )
+    with pytest.raises(ProviderMissionPlanError, match="compact Planner output requires"):
+        build_mission_plan_provider_schema(
+            _canonical_schema(), mission_id="mission-one", compact_planner_output=True
+        )

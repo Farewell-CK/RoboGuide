@@ -91,9 +91,21 @@ Controller/Node 和合成状态源，保留正、负验收及权限拒绝证据�
   v0.3-v0.6、当前输出 v0.6）和只读
   规划预检快照；旧 `v0/` 继续保留，避免静默改写已版本化合同。
 
-模型配置位于 `config/mission.toml`，服务/risk policy 位于 `config/mission-service.toml`，
-凭据只从 `OPENAI_API_KEY` 读取。远程明文 HTTP
+模型配置位于 `config/mission.toml`，服务/risk policy 位于 `config/mission-service.toml`。
+凭据从 Provider 的 `api_key_env` 环境变量读取，仓库示例使用 `OPENAI_API_KEY`。远程明文 HTTP
 默认拒绝；持续联调应使用 HTTPS 或通过 SSH 映射到 localhost。
+
+对 Operation、参数和 Task 边界明确的测试，可在独立配置的 `[mission.llm]` 表中加入
+`planner_reasoning_effort = "medium"`。它用于 Planner 首次生成和结构重生成。
+未填写时 Planner 读取 `model_reasoning_effort`，Interpreter、Reviewer 和 Repairer 始终读取该共享项。
+Request provenance 为各次调用记录请求的推理强度和输出 Schema 名称。
+
+长目标可通过 `[mission].provider_plan_profile = "host-objective-v1"` 让宿主从原
+GroundedIntent 组装计划目标。使用同一套 Schema、Catalog 和独立 Review 检查草稿。
+参见 [宿主组装目标](../docs/development/mi-host-objective-v0.1.md)。
+
+Workbench 在原规划或澄清请求等待期间显示已持久化的 MI 阶段。进度读和 `/observe`
+都使用原幂等键。完整草稿由该命令的正常响应或原命令回执取得。
 
 服务可用 `service.execution_profile_path` 选择启动时冻结的
 `roboguide.execution-profile/v0.1` 部署配置。它按 canonical operation 声明 resource
@@ -142,6 +154,69 @@ Planner 与 Repairer 的每次 Provider 请求把当前 Mission Request 的 `mis
 而是将有界的原始/归一化草案及完整内容 digest 绑定在内部 rejected-draft v0.3 观测
 证据中。传输和鉴权错误没有模型草案，仍只记录失败信息；既有 v0.1/v0.2 证据可继续恢复。
 
+## 审查结构化草稿
+
+调用方已有完整的 Task 图、Operation 和参数时，可以使用 `mission review-draft`。
+输入采用 MissionPlan 的字段结构。`mission.id` 和 `mission.objective` 可省略，由 CLI
+参数填入。若草稿已经含有这两个字段，其值必须与参数完全一致。用 `--instruction`
+传入用户原话，并按需重复 `--constraint` 和 `--assumption`。
+
+命令先做本地合同、Catalog 和满足策略校验，再让独立 Reviewer 对照原话审查一次。
+配置须启用 `mission.review_enabled`。通过审查时导出本地计划文件，其余审查结果
+以非零状态退出，作用范围限于离线草稿。
+
+```bash
+uv run mission review-draft --input draft.json --mission-id mission-demo \
+  --instruction '只规划一次无参数的 system.ping@v1，以执行报告为准。' \
+  --objective '调用一次 system.ping@v1 验证软件执行路径' --output reviewed.json
+```
+
+## Reviewer 前缀缓存
+
+在支持 Responses API 显式缓存断点的 Provider 上，可以给独立 Reviewer 开启固定前缀缓存。
+通过 `[mission.llm]` 下的 `review_static_prefix_cache = true` 启用。固定前缀包含
+Reviewer Prompt 和配置的 Catalog。草稿、用户原话、Grounding 和运行时证据进入同一次请求，
+排在缓存断点之后。推理强度沿用此模型的配置。
+可从 Provider 响应的 `usage.input_tokens_details.cached_tokens` 查看实际复用量。
+参见 [OpenAI Prompt Caching](https://developers.openai.com/api/docs/guides/prompt-caching)。
+
+## Planner 服务档位
+
+在支持对应档位的 Responses Provider 上，可通过 `[mission.llm]` 的
+`planner_service_tier = "ultrafast"` 加速 Planner 的草稿生成与结构重生成。
+此设置按请求传递。独立 Reviewer、Interpreter 和 Repairer 使用各自原有模型设置。
+Mission Request 的 provenance 记录请求的档位和 Provider 实际返回的档位。
+选择档位前可核对 [OpenAI 适用型号](https://developers.openai.com/api/docs/guides/ultrafast-mode)
+和 [计费](https://developers.openai.com/api/docs/pricing)。
+
+## 分阶段模型、缓存与紧凑 Grounding 视图
+
+为避免 `Interpreter`、`Reviewer` 与 `Repairer` 共享高推理档位或高价服务档位拖慢整体规划耗时，
+`[mission.llm]` 还支持按阶段独立覆盖（省略时全部保持既有默认）：
+
+- **Interpreter**：`interpreter_model`、`interpreter_reasoning_effort`、
+  `interpreter_service_tier`、`interpreter_static_prefix_cache = true`（缓存开发者指令前缀）
+- **Planner / Repairer**：`planner_model`、`planner_static_prefix_cache = true`、
+  `repair_model`、`repair_reasoning_effort`、`repair_service_tier`、`repair_static_prefix_cache = true`
+  （复用静态部署资产与 Catalog 前缀断点，同样作用于 `mission-runtime-replanner`）
+- **Reviewer**：`review_reasoning_effort`、`review_service_tier`、`review_static_prefix_cache = true`
+  （复用 Catalog 和启动时冻结的部署资产，不缓存当前草案和 Grounding）
+- **紧凑 Grounding 投影**：`compact_grounding_for_llm = true` 仅在送入模型的 JSON 中
+  整理物理观测、解析并摘要 `scene-targets` 中心/包围盒及精简 `MetadataOnly` 内存条目，
+  （含 `reported-origin/v0.1` 冗余字段）不修改持久化审计快照、摘要计算或确定性校验。
+- **跨请求静态输出 Schema**：`static_provider_schema = true` 使 Planner / Repairer
+  的 strict `json_schema` 在不同 `mission_id` 间保持一致（继续由宿主 `_validate_plan_output`
+  与用户侧动态字段强校验 `mission.id`，避免每次请求生成新 UUID 击穿约 1 万 token 的前缀缓存）。
+
+**Planner 紧凑输出**：在 v0.10 和 `host-objective-v1` 下可显式启用
+`[mission.llm].planner_compact_output = true`。无时间约束用 `timing: null`，
+`execution-report` 省略空的 `verifier`，未声明的 Memory 前置条件省略 `memories`。
+宿主恢复标准 MissionPlan 后按原流程校验。Reviewer、Repairer 和持久化合同使用原格式。
+
+Mission provenance 记录模型调用阶段和显式缓存前缀摘要，并在 Provider 返回时记录
+`cached_tokens`、`cache_write_tokens` 和 `reasoning_tokens`。
+摘要只覆盖断点及其之前的上下文，不包含断点之后的请求数据。历史记录可省略这些字段。
+
 ```bash
 uv sync --dev
 uv run mission-service
@@ -150,6 +225,5 @@ uv run mission validate \
 uv run pytest -q
 ```
 
-真实模型解释/规划会产生费用并访问外部网络，必须显式运行 `mission-service` 或
-`mission plan`。正常单元测试
-只使用 Fixture 和 Fake Transport，不访问模型服务。
+真实模型解释、规划和审查在 `mission-service`、`mission plan` 或 `mission review-draft`
+运行时访问配置的模型端点并可能产生费用。正常单元测试使用 Fixture 和 Fake Transport。

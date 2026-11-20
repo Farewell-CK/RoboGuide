@@ -27,7 +27,59 @@ def test_repository_configuration_selects_luna_without_a_secret() -> None:
         Path.cwd() / "contracts/capability/v0.3/catalog.json"
     )
     assert settings.provider.api_key_env == "OPENAI_API_KEY"
+    assert settings.llm.planner_reasoning_effort is None
     assert "sk-" not in path.read_text(encoding="utf-8")
+
+
+def test_planner_reasoning_effort_is_an_explicit_llm_setting(tmp_path: Path) -> None:
+    """Load the Planner override independently from the shared model setting."""
+    source = Path("config/mission.toml").read_text(encoding="utf-8")
+    config = tmp_path / "mission.toml"
+    config.write_text(
+        source.replace("[mission.llm]", '[mission.llm]\nplanner_reasoning_effort = "medium"')
+    )
+    settings = load_settings(config, repository_root=Path.cwd())
+    assert settings.llm.planner_reasoning_effort == "medium"
+    assert settings.llm.reasoning_effort == "xhigh"
+    config.write_text(
+        source.replace("[mission.llm]", '[mission.llm]\nplanner_reasoning_effort = " "')
+    )
+    with pytest.raises(MissionConfigError, match="planner_reasoning_effort"):
+        load_settings(config, repository_root=Path.cwd())
+
+
+def test_review_static_prefix_cache_requires_explicit_boolean(tmp_path: Path) -> None:
+    """Keep the Responses wire change opt-in and validate the configuration at load time."""
+    path = Path("config/mission.toml")
+    assert not load_settings(path, repository_root=Path.cwd()).llm.review_static_prefix_cache
+    source = path.read_text(encoding="utf-8")
+    config = tmp_path / "mission.toml"
+    config.write_text(
+        source.replace("[mission.llm]", "[mission.llm]\nreview_static_prefix_cache = true"),
+        encoding="utf-8",
+    )
+    assert load_settings(config, repository_root=Path.cwd()).llm.review_static_prefix_cache
+    config.write_text(
+        source.replace("[mission.llm]", '[mission.llm]\nreview_static_prefix_cache = "true"'),
+        encoding="utf-8",
+    )
+    with pytest.raises(MissionConfigError, match="review_static_prefix_cache"):
+        load_settings(config, repository_root=Path.cwd())
+
+
+def test_planner_service_tier_is_an_opt_in_provider_setting(tmp_path: Path) -> None:
+    """Load a Planner service tier with the original shared reasoning effort."""
+    path = Path("config/mission.toml")
+    assert load_settings(path, repository_root=Path.cwd()).llm.planner_service_tier is None
+    config = tmp_path / "mission.toml"
+    source = path.read_text(encoding="utf-8")
+    config.write_text(
+        source.replace("[mission.llm]", '[mission.llm]\nplanner_service_tier = "ultrafast"'),
+        encoding="utf-8",
+    )
+    settings = load_settings(config, repository_root=Path.cwd())
+    assert settings.llm.planner_service_tier == "ultrafast"
+    assert settings.llm.reasoning_effort == "xhigh"
 
 
 def test_remote_plaintext_provider_is_rejected_by_default() -> None:
@@ -167,3 +219,54 @@ def test_prompts_preserve_joint_effects_without_inventing_physical_identity() ->
     assert "Additional Actor names alone do not repair an effect conflict" in normalized["repairer"]
     benchmark_terms = ("Episode3", "Episode51", "any_targets", "Spot", "Fetch")
     assert all(term not in prompt for prompt in prompts.values() for term in benchmark_terms)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("interpreter_model", '"gpt-5.4-mini"'),
+        ("interpreter_reasoning_effort", '"low"'),
+        ("interpreter_service_tier", '"ultrafast"'),
+        ("planner_model", '"gpt-6.1-sol"'),
+        ("review_reasoning_effort", '"low"'),
+        ("review_service_tier", '"ultrafast"'),
+        ("repair_model", '"gpt-6.1-sol"'),
+        ("repair_reasoning_effort", '"medium"'),
+        ("repair_service_tier", '"ultrafast"'),
+    ],
+)
+def test_per_stage_llm_string_overrides_and_blank_rejection(
+    tmp_path: Path, key: str, value: str
+) -> None:
+    """Each optional per-stage model, effort, and service-tier knob validates cleanly."""
+    source = Path("config/mission.toml").read_text(encoding="utf-8")
+    config = tmp_path / "mission.toml"
+    config.write_text(source.replace("[mission.llm]", f"[mission.llm]\n{key} = {value}"))
+    settings = load_settings(config, repository_root=Path.cwd())
+    assert getattr(settings.llm, key) == value.strip('"')
+    config.write_text(source.replace("[mission.llm]", f'[mission.llm]\n{key} = "   "'))
+    with pytest.raises(MissionConfigError, match=key):
+        load_settings(config, repository_root=Path.cwd())
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "interpreter_static_prefix_cache",
+        "planner_static_prefix_cache",
+        "repair_static_prefix_cache",
+        "compact_grounding_for_llm",
+        "static_provider_schema",
+    ],
+)
+def test_latency_boolean_flags_require_strict_booleans(tmp_path: Path, key: str) -> None:
+    """Keep static caching and compact grounding opt-in and strictly boolean typed."""
+    source = Path("config/mission.toml").read_text(encoding="utf-8")
+    defaults = load_settings(Path("config/mission.toml"), repository_root=Path.cwd())
+    assert getattr(defaults.llm, key) is False
+    config = tmp_path / "mission.toml"
+    config.write_text(source.replace("[mission.llm]", f"[mission.llm]\n{key} = true"))
+    assert getattr(load_settings(config, repository_root=Path.cwd()).llm, key) is True
+    config.write_text(source.replace("[mission.llm]", f'[mission.llm]\n{key} = "true"'))
+    with pytest.raises(MissionConfigError, match=key):
+        load_settings(config, repository_root=Path.cwd())

@@ -12,13 +12,16 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from mission.grounding_context import GroundingContextSnapshot
 from mission.models import JSONObject
+from mission.request_record import DialogueTurn, IntentAssessment
 from roboguide_workbench import terminal
 from roboguide_workbench.actions import MissionActions
 from roboguide_workbench.client import ToolRefusal
 from roboguide_workbench.conversation import ConversationSession
 from roboguide_workbench.persistence import SessionStore
 from roboguide_workbench.task_tools import TaskTools
+from test_requests import FakeInterpreter
 from test_workbench_agent_loop import Responses, _call, _message, _response
 from test_workbench_dialogue import _router
 from test_workbench_display import ScriptedPrompt, command, drain_foreground, workbench
@@ -302,6 +305,62 @@ def test_discussion_and_plan_only_intent_cannot_turn_into_execution(
         with pytest.raises(ToolRefusal):
             TaskTools(session, question).invoke("start_task", {"mode": mode}, question, 5)
         assert session.store.data["commands"] == [] and controller.submissions == []
+
+
+@pytest.mark.parametrize("edit", [False, True])
+def test_original_command_displays_durable_progress_during_interpretation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, edit: bool
+) -> None:
+    """Display a matching actual SQL stage while its single create or edit waits for MI."""
+    with workbench(tmp_path) as (session, controller):
+        if edit:
+            assert "AwaitingExecution" in session.ask("/plan 初始目标")
+        original = FakeInterpreter.interpret
+        progress_shown = threading.Event()
+        visible_phases: list[str] = []
+        posts: list[tuple[str, JSONObject, str | None]] = []
+
+        def wait_for_progress(
+            interpreter: FakeInterpreter,
+            dialogue: tuple[DialogueTurn, ...],
+            grounding_context: GroundingContextSnapshot,
+        ) -> IntentAssessment:
+            """Hold the model until the client reports the original persistent state."""
+            assert progress_shown.wait(timeout=4)
+            return original(interpreter, dialogue, grounding_context)
+
+        def notify(phase: str) -> None:
+            """Capture the foreground status before letting interpretation finish."""
+            visible_phases.append(phase)
+            if phase == "MI · 正在理解目标":
+                progress_shown.set()
+
+        real_post = session.actions._post
+
+        def record_post(
+            path: str, body: JSONObject, key: str | None = None, *, timeout: float | None = None
+        ) -> JSONObject:
+            """Record both the original POST and its observation against real MI HTTP."""
+            posts.append((path, body, key))
+            return real_post(path, body, key, timeout=timeout)
+
+        monkeypatch.setattr(FakeInterpreter, "interpret", wait_for_progress)
+        monkeypatch.setattr(session.actions, "_post", record_post)
+        session.progress = notify
+        answer = session.ask("/answer 更新目标" if edit else "/plan 测试目标")
+        commands = cast(list[JSONObject], session.store.data["commands"])
+        assert "AwaitingExecution" in answer and progress_shown.is_set()
+        assert visible_phases.count("MI · 正在理解目标") == 1
+        command = commands[-1]
+        assert len(commands) == (2 if edit else 1) and command["state"] == "complete"
+        assert [path for path, _, key in posts if key] == [command["path"]]
+        observed_keys = [
+            (body["path"], body["idempotency_key"])
+            for path, body, _ in posts
+            if path.endswith("/observe")
+        ]
+        assert observed_keys == [(command["path"], command["idempotency_key"])]
+        assert controller.submissions == []
 
 
 def test_lost_native_task_response_observes_the_original_command_without_reposting(

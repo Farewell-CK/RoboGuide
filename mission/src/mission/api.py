@@ -192,6 +192,45 @@ def build_engine(
             "model": planner_settings.llm.model,
             "review_model": planner_settings.llm.review_model,
             "reasoning_effort": planner_settings.llm.reasoning_effort,
+            **{
+                key: value
+                for key, value in (
+                    ("interpreter_model", planner_settings.llm.interpreter_model),
+                    (
+                        "interpreter_reasoning_effort",
+                        planner_settings.llm.interpreter_reasoning_effort,
+                    ),
+                    ("interpreter_service_tier", planner_settings.llm.interpreter_service_tier),
+                    ("planner_model", planner_settings.llm.planner_model),
+                    ("planner_service_tier", planner_settings.llm.planner_service_tier),
+                    ("planner_reasoning_effort", planner_settings.llm.planner_reasoning_effort),
+                    ("review_reasoning_effort", planner_settings.llm.review_reasoning_effort),
+                    ("review_service_tier", planner_settings.llm.review_service_tier),
+                    ("repair_model", planner_settings.llm.repair_model),
+                    ("repair_reasoning_effort", planner_settings.llm.repair_reasoning_effort),
+                    ("repair_service_tier", planner_settings.llm.repair_service_tier),
+                )
+                if value is not None
+            },
+            **{
+                key: True
+                for key, enabled in (
+                    (
+                        "interpreter_static_prefix_cache",
+                        planner_settings.llm.interpreter_static_prefix_cache,
+                    ),
+                    (
+                        "planner_static_prefix_cache",
+                        planner_settings.llm.planner_static_prefix_cache,
+                    ),
+                    ("review_static_prefix_cache", planner_settings.llm.review_static_prefix_cache),
+                    ("repair_static_prefix_cache", planner_settings.llm.repair_static_prefix_cache),
+                    ("compact_grounding_for_llm", planner_settings.llm.compact_grounding_for_llm),
+                    ("static_provider_schema", planner_settings.llm.static_provider_schema),
+                    ("planner_compact_output", planner_settings.llm.planner_compact_output),
+                )
+                if enabled
+            },
             **(
                 {
                     "planning_profile": {
