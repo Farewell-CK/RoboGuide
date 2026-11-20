@@ -111,6 +111,7 @@ def build_mission_plan_provider_schema(
     mission_id: str,
     profile: str = ECHO_OBJECTIVE_PROFILE,
     bind_mission_id: bool = True,
+    compact_planner_output: bool = False,
 ) -> JSONObject:
     """Build a strict provider DTO fenced to one request's Mission ID.
 
@@ -148,7 +149,123 @@ def build_mission_plan_provider_schema(
         root_properties["provider_profile"] = {"type": "string", "enum": [profile]}
         required = _array(provider.get("required"), "provider.required")
         provider["required"] = [*required, "provider_profile"]
+    if compact_planner_output:
+        _check_compact_planner_contract(schema, profile)
+        _project_compact_planner_fields(provider)
     return provider
+
+
+def _check_compact_planner_contract(schema: JSONObject, profile: str) -> None:
+    """Limit the compact Planner wire format to the exact maintained contract."""
+    if (
+        _canonical_provider_version(schema) != MISSION_PLAN_CAPACITY_VERSION
+        or profile != HOST_OBJECTIVE_PROFILE
+    ):
+        raise ProviderMissionPlanError(
+            "compact Planner output requires v0.10 and host-objective-v1"
+        )
+
+
+def _project_compact_planner_fields(provider: JSONObject) -> None:
+    """Replace repeated neutral fields with closed alternatives in the strict DTO."""
+    definitions = _object(provider.get("$defs"), "schema.$defs")
+    task = _object(definitions.get("task"), "schema.$defs.task")
+    task_properties = _object(task.get("properties"), "schema.$defs.task.properties")
+    task_properties["timing"] = {
+        "description": "Use null only when the intent has no Task timing constraints. Otherwise "
+        "emit all timing fields, including every requested time bound.",
+        "anyOf": [task_properties["timing"], {"type": "null"}],
+    }
+
+    satisfaction = _object(definitions.get("satisfaction"), "schema.$defs.satisfaction")
+    properties = _object(satisfaction.get("properties"), "satisfaction.properties")
+    verifier = _object(properties.get("verifier"), "satisfaction.verifier")
+    verifier_options = _array(verifier.get("anyOf"), "satisfaction.verifier.anyOf")
+    verifier_policy = next(
+        (
+            option
+            for option in verifier_options
+            if isinstance(option, dict) and option.get("type") == "object"
+        ),
+        None,
+    )
+    if verifier_policy is None:
+        raise ProviderMissionPlanError("unexpected schema for compact satisfaction.verifier")
+    report_properties: JSONObject = {
+        "expected_effect": properties["expected_effect"],
+        "basis": {"enum": ["execution-report"]},
+    }
+    verified_properties: JSONObject = {
+        "expected_effect": properties["expected_effect"],
+        "basis": {"enum": ["verifier-evidence"]},
+        "verifier": verifier_policy,
+    }
+    definitions["satisfaction"] = {
+        "anyOf": [_closed_object(report_properties), _closed_object(verified_properties)]
+    }
+
+    role = _object(definitions.get("role"), "schema.$defs.role")
+    role_properties = _object(role.get("properties"), "schema.$defs.role.properties")
+    requirements = _object(role_properties.get("requirements"), "role.requirements")
+    requirement_properties = _object(requirements.get("properties"), "requirements.properties")
+    memories = _object(requirement_properties.get("memories"), "requirements.memories")
+    memory_options = _array(memories.get("anyOf"), "requirements.memories.anyOf")
+    memory_list = next(
+        (
+            option
+            for option in memory_options
+            if isinstance(option, dict) and option.get("type") == "array"
+        ),
+        None,
+    )
+    if memory_list is None:
+        raise ProviderMissionPlanError("unexpected schema for compact requirements.memories")
+    without_memories = {
+        key: value for key, value in requirement_properties.items() if key != "memories"
+    }
+    role_properties["requirements"] = {
+        "description": "Omit memories only if the intent declares no Memory prerequisites.",
+        "anyOf": [
+            _closed_object(without_memories),
+            _closed_object({**without_memories, "memories": memory_list}),
+        ],
+    }
+
+
+def _closed_object(properties: JSONObject) -> JSONObject:
+    """Describe one strict provider object variant with an exact set of keys."""
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": list(properties),
+        "properties": properties,
+    }
+
+
+def _expand_compact_planner_fields(value: JSONObject) -> None:
+    """Restore neutral canonical values without inferring timing, evidence, or prerequisites."""
+    for index, item in enumerate(_array(value.get("tasks"), "tasks")):
+        path = f"tasks[{index}]"
+        task = _object(item, path)
+        if "timing" in task and task["timing"] is None:
+            task["timing"] = {
+                "earliest_start_offset_ms": 0,
+                "latest_start_offset_ms": None,
+                "completion_deadline_offset_ms": None,
+            }
+        satisfaction = _object(task.get("satisfaction"), f"{path}.satisfaction")
+        if satisfaction.get("basis") == "execution-report":
+            if set(satisfaction) != {"expected_effect", "basis"}:
+                raise ProviderMissionPlanError(f"{path}.satisfaction must omit the verifier")
+            satisfaction["verifier"] = None
+        for role_index, item in enumerate(_array(task.get("roles"), f"{path}.roles")):
+            role_path = f"{path}.roles[{role_index}]"
+            role = _object(item, role_path)
+            requirements = _object(role.get("requirements"), f"{role_path}.requirements")
+            if "memories" in requirements and not isinstance(requirements["memories"], list):
+                raise ProviderMissionPlanError(
+                    f"{role_path}.requirements.memories must be an array"
+                )
 
 
 def normalize_mission_plan_provider_output(
@@ -157,6 +274,7 @@ def normalize_mission_plan_provider_output(
     *,
     profile: str = ECHO_OBJECTIVE_PROFILE,
     objective: str | None = None,
+    compact_planner_output: bool = False,
 ) -> JSONObject:
     """Normalize provider null sentinels and parameter entries to canonical form.
 
@@ -193,6 +311,9 @@ def normalize_mission_plan_provider_output(
     elif "provider_profile" in normalized:
         raise ProviderMissionPlanError("legacy provider output cannot carry provider_profile")
 
+    if compact_planner_output:
+        _check_compact_planner_contract(canonical_schema, profile)
+        _expand_compact_planner_fields(normalized)
     _normalize_optional_null_sentinels(normalized, canonical_schema, canonical_schema)
     tasks = _array(normalized.get("tasks"), "tasks")
     for task_index, task_value in enumerate(tasks):

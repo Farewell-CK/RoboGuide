@@ -207,6 +207,11 @@ Mission Request 的 provenance 记录请求的档位和 Provider 实际返回的
   的 strict `json_schema` 在不同 `mission_id` 间保持一致（继续由宿主 `_validate_plan_output`
   与用户侧动态字段强校验 `mission.id`，避免每次请求生成新 UUID 击穿约 1 万 token 的前缀缓存）。
 
+**Planner 紧凑输出**：在 v0.10 和 `host-objective-v1` 下可显式启用
+`[mission.llm].planner_compact_output = true`。无时间约束用 `timing: null`，
+`execution-report` 省略空的 `verifier`，未声明的 Memory 前置条件省略 `memories`。
+宿主恢复标准 MissionPlan 后按原流程校验。Reviewer、Repairer 和持久化合同使用原格式。
+
 Mission provenance 在响应携带 `usage` 时同步记录 `token_usage` 整数统计（含 `cached_tokens`
 与 `reasoning_tokens`）。
 

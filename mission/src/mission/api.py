@@ -227,6 +227,7 @@ def build_engine(
                     ("repair_static_prefix_cache", planner_settings.llm.repair_static_prefix_cache),
                     ("compact_grounding_for_llm", planner_settings.llm.compact_grounding_for_llm),
                     ("static_provider_schema", planner_settings.llm.static_provider_schema),
+                    ("planner_compact_output", planner_settings.llm.planner_compact_output),
                 )
                 if enabled
             },

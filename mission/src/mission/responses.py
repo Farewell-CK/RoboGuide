@@ -199,6 +199,7 @@ def _validated_provider_draft(
     execution_planning_evidence: ExecutionPlanningEvidence | None = None,
     plan_validator: Callable[[MissionPlan], None] | None = None,
     provider_plan_profile: str = ECHO_OBJECTIVE_PROFILE,
+    compact_planner_output: bool = False,
 ) -> MissionPlan:
     """Normalize and admit a Planner or Repairer output with durable rejection payloads."""
     try:
@@ -207,6 +208,7 @@ def _validated_provider_draft(
             canonical_schema,
             profile=provider_plan_profile,
             objective=grounded_intent.objective,
+            compact_planner_output=compact_planner_output,
         )
     except (MissionPlanError, ProviderMissionPlanError) as error:
         raise RejectedPlanError(
@@ -663,7 +665,11 @@ class _ResponsesClient:
         return cast(JSONObject, decoded)
 
     def _mission_plan_provider_schema(
-        self, canonical_schema: JSONObject, mission_id: str
+        self,
+        canonical_schema: JSONObject,
+        mission_id: str,
+        *,
+        compact_planner_output: bool = False,
     ) -> JSONObject:
         """Bind the strict provider DTO to this request's exact Mission identity."""
         return build_mission_plan_provider_schema(
@@ -671,6 +677,7 @@ class _ResponsesClient:
             mission_id=mission_id,
             profile=self._settings.provider_plan_profile,
             bind_mission_id=not self._settings.llm.static_provider_schema,
+            compact_planner_output=compact_planner_output,
         )
 
     def _plan_instructions(self, path: Path) -> str:
@@ -956,12 +963,15 @@ class ResponsesMissionPlanner:
             )
         else:
             input_text = json.dumps(plan_input, ensure_ascii=False, sort_keys=True)
+        compact = self._settings.llm.planner_compact_output
         response = self._client._request(
             model=self._settings.llm.planner_model or self._settings.llm.model,
             instructions=self._client._plan_instructions(self._settings.prompts.planner_path),
             input_text=input_text,
-            schema_name="mission_plan_v0",
-            schema=self._client._mission_plan_provider_schema(canonical_schema, mission_id),
+            schema_name="mission_plan_compact_v1" if compact else "mission_plan_v0",
+            schema=self._client._mission_plan_provider_schema(
+                canonical_schema, mission_id, compact_planner_output=compact
+            ),
             service_tier=self._settings.llm.planner_service_tier,
             cacheable_prefix=cacheable_prefix,
             reasoning_effort=self._settings.llm.planner_reasoning_effort,
@@ -981,6 +991,7 @@ class ResponsesMissionPlanner:
             self._execution_planning_evidence,
             self._plan_validator,
             self._settings.provider_plan_profile,
+            compact_planner_output=compact,
         )
 
 

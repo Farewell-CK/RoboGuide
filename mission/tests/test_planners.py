@@ -1393,3 +1393,46 @@ def test_static_provider_schema_reuses_identical_schema_and_still_rejects_wrong_
     ]
     assert len(schemas) == 2
     assert schemas[0] == schemas[1]
+
+
+def test_compact_planner_uses_full_admission_and_refuses_wrong_mission_id() -> None:
+    """Exercise the opt-in Planner through transport, canonical assembly and identity rejection."""
+    canonical = _v0_8_plan()
+    mission = cast(JSONObject, canonical["mission"])
+    mission["id"] = "mission-compact"
+    intent = GroundedIntent(cast(str, mission["objective"]), (), ())
+    compact = _provider_plan(canonical)
+    compact["schema_version"] = "roboguide.mission-plan/v0.10"
+    compact["provider_profile"] = "host-objective-v1"
+    del cast(JSONObject, compact["mission"])["objective"]
+    for task in cast(list[JSONObject], compact["tasks"]):
+        if task.get("timing") == {
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": None,
+            "completion_deadline_offset_ms": None,
+        }:
+            task["timing"] = None
+        satisfaction = cast(JSONObject, task["satisfaction"])
+        if satisfaction.get("basis") == "execution-report":
+            del satisfaction["verifier"]
+    wrong = deepcopy(compact)
+    cast(JSONObject, wrong["mission"])["id"] = "wrong-mission"
+    transport = FakeTransport([_response(compact), _response(wrong)])
+    original = _local_settings()
+    settings = replace(
+        original,
+        contract_version="roboguide.mission-plan/v0.10",
+        schema_path=Path("contracts/mission/v0.10/mission-plan.schema.json"),
+        provider_plan_profile="host-objective-v1",
+        llm=replace(original.llm, planner_compact_output=True, static_provider_schema=True),
+    )
+    planner = ResponsesMissionPlanner(settings, {"OPENAI_API_KEY": "test-only-key"}, transport)
+    plan = planner.plan("mission-compact", intent, _current_catalog(), _grounding())
+    canonical["schema_version"] = "roboguide.mission-plan/v0.10"
+    assert plan.to_json() == MissionPlan.from_json(canonical).to_json()
+    with pytest.raises(MissionIdentityError, match="model changed the requested mission id"):
+        planner.plan("mission-compact", intent, _current_catalog(), _grounding())
+    for _, _, payload, _ in transport.requests:
+        assert cast(JSONObject, cast(JSONObject, payload["text"])["format"])["name"] == (
+            "mission_plan_compact_v1"
+        )

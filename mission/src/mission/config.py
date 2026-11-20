@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
-from mission.provider_mission_plan import ECHO_OBJECTIVE_PROFILE, PROVIDER_PLAN_PROFILES
+from mission.contract_values import MISSION_PLAN_CAPACITY_VERSION
+from mission.provider_mission_plan import (
+    ECHO_OBJECTIVE_PROFILE,
+    HOST_OBJECTIVE_PROFILE,
+    PROVIDER_PLAN_PROFILES,
+)
 from mission.satisfaction_policy import MissionSatisfactionPolicy, MissionSatisfactionPolicyError
 
 
@@ -78,6 +83,7 @@ class LlmSettings:
     planner_service_tier: str | None = None
     compact_grounding_for_llm: bool = False
     static_provider_schema: bool = False
+    planner_compact_output: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +119,14 @@ class MissionSettings:
         """Refuse unknown output profiles before any Provider call or plan assembly."""
         if self.provider_plan_profile not in PROVIDER_PLAN_PROFILES:
             raise MissionConfigError("unsupported mission.provider_plan_profile")
+        if self.llm.planner_compact_output and (
+            self.contract_version != MISSION_PLAN_CAPACITY_VERSION
+            or self.provider_plan_profile != HOST_OBJECTIVE_PROFILE
+        ):
+            raise MissionConfigError(
+                "mission.llm.planner_compact_output requires MissionPlan v0.10 and "
+                "host-objective-v1"
+            )
 
 
 def _table(value: object, path: str) -> dict[str, object]:
@@ -268,6 +282,7 @@ def load_settings(
                 llm, "compact_grounding_for_llm", "mission.llm"
             ),
             static_provider_schema=_optional_boolean(llm, "static_provider_schema", "mission.llm"),
+            planner_compact_output=_optional_boolean(llm, "planner_compact_output", "mission.llm"),
         ),
         provider=ProviderSettings(
             name=_string(provider, "name", f"model_providers.{provider_name}"),
