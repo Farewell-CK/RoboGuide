@@ -1,4 +1,4 @@
-"""Command-line boundary for planning and validating Mission Plan artifacts."""
+"""Command-line boundary for planning, reviewing, and validating Mission Plan artifacts."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from typing import cast
 
 from mission.capability_catalog import CanonicalCapabilityCatalog
 from mission.config import MissionSettings, current_environment, load_settings
+from mission.contract_values import MissionPlanError
 from mission.grounding_context import GroundingContextSnapshot
 from mission.grounding_reader import EmptyMissionGroundingReader
 from mission.intent import GroundedIntent
@@ -19,6 +20,7 @@ from mission.responses import (
     ResponsesMissionPlanner,
     ResponsesMissionRepairer,
     ResponsesMissionReviewer,
+    _validate_plan_output,
 )
 from mission.review import MissionReviewError, MissionReviewRoute, route_mission_review
 
@@ -44,6 +46,16 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--assumption", action="append", default=[])
     plan.add_argument("--output", type=Path, required=True)
     plan.add_argument("--fixture", type=Path)
+
+    draft = subparsers.add_parser("review-draft", help="validate and review a structured draft")
+    draft.add_argument("--input", type=Path, required=True)
+    draft.add_argument("--instruction", required=True, help="original user instruction")
+    draft.add_argument("--config", type=Path, default=Path("config/mission.toml"))
+    draft.add_argument("--mission-id", required=True)
+    draft.add_argument("--objective", required=True)
+    draft.add_argument("--constraint", action="append", default=[])
+    draft.add_argument("--assumption", action="append", default=[])
+    draft.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -102,8 +114,70 @@ def _review_and_repair_plan(
         repairs += 1
 
 
+def _review_structured_draft(
+    path: Path,
+    settings: MissionSettings,
+    mission_id: str,
+    grounded_intent: GroundedIntent,
+    capability_catalog: CanonicalCapabilityCatalog,
+    dialogue: tuple[DialogueTurn, ...],
+    grounding_context: GroundingContextSnapshot,
+) -> MissionPlan:
+    """Assemble caller-owned identity, validate the draft, and obtain one semantic Review."""
+    if not settings.review_enabled:
+        raise MissionReviewError("review-draft requires mission.review_enabled")
+    value = cast(JSONObject, json.loads(path.read_text(encoding="utf-8")))
+    if not isinstance(value, dict) or not isinstance(mission := value.get("mission"), dict):
+        raise MissionPlanError("structured draft must contain a mission object")
+    if mission.get("id", mission_id) != mission_id:
+        raise MissionPlanError("draft mission id differs from --mission-id")
+    if mission.get("objective", grounded_intent.objective) != grounded_intent.objective:
+        raise MissionPlanError("draft mission objective differs from --objective")
+    value["mission"] = {**mission, "id": mission_id, "objective": grounded_intent.objective}
+    plan = _validate_plan_output(
+        value,
+        mission_id,
+        grounded_intent,
+        capability_catalog,
+        settings.satisfaction_policy,
+        grounding_context,
+        execution_profile=None,
+    )
+    review = ResponsesMissionReviewer(settings, current_environment()).review(
+        grounded_intent, plan, capability_catalog, grounding_context, original_dialogue=dialogue
+    )
+    route = route_mission_review(review)
+    if route is not MissionReviewRoute.APPROVED:
+        issues = [f"{issue.code}: {issue.message}" for issue in review.issues]
+        raise MissionReviewError(f"structured draft review returned {route.value}: {issues}")
+    return plan
+
+
+def _plan_from_objective(
+    arguments: argparse.Namespace,
+    settings: MissionSettings,
+    mission_id: str,
+    grounded_intent: GroundedIntent,
+    capability_catalog: CanonicalCapabilityCatalog,
+    grounding_context: GroundingContextSnapshot,
+) -> MissionPlan:
+    """Generate a draft from the objective and apply the existing bounded CLI Review policy."""
+    planner = _planner(arguments, settings)
+    plan = planner.plan(
+        mission_id=mission_id,
+        grounded_intent=grounded_intent,
+        capability_catalog=capability_catalog,
+        grounding_context=grounding_context,
+    )
+    if arguments.fixture is not None:
+        return plan
+    return _review_and_repair_plan(
+        settings, mission_id, grounded_intent, capability_catalog, plan, grounding_context
+    )
+
+
 def main() -> int:
-    """Run validation or planning and return a process-compatible status code."""
+    """Run one Mission CLI command and return a process-compatible status code."""
     arguments = _parser().parse_args()
     if arguments.command == "validate":
         capability_catalog = CanonicalCapabilityCatalog.load(cast(Path, arguments.catalog))
@@ -111,38 +185,46 @@ def main() -> int:
         return 0
     settings = load_settings(cast(Path, arguments.config), repository_root=Path.cwd())
     capability_catalog = CanonicalCapabilityCatalog.load(settings.capability_catalog_path)
-    planner = _planner(arguments, settings)
     grounded_intent = GroundedIntent(
         cast(str, arguments.objective),
         tuple(cast(list[str], arguments.constraint)),
         tuple(cast(list[str], arguments.assumption)),
     )
     mission_id = cast(str, arguments.mission_id)
+    instruction = (
+        cast(str, arguments.instruction)
+        if arguments.command == "review-draft"
+        else grounded_intent.objective
+    )
     dialogue = (
         DialogueTurn(
             "turn-cli-0001",
             DialogueSpeaker.USER,
             DialogueTurnKind.INSTRUCTION,
-            grounded_intent.objective,
+            instruction,
             0,
         ),
     )
     grounding_context = EmptyMissionGroundingReader().capture(
         f"request-cli-{mission_id}", dialogue, 0
     )
-    plan = planner.plan(
-        mission_id=mission_id,
-        grounded_intent=grounded_intent,
-        capability_catalog=capability_catalog,
-        grounding_context=grounding_context,
-    )
-    if arguments.fixture is None:
-        plan = _review_and_repair_plan(
+    if arguments.command == "review-draft":
+        plan = _review_structured_draft(
+            cast(Path, arguments.input),
             settings,
             mission_id,
             grounded_intent,
             capability_catalog,
-            plan,
+            dialogue,
+            grounding_context,
+        )
+    else:
+        plan = _plan_from_objective(
+            arguments,
+            settings,
+            mission_id,
+            grounded_intent,
+            capability_catalog,
             grounding_context,
         )
     output_path = cast(Path, arguments.output)

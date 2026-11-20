@@ -142,6 +142,23 @@ Planner 与 Repairer 的每次 Provider 请求把当前 Mission Request 的 `mis
 而是将有界的原始/归一化草案及完整内容 digest 绑定在内部 rejected-draft v0.3 观测
 证据中。传输和鉴权错误没有模型草案，仍只记录失败信息；既有 v0.1/v0.2 证据可继续恢复。
 
+## 审查结构化草稿
+
+调用方已有完整的 Task 图、Operation 和参数时，可以使用 `mission review-draft`。
+输入采用 MissionPlan 的字段结构。`mission.id` 和 `mission.objective` 可省略，由 CLI
+参数填入。若草稿已经含有这两个字段，其值必须与参数完全一致。用 `--instruction`
+传入用户原话，并按需重复 `--constraint` 和 `--assumption`。
+
+命令先做本地合同、Catalog 和满足策略校验，再让独立 Reviewer 对照原话审查一次。
+配置须启用 `mission.review_enabled`。通过审查时导出本地计划文件，其余审查结果
+以非零状态退出，作用范围限于离线草稿。
+
+```bash
+uv run mission review-draft --input draft.json --mission-id mission-demo \
+  --instruction '只规划一次无参数的 system.ping@v1，以执行报告为准。' \
+  --objective '调用一次 system.ping@v1 验证软件执行路径' --output reviewed.json
+```
+
 ```bash
 uv sync --dev
 uv run mission-service
