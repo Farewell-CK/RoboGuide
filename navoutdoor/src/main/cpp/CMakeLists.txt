@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(swinl_plan LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+add_library(swinl_plan SHARED swinl_plan.cpp map_archive.cpp)
+target_link_libraries(swinl_plan PRIVATE neuralnetworks log android dl)
+target_compile_options(swinl_plan PRIVATE -O3)

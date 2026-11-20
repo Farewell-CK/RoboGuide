@@ -1,0 +1,21 @@
+{
+  "date": "2026-11-12",
+  "version": "1.0.15",
+  "version_code": 16,
+  "apk": "NAVI-中文版-1.0.15-视觉避障.apk",
+  "apk_bytes": 28775064,
+  "apk_sha256": "a8d8b9341a08170b95c95bcc165f17de644d5423e4d98004d52e7bd0e9342ec2",
+  "flutter_tests_passed": 76,
+  "python_policy_tests_passed": 6,
+  "apk_signature_and_alignment_verified": true,
+  "model_revision": "4772b6bf101d91f2534c106dc524d906aeb3c68a",
+  "vision_url": "http://100.126.48.92:18000",
+  "obstacle_health_url": "http://100.126.48.92:18000/obstacles/health",
+  "physical_phone_obstacle_test": "pending",
+  "host_roboguide_apk_rebuilt": false,
+  "limits": [
+    "monocular semantic observations only",
+    "no metric distance",
+    "no automatic detour"
+  ]
+}

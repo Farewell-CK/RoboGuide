@@ -41,6 +41,20 @@ final class LocalPlannerGrid {
         return result;
     }
 
+    static int[][] preprocessSource(int[][] source) {
+        int rows=source.length,cols=source[0].length;int[][] out=new int[rows][cols];
+        for(int r=0;r<rows;r++)for(int c=0;c<cols;c++) {
+            if(source[r][c]<0){out[r][c]=50;continue;}
+            int maximum=0;
+            for(int dr=-3;dr<=3;dr++)for(int dc=-3;dc<=3;dc++) {
+                int rr=r+dr,cc=c+dc;
+                if(rr>=0&&rr<rows&&cc>=0&&cc<cols)maximum=Math.max(maximum,Math.max(0,source[rr][cc]));
+            }
+            out[r][c]=source[r][c]==0&&maximum>0?20:maximum;
+        }
+        return out;
+    }
+
     /** Python 3 round() uses ties-to-even, unlike Java Math.round(). */
     static int pythonRound(float value) { return (int)Math.rint(value); }
 }

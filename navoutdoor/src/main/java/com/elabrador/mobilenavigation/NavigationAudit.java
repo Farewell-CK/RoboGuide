@@ -43,6 +43,7 @@ final class NavigationAudit {
         log("SESSION_START version="+BuildConfig.NAV_SOURCE_VERSION);
     }
     static void log(String message){
+        NavigationRecording.safe(() -> com.elabrador.mobilenavigation.archive.NavigationArchive.event("navigation_audit", NavigationRecording.j("message",message)));
         if(!queue.offer(System.currentTimeMillis()+" "+message))dropped.incrementAndGet();
     }
 }

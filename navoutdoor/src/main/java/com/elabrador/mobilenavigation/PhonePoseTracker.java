@@ -29,6 +29,17 @@ final class PhonePoseTracker implements SensorEventListener, LocationListener {
     private static final float HEADING_SMOOTHING = 0.15f;
     private static final long MAX_LAST_KNOWN_AGE_MILLIS = 30_000L;
     private static final long GPS_PREFERENCE_NANOS = 10_000_000_000L;
+    private static final long LOCATION_MIN_TIME_MS=1000L;
+    private static final float GPS_MIN_DISTANCE_M=0f,NETWORK_MIN_DISTANCE_M=0.5f;
+
+    static org.json.JSONObject recordingConfiguration(){
+        return RuntimeRecordingConfiguration.json("source","PhonePoseTracker runtime constants",
+                "position_coordinate_system","WGS84","heading_reference","magnetic_north",
+                "heading_sensor","TYPE_ROTATION_VECTOR","heading_sensor_rate","SENSOR_DELAY_UI",
+                "heading_smoothing",HEADING_SMOOTHING,"max_last_known_age_ms",MAX_LAST_KNOWN_AGE_MILLIS,
+                "gps_preference_ns",GPS_PREFERENCE_NANOS,"location_min_time_ms",LOCATION_MIN_TIME_MS,
+                "gps_min_distance_m",GPS_MIN_DISTANCE_M,"network_min_distance_m",NETWORK_MIN_DISTANCE_M);
+    }
 
     private final Context context;
     private final Listener listener;
@@ -70,13 +81,13 @@ final class PhonePoseTracker implements SensorEventListener, LocationListener {
         try {
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(
-                        LocationManager.GPS_PROVIDER, 1000L, 0f, this);
+                        LocationManager.GPS_PROVIDER, LOCATION_MIN_TIME_MS, GPS_MIN_DISTANCE_M, this);
                 requested = true;
                 publishLastKnown(LocationManager.GPS_PROVIDER);
             }
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 locationManager.requestLocationUpdates(
-                        LocationManager.NETWORK_PROVIDER, 1000L, 0.5f, this);
+                        LocationManager.NETWORK_PROVIDER, LOCATION_MIN_TIME_MS, NETWORK_MIN_DISTANCE_M, this);
                 requested = true;
                 publishLastKnown(LocationManager.NETWORK_PROVIDER);
             }

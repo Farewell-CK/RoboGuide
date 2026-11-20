@@ -141,6 +141,13 @@ public class OutdoorAuditTest {
         assertNotNull(recovered);
         assertTrue(recovered.remainingMeters<first.remainingMeters);
     }
+    @Test public void ordinaryThirtyMeterFixJitterRetainsRouteButReportsDeviation(){
+        RouteFollower f=straight(200);
+        f.update(0,0,3,Float.NaN,1_000_000_000L);
+        RouteFollower.Guidance next=f.update(0,30*M,3,Float.NaN,6_000_000_000L);
+        assertNotNull(next);assertTrue(next.offRoute);assertEquals(30,next.crossTrackMeters);
+        assertFalse(f.shouldRequestAutomaticReroute());
+    }
     @Test public void twoConsistentFixesOutsideProgressWindowReanchorWithoutRestart(){
         RouteFollower f=straight(200);
         RouteFollower.Guidance first=f.update(0,0,3,Float.NaN,1_000_000_000L);

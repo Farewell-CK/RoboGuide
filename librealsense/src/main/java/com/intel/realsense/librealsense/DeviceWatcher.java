@@ -52,8 +52,8 @@ class DeviceWatcher extends LrsClass {
 
     DeviceWatcher(Context context){
         mContext = context;
-        mEnumerator = new Enumerator(mContext, mListener);
         mAppDeviceListener = new ArrayList<>();
+        mEnumerator = new Enumerator(mContext, mListener);
     }
 
     private synchronized void invalidateDevices() {
@@ -112,6 +112,7 @@ class DeviceWatcher extends LrsClass {
             return;
 
         UsbManager usbManager = (UsbManager) mContext.getSystemService(Context.USB_SERVICE);
+        if (!usbManager.hasPermission(device)) return;
         UsbDeviceConnection conn = usbManager.openDevice(device);
         if(conn == null)
             return;

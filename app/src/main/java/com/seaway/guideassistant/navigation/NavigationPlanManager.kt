@@ -7,6 +7,9 @@ import com.seaway.guideassistant.utils.ApolloEvents
 import com.seaway.guideassistant.ws.DeviceWatchClient
 import com.seaway.guideassistant.ws.NavigationPhaseData
 import kotlinx.coroutines.flow.MutableStateFlow
+import com.elabrador.mobilenavigation.NavigationRecording
+import com.elabrador.mobilenavigation.archive.NavigationArchive
+import org.json.JSONObject
 
 /**
  * 多阶段出行计划的唯一持有者。将大模型解析出的 [NavigationIntent.navigationPhases]
@@ -17,7 +20,8 @@ object NavigationPlanManager {
     data class NavigationPlan(
         val destination: String?,
         val phases: List<NavigationPhase>,
-        val rawInstruction: String
+        val rawInstruction: String,
+        val parsedIntentJson: String
     )
 
     sealed class PlanState {
@@ -30,6 +34,31 @@ object NavigationPlanManager {
 
     /** 每次 [startPlan] 重新下发都会自增，供 NavigateFragment 区分"新指令"与"同一计划内的阶段推进" */
     private var nextPlanId = 0
+    private var archiveSession: String? = null
+
+    fun archiveTaskActive(): Boolean = archiveSession != null && archiveSession == NavigationArchive.activeSessionId()
+
+    private fun closeArchive(reason: String) {
+        if (archiveTaskActive()) {
+            NavigationArchive.finish(reason)
+        }
+        archiveSession = null
+    }
+
+    /** The plan alone is not a recording. Begin when an actual phase is started. */
+    fun beginRecordingIfNeeded(): String? {
+        val progress = state.value as? PlanState.InProgress ?: return null
+        if (archiveTaskActive()) return archiveSession
+        archiveSession = NavigationArchive.begin("navigation_task", NavigationRecording.startMetadata())
+        NavigationArchive.event("navigation.task", NavigationArchive.json(
+            "instruction", progress.plan.rawInstruction,
+            "destination_input", progress.plan.destination,
+            "start_mode", "current_phone_location",
+            "intent", JSONObject(progress.plan.parsedIntentJson),
+            "phase", progress.plan.phases[progress.phaseIndex].phase
+        ))
+        return archiveSession
+    }
 
     fun currentPhase(): NavigationPhase? =
         (state.value as? PlanState.InProgress)?.let { it.plan.phases[it.phaseIndex] }
@@ -38,6 +67,11 @@ object NavigationPlanManager {
      * [rawInstruction] 是 AgentFragment 下发给大模型的完整原始指令文本，供 NavigateFragment 展示。 */
     fun startPlan(intent: NavigationIntent, rawInstruction: String) {
         if (intent.intent != "navigation" || intent.needClarification || intent.navigationPhases.isEmpty()) return
+        if (state.value is PlanState.InProgress) closeArchive("task_replaced")
+        else if (NavigationArchive.currentReason() == "outdoor_navigation") {
+            NavigationArchive.event("navigation.replaced", NavigationArchive.json("source", "new_navigation_task"))
+            NavigationArchive.finish("task_replaced")
+        }
         val sortedPhases = intent.navigationPhases.sortedBy { it.phase }
         DeviceWatchClient.reportNavigation(
             instruction = rawInstruction,
@@ -49,7 +83,8 @@ object NavigationPlanManager {
             clarificationQuestion = intent.clarificationQuestion,
             confidence = intent.confidence?.toFloat() ?: 0f
         )
-        val plan = NavigationPlan(intent.destination, sortedPhases, rawInstruction)
+        val plan = NavigationPlan(intent.destination, sortedPhases, rawInstruction,
+            com.seaway.guideassistant.llm.NavigationIntentEncoder.toJson(intent))
         state.value = PlanState.InProgress(plan, 0, ++nextPlanId)
         Apollo.emit(ApolloEvents.SWITCH_TO_NAVIGATE_TAB)
     }
@@ -68,10 +103,18 @@ object NavigationPlanManager {
             totalPhases = phases.size,
             confidence = 1f
         )
+        NavigationArchive.event("navigation.phase", NavigationArchive.json(
+            "completed_phase", phases[s.phaseIndex].phase,
+            "next_phase", phases.getOrNull(next)?.phase,
+            "total_phases", phases.size
+        ))
         state.value = if (next < phases.size) s.copy(phaseIndex = next) else PlanState.Completed
+        if (next >= phases.size) closeArchive("task_completed")
     }
 
-    fun cancel() {
+    fun cancel(reason: String = "task_cancelled") {
+        NavigationArchive.event("navigation.cancelled", NavigationArchive.json("source", "user", "reason", reason))
+        closeArchive(reason)
         state.value = PlanState.Idle
     }
 }

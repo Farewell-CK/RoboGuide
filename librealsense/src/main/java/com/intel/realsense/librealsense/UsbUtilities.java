@@ -1,11 +1,14 @@
 package com.intel.realsense.librealsense;
 
 import android.app.PendingIntent;
+import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.util.Log;
+import android.os.Build;
 
 import java.lang.reflect.Array;
 import java.util.ArrayList;
@@ -68,7 +71,12 @@ public class UsbUtilities {
 
         if(!permission) {
             Log.i(TAG, "grantUsbPermissions:\ndevice: " + usbDevice.toString());
-            PendingIntent pi = PendingIntent.getBroadcast(context, 0, new Intent(UsbUtilities.ACTION_USB_PERMISSION), PendingIntent.FLAG_IMMUTABLE);
+            // The system fills EXTRA_DEVICE / EXTRA_PERMISSION_GRANTED into this
+            // callback. Keep it mutable but explicitly scoped to our own package.
+            Intent result = new Intent(UsbUtilities.ACTION_USB_PERMISSION).setPackage(context.getPackageName());
+            PendingIntent pi = PendingIntent.getBroadcast(context, usbDevice.getDeviceId(), result,
+                    PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                            ? PendingIntent.FLAG_MUTABLE : 0));
             usbManager.requestPermission(usbDevice, pi);
         }
     }
@@ -78,6 +86,12 @@ public class UsbUtilities {
     }
 
     public static void grantUsbPermissionIfNeeded(Context context) {
+        // Android requires CAMERA before it can show the UVC permission dialog.
+        // The host activity requests that runtime permission first.
+        if (context.checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            Log.i(TAG, "Waiting for CAMERA runtime permission before USB permission");
+            return;
+        }
         List<UsbDevice> usbDevices = getDevices(context);
         for (UsbDevice usbDevice : usbDevices) {
             if (!hasUsbPermission(context, usbDevice)) {

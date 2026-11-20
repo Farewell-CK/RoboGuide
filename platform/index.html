@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>导航数据档案</title>
+<style>
+:root{font:15px/1.6 system-ui,sans-serif;color:#193143;background:#f3f6f9}*{box-sizing:border-box}body{margin:0}main{max-width:1180px;margin:auto;padding:28px 20px}h1{font-size:27px;margin:0}h2{font-size:19px;margin:0 0 12px}p{margin:7px 0 17px;color:#526879}.bar,.panel{background:white;border:1px solid #dce5ed;border-radius:12px;padding:18px;margin:18px 0}.bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap}select{font:inherit;padding:9px;border:1px solid #c0cfda;border-radius:6px}input{border:1px solid #c0cfda;border-radius:6px;padding:9px;min-width:240px;font:inherit}button{border:0;border-radius:6px;background:#13658b;color:white;padding:10px 14px;font:inherit;cursor:pointer}button.secondary{background:#eaf2f7;color:#145273}button:hover{filter:brightness(.96)}button:disabled{opacity:.5;cursor:wait}.error{color:#a32727;white-space:pre-wrap}.muted{color:#607789}table{width:100%;border-collapse:collapse;text-align:left}th,td{border-bottom:1px solid #e3eaf0;padding:11px 8px;vertical-align:top}th{font-weight:600;color:#607789}td{overflow-wrap:anywhere}code{font:12px/1.4 ui-monospace,monospace}pre{white-space:pre-wrap;word-break:break-word;font:12px/1.7 ui-monospace,monospace;max-height:560px;overflow:auto;background:#f5f8fa;padding:14px;border-radius:6px}details{margin:10px 0}summary{cursor:pointer}.scroll{overflow:auto}.badge{display:inline-block;background:#e7f3ec;color:#19673c;padding:2px 8px;border-radius:4px;font-size:12px}.waiting{background:#fff2d7;color:#8b5a00}.warn{color:#a15a00}#detail{display:none}.filebtn{font-size:13px;padding:5px 10px}.sessionbtn{background:none;color:#13658b;padding:0;text-align:left;max-width:280px;font-size:13px}#count{margin-left:auto}
+</style>
+<main>
+<h1>导航数据档案</h1>
+<p>查看导航记录、上传完整性、过程事件与原始结果文件。</p>
+<form id="login" class="bar"><label>平台访问令牌 <input id="token" type="password" autocomplete="off" placeholder="本机无认证时留空"></label><button>连接平台</button><button id="refresh" class="secondary" type="button">刷新</button><span id="count" class="muted"></span></form>
+<p id="error" class="error" role="alert"></p>
+<section class="panel"><h2>导航记录</h2><div class="scroll"><table><thead><tr><th>导航档案</th><th>开始时间</th><th>平台保存</th><th>采集完整性</th><th>文件 / 大小</th></tr></thead><tbody id="sessions"></tbody></table></div></section>
+<section id="detail" class="panel"><h2 id="detail-title"></h2><p id="detail-status"></p><div class="bar"><button id="manifest" class="secondary" type="button">下载档案清单</button><button id="events" class="secondary" type="button">查看最近 200 条事件</button></div><details><summary>档案信息</summary><pre id="metadata"></pre></details><section id="media"></section><div class="bar"><label>数据类型 <select id="file-type"><option value="">全部</option></select></label><label>文件搜索 <input id="file-search" placeholder="输入文件路径或编号"></label><span id="file-count"></span><button id="more-files" type="button" class="secondary">显示更多</button></div><div class="scroll"><table><thead><tr><th>数据文件</th><th>大小</th><th>已接收</th><th>状态</th><th></th></tr></thead><tbody id="files"></tbody></table></div><div id="timeline"></div></section>
+</main>
+<script>
+const $=id=>document.getElementById(id); let active=null; let mediaUrl=null; let lastTimelineTick=0; let fileLimit=200;
+$('token').value=sessionStorage.getItem('navigation_archive_token')||'';
+function fail(e){$('error').textContent=String(e.message||e)}
+function headers(){const value=$('token').value.trim();return value?{Authorization:'Bearer '+value}:{}}
+async function request(url){const response=await fetch(url,{headers:headers(),cache:'no-store'});if(!response.ok){const value=await response.json().catch(()=>({error:'请求失败'}));throw Error(value.error+'（HTTP '+response.status+'）')}return response}
+const api=id=>'/api/v1/sessions/'+encodeURIComponent(id);
+const fileUrl=(id,path)=>api(id)+'/files/'+path.split('/').map(encodeURIComponent).join('/');
+function cell(row,text){const td=document.createElement('td');td.textContent=text;row.append(td);return td}
+function badge(td,text,waiting=false){const span=document.createElement('span');span.className='badge'+(waiting?' waiting':'');span.textContent=text;td.append(span)}
+function size(value){if(value<1024)return value+' B';if(value<1024**2)return(value/1024).toFixed(1)+' KB';if(value<1024**3)return(value/1024**2).toFixed(1)+' MB';return(value/1024**3).toFixed(2)+' GB'}
+function date(value){return value?new Date(value).toLocaleString('zh-CN'):'—'}
+async function download(url,name){try{const response=await request(url);const blob=await response.blob(),link=document.createElement('a'),objectUrl=URL.createObjectURL(blob);link.href=objectUrl;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(objectUrl),1000)}catch(e){fail(e)}}
+async function refresh(){try{$('error').textContent='';const data=await(await request('/api/v1/sessions')).json();$('sessions').replaceChildren();$('count').textContent=data.sessions.length+' 份档案';for(const value of data.sessions){const row=document.createElement('tr'),td=cell(row,''),button=document.createElement('button');button.className='sessionbtn';button.textContent=value.session_id;button.onclick=()=>detail(value.session_id);td.append(button);cell(row,date(value.started_at_ms));badge(cell(row,''),value.state==='complete'?'已校验保存':'上传中',value.state!=='complete');badge(cell(row,''),({completed:'录制完成',interrupted:'异常中断',incomplete:'存在缺失',recording:'正在记录'})[value.archive_state]||value.archive_state,value.archive_state!=='completed');cell(row,value.file_count+' 个 / '+size(value.total_bytes));$('sessions').append(row)}if(!data.sessions.length){const row=document.createElement('tr');cell(row,'暂无导航档案。手机完成导航并上传后，将显示在这里。').colSpan=5;$('sessions').append(row)}}catch(e){fail(e)}}
+async function detail(id){try{const data=await(await request(api(id))).json();active=id;$('detail').style.display='block';$('detail-title').textContent=id;$('detail-status').textContent='开始：'+date(data.manifest.started_at_ms)+'；结束：'+date(data.manifest.ended_at_ms)+'；平台状态：'+(data.upload.state==='complete'?'全部文件已校验保存':'等待文件上传');$('metadata').textContent=JSON.stringify(data.manifest,null,2);$('timeline').replaceChildren();$('media').replaceChildren();if(mediaUrl){URL.revokeObjectURL(mediaUrl);mediaUrl=null;}$('files').replaceChildren();for(const file of data.upload.files){const row=document.createElement('tr');row.dataset.kind=file.type||'';row.dataset.path=file.path;cell(row,file.path);cell(row,size(file.size));cell(row,size(file.received_bytes));badge(cell(row,''),file.complete?'文件已接收':'待补传',!file.complete);const td=cell(row,'');if(file.complete){const button=document.createElement('button');button.className='filebtn secondary';button.textContent='下载';button.onclick=()=>download(fileUrl(id,file.path),file.path.split('/').pop());td.append(button);if(/\.(mp4|jpg|png|bin|gz)$/.test(file.path)){const view=document.createElement('button');view.className='filebtn secondary';view.textContent=file.path.endsWith('.mp4')?'播放':'预览';view.onclick=()=>preview(id,file);td.append(view)}}$('files').append(row)}const types=[...new Set(data.upload.files.map(f=>f.type||''))].sort();$('file-type').replaceChildren(new Option('全部',''),...types.map(t=>new Option(t,t)));$('file-search').value='';fileLimit=200;filterFiles();$('detail').scrollIntoView({behavior:'smooth',block:'start'})}catch(e){fail(e)}}
+
+async function timelineAt(id,elapsedMs){
+  try {const data=await(await request(api(id)+'/events?limit=100&since_ms='+Math.max(0,elapsedMs-1500)+'&until_ms='+(elapsedMs+500))).json();
+    const pre=document.createElement('pre');pre.textContent=data.events.filter(e=>e.type!=='artifact').map(e=>JSON.stringify(e,null,2)).join('\n\n')||'该时间窗口暂无已保存事件';$('timeline').replaceChildren(pre);
+  }catch(e){fail(e)}
+}
+async function preview(id,file){
+ try {
+  if(mediaUrl){URL.revokeObjectURL(mediaUrl);mediaUrl=null;}
+  const panel=$('media');panel.replaceChildren();panel.scrollIntoView({behavior:'smooth',block:'start'});const title=document.createElement('h2');title.textContent=file.path;panel.append(title);
+  const response=await request(fileUrl(id,file.path));let data=await response.arrayBuffer();
+  if(file.path.endsWith('.mp4')) {
+    mediaUrl=URL.createObjectURL(new Blob([data],{type:'video/mp4'}));const video=document.createElement('video');video.controls=true;video.src=mediaUrl;video.style.cssText='width:100%;max-width:720px;background:#101923';panel.append(video);
+    const meta=file.metadata||{};video.ontimeupdate=()=>{if(Date.now()-lastTimelineTick<800)return;lastTimelineTick=Date.now();if(meta.start_elapsed_ns)timelineAt(id,meta.start_elapsed_ns/1e6+video.currentTime*1000)};
+    const note=document.createElement('p');note.textContent='回放时间线显示此片段对应时刻的导航、距离、规划和模型事件。';panel.append(note);return;
+  }
+  if(/\.(jpg|png)$/.test(file.path)) {
+    mediaUrl=URL.createObjectURL(new Blob([data],{type:file.path.endsWith('.jpg')?'image/jpeg':'image/png'}));const image=document.createElement('img');image.src=mediaUrl;image.style.maxWidth='100%';panel.append(image);return;
+  }
+  const meta=file.metadata||{};const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');panel.append(canvas);
+  canvas.style.cssText='max-width:100%;image-rendering:pixelated;border:1px solid #cddbe5';
+  if(file.path.includes('semantic_point_cloud')) {
+    canvas.width=640;canvas.height=480;ctx.fillStyle='#10202c';ctx.fillRect(0,0,640,480);const values=new DataView(data);const count=Math.floor(data.byteLength/20),step=Math.max(1,Math.floor(count/18000));
+    for(let i=0;i<count;i+=step){const x=values.getFloat32(i*20,true),z=values.getFloat32(i*20+8,true),color=values.getUint32(i*20+12,true);ctx.fillStyle='#'+(color&0xffffff).toString(16).padStart(6,'0');ctx.fillRect(320+x*45,460-z*45,2,2)}
+    const note=document.createElement('p');note.textContent='相机坐标点云俯视图：横轴为左右，纵轴为前方距离；为显示性能抽样绘制，下载文件保留全部已记录点。';panel.append(note);return;
+  }
+  if(file.path.includes('depth')&&file.path.endsWith('.gz')) {
+    if(!window.DecompressionStream)throw Error('当前浏览器不支持深度预览，请下载后使用解析工具');
+    data=await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+  }
+  const width=meta.width||(file.path.includes('grid')?80:384),height=meta.height||(file.path.includes('grid')?80:288);
+  canvas.width=width;canvas.height=height;const pixels=ctx.createImageData(width,height),view=new DataView(data);
+  let colors=null;
+  if(file.path.includes('semantic_labels')){
+    try{const info=await(await request(api(id))).json();const config=info.upload.files.find(f=>f.path.includes('semantic_configuration'));if(config){const labels=await(await request(fileUrl(id,config.path))).json();colors=labels.labels.map(x=>x.color)}}catch(e){}
+  }
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+    const i=y*width+x;let r=0,g=0,b=0;
+    if(file.path.includes('depth')){const d=view.getUint16(y*(meta.stride_bytes||width*2)+x*2,true)*(meta.depth_unit_m||.001),v=d?Math.max(0,255-d/6*255):0;r=v;g=v;b=v;}
+    else if(file.path.includes('confidence')){r=g=b=Math.round(Math.max(0,Math.min(1,view.getFloat32(i*4,true)))*255)}
+    else if(file.path.includes('grid')){const v=view.getInt32(i*4,true);r=v<0?110:Math.min(255,v*2.55);g=v<0?120:255-r;b=v<0?130:80;}
+    else{const label=view.getUint8(i),c=colors&&colors[label];if(c){[r,g,b]=c}else{r=(label*71)%256;g=(label*43)%256;b=(label*113)%256}}
+    pixels.data[i*4]=r;pixels.data[i*4+1]=g;pixels.data[i*4+2]=b;pixels.data[i*4+3]=255;
+  }
+  ctx.putImageData(pixels,0,0);const info=document.createElement('p');info.textContent='格式：'+(meta.format||'二进制')+'；尺寸：'+width+'×'+height;panel.append(info);
+  if(file.path.includes('depth'))canvas.onmousemove=e=>{const box=canvas.getBoundingClientRect(),x=Math.min(width-1,Math.max(0,Math.floor((e.clientX-box.left)/box.width*width))),y=Math.min(height-1,Math.max(0,Math.floor((e.clientY-box.top)/box.height*height)));const raw=view.getUint16(y*(meta.stride_bytes||width*2)+x*2,true);info.textContent=`像素 (${x}, ${y})：${raw===0?'无有效深度':(raw*(meta.depth_unit_m||.001)).toFixed(3)+' 米'}；原始值 ${raw}`};
+ }catch(e){fail(e)}
+}
+
+function filterFiles(){let matched=0,shown=0;const kind=$('file-type').value,text=$('file-search').value.trim().toLowerCase();for(const row of $('files').rows){const matches=(!kind||row.dataset.kind===kind)&&(!text||row.dataset.path.toLowerCase().includes(text));if(matches)matched++;row.hidden=!matches||shown>=fileLimit;if(!row.hidden)shown++;}$('file-count').textContent='显示 '+shown+' / '+matched+' 个';$('more-files').hidden=shown>=matched;}
+$('file-type').onchange=()=>{fileLimit=200;filterFiles()};$('file-search').oninput=()=>{fileLimit=200;filterFiles()};$('more-files').onclick=()=>{fileLimit+=200;filterFiles()};
+$('login').onsubmit=event=>{event.preventDefault();sessionStorage.setItem('navigation_archive_token',$('token').value.trim());refresh()};$('refresh').onclick=()=>refresh();$('manifest').onclick=()=>active&&download(api(active)+'/manifest','manifest.json');$('events').onclick=async()=>{if(!active)return;try{const data=await(await request(api(active)+'/events')).json(),pre=document.createElement('pre');pre.textContent=data.events.length?data.events.map(event=>JSON.stringify(event,null,2)).join('\n\n'):'暂无已上传的过程事件。';$('timeline').replaceChildren(pre)}catch(e){fail(e)}};refresh();
+</script>
+</html>

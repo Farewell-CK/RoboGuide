@@ -11,6 +11,11 @@ import android.view.View;
 
 /** Android renderer for local_planner.py's map_data_visualize matrix. */
 public final class LocalPlanView extends View {
+    public interface ObservationDrawnListener {
+        void onObservationDrawn(double cameraSeconds,long captureElapsedMillis,long generation,long drawnElapsedMillis);
+    }
+    private ObservationDrawnListener observationDrawnListener;
+    public void setObservationDrawnListener(ObservationDrawnListener listener) { observationDrawnListener=listener; }
     private final Paint cellPaint = new Paint();
     private final Paint emptyPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint personPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -93,10 +98,14 @@ public final class LocalPlanView extends View {
                 cellPaint);
         drawPersonMarker(canvas, left + cols * cell / 2f, top + rows * cell / 2f, cell);
         long drawn = android.os.SystemClock.elapsedRealtime();
-        if (draws.observe(evidence, drawn)) {
+        if (draws.observeDrawn(evidence, drawn)) {
+            if(observationDrawnListener!=null) observationDrawnListener.onObservationDrawn(
+                    evidence.cameraSeconds,evidence.captureElapsedMillis,evidence.generation,drawn);
             NavigationAudit.log("MAP_DRAW_AUDIT frame=" + evidence.cameraSeconds
+                    + " generation="+evidence.generation
                     + " capture_to_draw_ms=" + evidence.ageMillis(drawn)
-                    + " new_observation_interval_ms=" + draws.intervalMillis);
+                    + " new_observation_interval_ms=" + draws.intervalMillis
+                    + " within_legacy_1500ms="+evidence.fresh(drawn));
         }
     }
 

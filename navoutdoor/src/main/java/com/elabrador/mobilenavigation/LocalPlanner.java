@@ -15,6 +15,19 @@ final class LocalPlanner {
     private static final long TAIL_RETRY_NANOS = TimeUnit.SECONDS.toNanos(1);
     private static final double MAX_LENGTH_RATIO_FOR_FEWER_TURNS = 1.25;
     private static final double[] TURN_SEARCH_PENALTIES = {36.0};
+    static org.json.JSONObject recordingConfiguration(){
+        return RuntimeRecordingConfiguration.json("source","LocalPlanner runtime constants",
+                "path_lifetime_ns",PATH_LIFE_NANOS,"committed_safety_horizon_m",COMMITTED_SAFETY_HORIZON_METERS,
+                "min_remaining_path_m",MIN_REMAINING_PATH_METERS,"target_change_degrees",TARGET_CHANGE_DEGREES,
+                "max_rejoin_distance_m",MAX_REJOIN_DISTANCE_METERS,"tail_extension_gap_m",TAIL_EXTENSION_GAP_METERS,
+                "tail_retry_ns",TAIL_RETRY_NANOS,"max_length_ratio_for_fewer_turns",MAX_LENGTH_RATIO_FOR_FEWER_TURNS,
+                "turn_search_penalties",NavigationRecording.array(TURN_SEARCH_PENALTIES),
+                "grid_width",MapTransform.WIDTH,"grid_height",MapTransform.HEIGHT,"grid_resolution_m",MapTransform.RESOLUTION,
+                "grid_safety_radius_cells",LocalPlannerGrid.SAFETY_RADIUS_CELLS,"grid_safety_cost",LocalPlannerGrid.SAFETY_COST,
+                "source_cost_rules",BuildConfig.SEMANTIC_MODEL_KIND.equals("SWINL_NPU"),
+                "grid_coordinate_system","ego_camera_x_right_y_forward_m",
+                "source_cost_configuration_assets",new org.json.JSONArray().put("source_port/semantic/dataconfig_mapillary.json").put("source_port/planning/dataconfig_mapillary_extend.json"));
+    }
     static final class PathResult {
         final List<float[]> worldPath;
         final boolean planned;
@@ -50,9 +63,23 @@ final class LocalPlanner {
             return new PathResult(Collections.emptyList(), false, false,
                     Float.NaN, false, -1, -1, 0, null, reason);
         }
+        /**
+         * Keep a computed local grid visible while the safety layer rejects its
+         * stale evidence.  The result is deliberately unplanned, so callers
+         * cannot turn this diagnostic visualization into a movement cue.
+         */
+        static PathResult waitingWithGrid(String reason, int[][] grid) {
+            return new PathResult(Collections.emptyList(), false, false,
+                    Float.NaN, false, -1, -1, 0, grid, reason);
+        }
+        PathResult withDisplayStatus(String reason) {
+            return new PathResult(worldPath, planned, success, steeringDegrees, blocked,
+                    startCost, targetCost, obstacleCount, visualizationGrid, reason);
+        }
     }
     private List<float[]> previousPath = new ArrayList<>();
     private final LongSupplier nanoTime;
+    private final boolean sourceCostRules;
     private long previousPathStampNanos;
     private long stateGeneration;
     private long nextTailAttemptNanos;
@@ -62,8 +89,13 @@ final class LocalPlanner {
     private final Object stateLock = new Object();
 
     LocalPlanner() { this(System::nanoTime); }
+    LocalPlanner(boolean sourceCostRules) {this(System::nanoTime,sourceCostRules);}
 
     LocalPlanner(LongSupplier nanoTime) {
+        this(nanoTime,false);
+    }
+    LocalPlanner(LongSupplier nanoTime,boolean sourceCostRules) {
+        this.sourceCostRules=sourceCostRules;
         this.nanoTime = nanoTime;
         previousPathStampNanos = nanoTime.getAsLong();
     }
@@ -76,6 +108,12 @@ final class LocalPlanner {
     PathResult plan(int[][] sourceMap, float resolution, float originX, float originY,
                     float locationX, float locationY, float dirX, float dirY,
                     VinsMono.Pose mapPose) {
+        return plan(sourceMap,resolution,originX,originY,locationX,locationY,dirX,dirY,mapPose,null);
+    }
+
+    PathResult plan(int[][] sourceMap, float resolution, float originX, float originY,
+                    float locationX, float locationY, float dirX, float dirY,
+                    VinsMono.Pose mapPose,int[][] sourceDisplayMap) {
         final List<float[]> retainedPath;
         final List<float[]> retainedPendingPath;
         final long planGeneration;
@@ -85,8 +123,15 @@ final class LocalPlanner {
             retainedPendingPath = reprojectPath(pendingPath, pendingMapPose, mapPose);
             planGeneration = stateGeneration;
         }
-        int[][] map = LocalPlannerGrid.preprocess(sourceMap);
-        int[][] visualizationMap = planningVisualization(sourceMap, map);
+        // Swin source maps have already received the upstream filters and 7x7
+        // dilation in world coordinates, before the ego coordinate adapter.
+        int[][] map;
+        if(sourceCostRules){
+            map=new int[sourceMap.length][];
+            for(int r=0;r<map.length;r++)map[r]=sourceMap[r].clone();
+        }else map=LocalPlannerGrid.preprocess(sourceMap);
+        int[][] visualizationMap = sourceCostRules && sourceDisplayMap!=null
+                ? sourceDisplayMap : planningVisualization(sourceMap, map);
         float locCol=(locationX-originX)/resolution, locRow=(locationY-originY)/resolution;
         LocalPlannerGrid.Target target;
         try { target=LocalPlannerGrid.boundaryTarget(map.length,map[0].length,locRow,locCol,dirY,dirX); }

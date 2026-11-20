@@ -10,12 +10,13 @@
 plugins {
     id("com.android.library")
     id("kotlin-android")
+    id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.protobuf")
 }
 
 android {
     namespace = "com.robonix.client"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         minSdk = 21
@@ -35,12 +36,7 @@ android {
         compose = true
     }
 
-    composeOptions {
-        // Root project pins Kotlin at 1.9.24 (see root build.gradle); 1.5.14 is the compose
-        // compiler release matched to that Kotlin version (robonix itself used to target
-        // Kotlin 1.9.22 + compiler 1.5.8).
-        kotlinCompilerExtensionVersion = "1.5.14"
-    }
+    // Kotlin 2.x uses its matching Compose compiler plugin above.
 }
 
 protobuf {

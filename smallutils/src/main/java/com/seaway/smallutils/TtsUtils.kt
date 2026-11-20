@@ -1,6 +1,7 @@
 package com.seaway.smallutils
 
 import android.content.Context
+import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import java.util.Locale
@@ -13,6 +14,12 @@ import java.util.UUID
 object TtsUtils {
     private const val TAG = "TtsUtils"
 
+    @Volatile var observer: ((String, String, String, String?) -> Unit)? = null
+    private val utterances = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private fun report(stage: String, id: String, detail: String? = null) {
+        try { observer?.invoke(stage, id, utterances[id].orEmpty(), detail) } catch (_: Exception) { }
+        if (stage in listOf("completed", "failed", "interrupted")) utterances.remove(id)
+    }
     private var tts: TextToSpeech? = null
     private var ready = false
     private val pendingTexts = mutableListOf<String>()
@@ -30,6 +37,13 @@ object TtsUtils {
                     Log.e(TAG, "Locale.CHINA not supported by TTS engine, result=$langResult, falling back to default locale")
                     tts?.language = Locale.getDefault()
                 }
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(id: String?) { id?.let { report("started", it) } }
+                    override fun onDone(id: String?) { id?.let { report("completed", it) } }
+                    @Deprecated("Deprecated in Java") override fun onError(id: String?) { id?.let { report("failed", it) } }
+                    override fun onError(id: String?, code: Int) { id?.let { report("failed", it, code.toString()) } }
+                    override fun onStop(id: String?, interrupted: Boolean) { id?.let { report("interrupted", it, interrupted.toString()) } }
+                })
                 pendingTexts.forEach { speakNow(it) }
                 pendingTexts.clear()
             } else {
@@ -65,7 +79,10 @@ object TtsUtils {
 
     private fun speakNow(text: String, interrupt: Boolean = false) {
         val queueMode = if (interrupt) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-        tts?.speak(text, queueMode, null, UUID.randomUUID().toString())
+        val id = UUID.randomUUID().toString()
+        utterances[id] = text
+        report("requested", id)
+        if (tts?.speak(text, queueMode, null, id) == TextToSpeech.ERROR) report("failed", id, "speak_rejected")
     }
 
     /**

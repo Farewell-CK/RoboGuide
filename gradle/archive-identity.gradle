@@ -1,0 +1,57 @@
+// Package reproducible source/native identities; never package local credentials.
+def archiveIdentityDirectory = layout.buildDirectory.dir('generated/archiveIdentityAssets')
+def archiveIdentitySources = rootProject.files(
+        ['app/src/main', 'navoutdoor/src/main/java', 'navoutdoor/src/main/cpp',
+         'navoutdoor/src/main/assets/source_port', 'smallutils/src/main/java',
+         'robonix/src/main/java', 'gradle'].collect { relative ->
+            rootProject.fileTree(relative) {
+                include '**/*.java', '**/*.kt', '**/*.cpp', '**/*.h', '**/*.xml', '**/*.json', '**/*.gradle', '**/CMakeLists.txt'
+            }
+        }, rootProject.file('app/build.gradle'), project.file('build.gradle'),
+        rootProject.file('build.gradle'), rootProject.file('gradle/wrapper/gradle-wrapper.properties'))
+def archiveNativeFiles = fileTree('src/main/jniLibs/arm64-v8a') { include '*.so' }
+def generateArchiveIdentity = tasks.register('generateArchiveIdentity') {
+    inputs.files(archiveIdentitySources, archiveNativeFiles)
+    inputs.property('swinlFast', project.findProperty('swinlFast') ?: 'false')
+    inputs.property('archiveTest', project.findProperty('archiveTest') ?: 'false')
+    inputs.property('gradleVersion', gradle.gradleVersion)
+    inputs.property('javaVersion', System.getProperty('java.version'))
+    outputs.dir(archiveIdentityDirectory)
+    doLast {
+        def sourceDigest = java.security.MessageDigest.getInstance('SHA-256')
+        def files = archiveIdentitySources.files.findAll { it.isFile() }.sort {
+            rootProject.relativePath(it).replace('\\', '/')
+        }
+        files.each { source ->
+            sourceDigest.update(rootProject.relativePath(source).replace('\\', '/').getBytes('UTF-8'))
+            sourceDigest.update((byte) 0)
+            source.withInputStream { input ->
+                byte[] buffer = new byte[65536]; int count
+                while ((count = input.read(buffer)) != -1) sourceDigest.update(buffer, 0, count)
+            }
+        }
+        def sourceHash = sourceDigest.digest().encodeHex().toString()
+        def nativeHashes = [:]
+        archiveNativeFiles.files.sort { it.name }.each { library ->
+            def digest = java.security.MessageDigest.getInstance('SHA-256')
+            library.withInputStream { input ->
+                byte[] buffer = new byte[65536]; int count
+                while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
+            }
+            nativeHashes[library.name] = digest.digest().encodeHex().toString()
+        }
+        def generated = java.time.Instant.now().toString()
+        def identity = [schema_version: 1, build_id: generated + '-' + sourceHash.take(12),
+                generated_at_utc: generated, source_sha256: sourceHash, source_files: files.size(),
+                source_scope: 'app, navoutdoor and shared source/configuration; excludes model binaries and private properties',
+                bundled_arm64_libraries_sha256: nativeHashes, gradle_version: gradle.gradleVersion,
+                java_version: System.getProperty('java.version'),
+                swinl_fast: project.findProperty('swinlFast') == 'true',
+                archive_test: project.findProperty('archiveTest') == 'true']
+        def output = archiveIdentityDirectory.get().file('archive/build_identity.json').asFile
+        output.parentFile.mkdirs()
+        output.setText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(identity)), 'UTF-8')
+    }
+}
+android.sourceSets.main.assets.srcDir(archiveIdentityDirectory)
+tasks.named('preBuild').configure { dependsOn generateArchiveIdentity }

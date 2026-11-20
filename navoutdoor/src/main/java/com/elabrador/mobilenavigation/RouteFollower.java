@@ -46,6 +46,19 @@ final class RouteFollower {
 
     private static final double EARTH_RADIUS_METERS = 6371000.0;
     private static final double LOOKAHEAD_METERS = 12.0;
+    // Phone fixes without a reliable accuracy field routinely move 25–30 m between
+    // samples. Keep the route match stable while the separate off-route and reroute
+    // gates continue to use their stricter thresholds.
+    private static final double MIN_MATCH_THRESHOLD_METERS = 35.0;
+    static org.json.JSONObject recordingConfiguration(){
+        return RuntimeRecordingConfiguration.json("source","RouteFollower runtime constants",
+                "lookahead_m",LOOKAHEAD_METERS,"min_match_threshold_m",MIN_MATCH_THRESHOLD_METERS,
+                "mismatch_grace_ns",MISMATCH_GRACE_NANOS,"recovery_confirmation_window_ns",RECOVERY_CONFIRMATION_WINDOW_NANOS,
+                "automatic_reroute_min_mismatch_ns",AUTO_REROUTE_MIN_MISMATCH_NANOS,
+                "automatic_reroute_min_fixes",AUTO_REROUTE_MIN_FIXES,"automatic_reroute_max_accuracy_m",AUTO_REROUTE_MAX_ACCURACY_METERS,
+                "min_recovery_forward_window_m",MIN_RECOVERY_FORWARD_WINDOW_METERS,
+                "recovery_progress_tolerance_m",RECOVERY_PROGRESS_TOLERANCE_METERS);
+    }
 
     private AmapRouteClient.RouteResult route;
     private List<AmapRouteClient.GeoPoint> points = Collections.emptyList();
@@ -124,7 +137,7 @@ final class RouteFollower {
                 +3*Math.min(5,Math.max(0,(fixNanos-lastFixNanos)/1e9)));
         AmapRouteClient.GeoPoint current = AmapRouteClient.wgs84ToGcj02(
                 wgsLatitude, wgsLongitude);
-        double matchThreshold=Math.max(25,accuracyMeters*2);
+        double matchThreshold=Math.max(MIN_MATCH_THRESHOLD_METERS,accuracyMeters*2);
         Match match = findClosestMatch(current,candidateAdvanceBudget,true);
         boolean recovered=false;
         if(match.distanceMeters>matchThreshold){

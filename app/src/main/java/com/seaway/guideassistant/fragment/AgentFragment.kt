@@ -92,7 +92,11 @@ class AgentFragment : BaseBindFragment<FragmentAgentBinding>() {
     }
 
     private fun demoIntentRecognition(apiKey: String, text: String) {
-        val recognizer = QwenIntentRecognizer(IntentRecognizerConfig(apiKey = apiKey))
+        val preferences = requireContext().getSharedPreferences("qwen_visual_hints", android.content.Context.MODE_PRIVATE)
+        val configuredKey = preferences.getString("key", "").orEmpty().ifBlank { apiKey }
+        val endpoint = preferences.getString("endpoint", "").orEmpty().ifBlank { IntentRecognizerConfig(apiKey = configuredKey).endpoint }
+        val intentModel = preferences.getString("intent_model", "qwen-plus").orEmpty()
+        val recognizer = QwenIntentRecognizer(IntentRecognizerConfig(apiKey = configuredKey, endpoint = endpoint, model = intentModel))
 
         viewLifecycleOwner.lifecycleScope.launch {
             val result = try {

@@ -1,0 +1,66 @@
+{
+  "date": "2026-11-10",
+  "base_branch": "feat/guide-assistant",
+  "base_commit": "0e76585379644698a8d01db4e752fd7127bf12af",
+  "tested_model": "Swin-L MDLA NPU 384x288",
+  "android_tests": {
+    "tests": 258,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "reference_platform_tests": 18,
+  "archive_and_media_tests": 16,
+  "phone_retest": {
+    "duration_seconds": 349.02,
+    "files": 2846,
+    "file_bytes": 306303440,
+    "zip_bytes": 176305723,
+    "write_errors": 0,
+    "dropped_records": 0,
+    "video_drops": 0,
+    "media": {
+      "video_files": 12,
+      "video_seconds": 348.689,
+      "video_bytes": 52483363,
+      "video_average_fps": 14.999039258479618,
+      "video_file_bitrate_mbps": 1.204130052855123,
+      "rgb_keyframes": 113,
+      "raw_depth_frames": 113,
+      "aligned_depth_frames": 113,
+      "raw_depth_compressed_bytes": 16760938,
+      "aligned_depth_compressed_bytes": 15705932,
+      "depth_pairs_compressed_bytes": 32466870,
+      "input_triplets": 113,
+      "triplets_with_semantic_result": 112,
+      "codec_profiles": [
+        100
+      ],
+      "codec_levels": [
+        22
+      ]
+    },
+    "hash_errors": [],
+    "media_errors": [],
+    "restored_map_bundles_including_final": 113,
+    "all_maps_semantic_format_valid": true,
+    "cloud_responses": 91,
+    "cloud_http_statuses": {
+      "200": 91
+    },
+    "vins_dropped_counter_increase": 0,
+    "origin_and_destination_present": true,
+    "summary_matches_manifest": true
+  },
+  "known_limits": [
+    "The final semantic inference and cloud request can be unfinished at navigation end; archive includes input and explicit unfinished markers.",
+    "Per-frame exposure metadata is unavailable on the tested D455f interface; sensor configuration is recorded with unavailable markers.",
+    "No long walking route or controlled old/new performance acceptance claimed."
+  ],
+  "excluded": [
+    "API keys and local credentials",
+    "Phone recordings, archive ZIPs and private location data",
+    "APK/build outputs and SDK/NDK toolchain"
+  ],
+  "model_sha256": "7a8f97e7d32f9aea464c2f8f04f8ad73ff2d826f0388943cbe5817cbc9f34a9c"
+}

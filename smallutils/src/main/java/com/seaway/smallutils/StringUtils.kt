@@ -214,7 +214,7 @@ object StringUtils {
      * 是否是空
      */
     fun isNull(content: String?): Boolean {
-        return content == null || content.isEmpty() || content.toLowerCase(Locale.ROOT) == "null"
+        return content == null || content.isEmpty() || content.lowercase(Locale.ROOT) == "null"
     }
 
 
