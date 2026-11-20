@@ -24,6 +24,16 @@ MAX_PROVIDER_CALLS = 64
 MAX_TRACE_BYTES = 128 * 1024
 MAX_CALL_BYTES = 16 * 1024
 
+_PROVIDER_STAGES = {
+    "mission_intent_v0": "interpreter",
+    "mission_plan_v0": "planner",
+    "mission_plan_compact_v1": "planner",
+    "mission_review_v0": "reviewer",
+    "mission_plan_repair_v0": "repairer",
+    "deployment_recovery_v0": "deployment_recovery",
+}
+_CACHE_PREFIX_DIGEST = re.compile(r"sha256:[a-f0-9]{64}")
+
 
 def implementation_identity() -> JSONObject:
     """Hash the actual installed MI implementation and Python version without machine paths."""
@@ -116,6 +126,36 @@ def _trim_optional_assemblies(trace: ProviderTrace, reserve_bytes: int) -> None:
         trace.calls[index] = compact
 
 
+def _cache_prefix_digest(payload: JSONObject) -> str | None:
+    """Fingerprint the exact ordered wire prefix through its first explicit breakpoint."""
+    messages = payload.get("input")
+    if not isinstance(messages, list):
+        return None
+    prefix: list[JSONValue] = []
+    for message in messages:
+        if not isinstance(message, dict) or not isinstance(content := message.get("content"), list):
+            return None
+        for index, block in enumerate(content):
+            if isinstance(block, dict) and block.get("prompt_cache_breakpoint") == {
+                "mode": "explicit"
+            }:
+                prefix.append({**message, "content": content[: index + 1]})
+                context = {
+                    key: payload[key]
+                    for key in ("model", "reasoning", "text", "prompt_cache_options", "tools")
+                    if key in payload
+                }
+                # Structured schemas and message content keep their original wire order.
+                packed = json.dumps(
+                    {"settings": context, "prefix": prefix},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                return "sha256:" + hashlib.sha256(packed).hexdigest()
+        prefix.append(message)
+    return None
+
+
 def provider_call(
     payload: JSONObject,
     response: JSONObject | None,
@@ -159,6 +199,10 @@ def provider_call(
         evidence["requested_reasoning_effort"] = requested_effort
     if isinstance(schema_name, str) and 0 < len(schema_name) <= 256:
         evidence["response_schema_name"] = schema_name
+        if schema_name in _PROVIDER_STAGES:
+            evidence["stage"] = _PROVIDER_STAGES[schema_name]
+    if (prefix_digest := _cache_prefix_digest(payload)) is not None:
+        evidence["cache_prefix_digest"] = prefix_digest
     usage = response.get("usage") if response is not None else None
     if isinstance(usage, dict):
         token_usage: dict[str, int] = {}
@@ -166,12 +210,16 @@ def provider_call(
             val = usage.get(key)
             if type(val) is int and val >= 0:
                 token_usage[key] = val
-        in_details = usage.get("input_tokens_details")
-        if isinstance(in_details, dict) and type(in_details.get("cached_tokens")) is int:
-            token_usage["cached_tokens"] = cast(int, in_details["cached_tokens"])
-        out_details = usage.get("output_tokens_details")
-        if isinstance(out_details, dict) and type(out_details.get("reasoning_tokens")) is int:
-            token_usage["reasoning_tokens"] = cast(int, out_details["reasoning_tokens"])
+        for group, fields in (
+            ("input_tokens_details", ("cached_tokens", "cache_write_tokens")),
+            ("output_tokens_details", ("reasoning_tokens",)),
+        ):
+            details = usage.get(group)
+            if isinstance(details, dict):
+                for key in fields:
+                    count = details.get(key)
+                    if type(count) is int and count >= 0:
+                        token_usage[key] = count
         if token_usage:
             evidence["token_usage"] = cast(JSONValue, token_usage)
     trace.calls.append(json.dumps(evidence, sort_keys=True, separators=(",", ":")))
@@ -265,6 +313,15 @@ def validate_snapshot(value: JSONObject) -> None:
             setting = call.get(name)
             if name in call and (not isinstance(setting, str) or not 0 < len(setting) <= 256):
                 raise ValueError("provenance provider request settings are invalid")
+        if "stage" in call and (
+            not isinstance(call["stage"], str)
+            or call["stage"] != _PROVIDER_STAGES.get(str(call.get("response_schema_name")))
+        ):
+            raise ValueError("provenance provider stage does not match its response schema")
+        if "cache_prefix_digest" in call:
+            digest = call["cache_prefix_digest"]
+            if not isinstance(digest, str) or _CACHE_PREFIX_DIGEST.fullmatch(digest) is None:
+                raise ValueError("provenance cache prefix digest is invalid")
         if "token_usage" in call:
             token_usage = call["token_usage"]
             if not isinstance(token_usage, dict) or any(

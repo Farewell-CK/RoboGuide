@@ -25,6 +25,7 @@ from mission.grounding_reader import EmptyMissionGroundingReader
 from mission.intent import GroundedIntent
 from mission.models import JSONObject, JSONValue, MissionPlan
 from mission.planners import FixturePlanner
+from mission.planning_profile import DeploymentPlanningProfile
 from mission.provider_errors import MissionIdentityError, MissionProviderError
 from mission.provider_mission_plan import (
     ProviderMissionPlanError,
@@ -787,23 +788,26 @@ def test_responses_reviewer_returns_structured_findings_with_independent_model()
 
 
 def test_review_static_prefix_cache_preserves_the_complete_review_input() -> None:
-    """Cache only stable reviewer instructions and catalog before the exact request evidence."""
+    """Cache frozen reviewer assets while preserving the exact request evidence."""
     settings = _local_settings()
     environment = {"OPENAI_API_KEY": "test-only-key"}
     plan = MissionPlan.from_json(_v0_8_plan())
     grounded = GroundedIntent(plan.mission.objective, (), ())
     catalog = _current_catalog()
     context = _semantic_grounding()
+    profile = DeploymentPlanningProfile.load(
+        Path("scenarios/e1-shared-world-episode-51/planning-profile.json")
+    )
     runtime: JSONObject = {"review_purpose": "runtime-replan"}
     plain = FakeTransport([_response(_review_output())])
     cached = FakeTransport([_response(_review_output())])
     cached_settings = replace(settings, llm=replace(settings.llm, review_static_prefix_cache=True))
-    original_review = ResponsesMissionReviewer(settings, environment, plain).review_runtime(
-        grounded, plan, catalog, context, runtime
-    )
-    cached_review = ResponsesMissionReviewer(cached_settings, environment, cached).review_runtime(
-        grounded, plan, catalog, context, runtime
-    )
+    original_review = ResponsesMissionReviewer(
+        settings, environment, plain, planning_profile=profile
+    ).review_runtime(grounded, plan, catalog, context, runtime)
+    cached_review = ResponsesMissionReviewer(
+        cached_settings, environment, cached, planning_profile=profile
+    ).review_runtime(grounded, plan, catalog, context, runtime)
 
     assert cached_review == original_review
     standard_payload = plain.requests[0][2]
@@ -820,7 +824,11 @@ def test_review_static_prefix_cache_preserves_the_complete_review_input() -> Non
     assert set(suffix) == {"type", "text"}
     prefix_text = cast(str, prefix["text"])
     assert json.loads(prefix_text.removesuffix(", ") + "}") == {
-        "capability_catalog": catalog.to_json()
+        "capability_catalog": catalog.to_json(),
+        "deployment_planning_profile": profile.to_json(),
+        "satisfaction_policy": (
+            settings.satisfaction_policy.to_json() if settings.satisfaction_policy else None
+        ),
     }
     assert json.loads(prefix_text + cast(str, suffix["text"])) == json.loads(
         cast(str, standard_payload["input"])

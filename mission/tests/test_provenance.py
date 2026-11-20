@@ -279,7 +279,7 @@ def test_token_usage_is_recorded_and_validated_when_present() -> None:
                     "input_tokens": 1200,
                     "output_tokens": 85,
                     "total_tokens": 1285,
-                    "input_tokens_details": {"cached_tokens": 900},
+                    "input_tokens_details": {"cached_tokens": 900, "cache_write_tokens": 256},
                     "output_tokens_details": {"reasoning_tokens": 12},
                 },
             },
@@ -295,8 +295,54 @@ def test_token_usage_is_recorded_and_validated_when_present() -> None:
             "output_tokens": 85,
             "total_tokens": 1285,
             "cached_tokens": 900,
+            "cache_write_tokens": 256,
             "reasoning_tokens": 12,
         }
         calls[0]["token_usage"] = {"cached_tokens": -1}
         with pytest.raises(ValueError, match="token_usage"):
             validate_snapshot(snap)
+
+
+def test_cache_prefix_digest_ignores_request_suffix_and_tracks_schema_order() -> None:
+    """Record an order-sensitive prefix identity while omitting changing request data."""
+    from mission.provenance import validate_snapshot
+
+    def identify(dynamic: str, schema_keys: tuple[str, str]) -> str:
+        """Record a real request envelope under a fresh Request trace."""
+        payload: JSONObject = {
+            "model": "gpt-6.1-sol",
+            "text": {
+                "format": {
+                    "name": "mission_plan_v0",
+                    "schema": {key: "value" for key in schema_keys},
+                }
+            },
+            "input": [
+                {"role": "developer", "content": [{"type": "input_text", "text": "instructions"}]},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "catalog",
+                            "prompt_cache_breakpoint": {"mode": "explicit"},
+                        },
+                        {"type": "input_text", "text": dynamic},
+                    ],
+                },
+            ],
+        }
+        with trace_deliberation("request-prefix", "input"):
+            provider_call(payload, None, None, 10, 20)
+            snap = snapshot(
+                "{}", "request-prefix", "input", "sha256:" + "a" * 64, None, 1, "Drafted"
+            )
+            validate_snapshot(snap)
+            call = cast(list[JSONObject], snap["provider_calls"])[0]
+            assert call["stage"] == "planner"
+            assert dynamic not in json.dumps(call)
+            return cast(str, call["cache_prefix_digest"])
+
+    first = identify("dynamic-request-one", ("a", "b"))
+    assert first == identify("dynamic-request-two", ("a", "b"))
+    assert first != identify("dynamic-request-two", ("b", "a"))

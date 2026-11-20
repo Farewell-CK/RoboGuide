@@ -1105,14 +1105,15 @@ class ResponsesMissionReviewer:
         review_input = _with_planning_world_evidence(review_payload, grounding_context)
         cacheable_prefix = None
         if self._settings.llm.review_static_prefix_cache:
-            # Keep the Catalog in user data and the request-specific evidence after the breakpoint.
-            catalog = {"capability_catalog": review_input.pop("capability_catalog")}
-            cacheable_prefix = json.dumps(catalog, ensure_ascii=False, sort_keys=True)[:-1] + ", "
-        input_text = json.dumps(review_input, ensure_ascii=False, sort_keys=True)
+            cacheable_prefix, input_text = _split_static_prefix(
+                dict(review_input), _STATIC_PLAN_PREFIX_KEYS
+            )
+        else:
+            input_text = json.dumps(review_input, ensure_ascii=False, sort_keys=True)
         response = self._client._request(
             model=self._settings.llm.review_model,
             instructions=instructions,
-            input_text=input_text if cacheable_prefix is None else input_text[1:],
+            input_text=input_text,
             schema_name="mission_review_v0",
             schema=_review_schema(),
             service_tier=self._settings.llm.review_service_tier,

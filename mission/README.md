@@ -199,7 +199,8 @@ Mission Request 的 provenance 记录请求的档位和 Provider 实际返回的
 - **Planner / Repairer**：`planner_model`、`planner_static_prefix_cache = true`、
   `repair_model`、`repair_reasoning_effort`、`repair_service_tier`、`repair_static_prefix_cache = true`
   （复用静态部署资产与 Catalog 前缀断点，同样作用于 `mission-runtime-replanner`）
-- **Reviewer**：`review_reasoning_effort`、`review_service_tier`
+- **Reviewer**：`review_reasoning_effort`、`review_service_tier`、`review_static_prefix_cache = true`
+  （复用 Catalog 和启动时冻结的部署资产，不缓存当前草案和 Grounding）
 - **紧凑 Grounding 投影**：`compact_grounding_for_llm = true` 仅在送入模型的 JSON 中
   整理物理观测、解析并摘要 `scene-targets` 中心/包围盒及精简 `MetadataOnly` 内存条目，
   （含 `reported-origin/v0.1` 冗余字段）不修改持久化审计快照、摘要计算或确定性校验。
@@ -212,8 +213,9 @@ Mission Request 的 provenance 记录请求的档位和 Provider 实际返回的
 `execution-report` 省略空的 `verifier`，未声明的 Memory 前置条件省略 `memories`。
 宿主恢复标准 MissionPlan 后按原流程校验。Reviewer、Repairer 和持久化合同使用原格式。
 
-Mission provenance 在响应携带 `usage` 时同步记录 `token_usage` 整数统计（含 `cached_tokens`
-与 `reasoning_tokens`）。
+Mission provenance 记录模型调用阶段和显式缓存前缀摘要，并在 Provider 返回时记录
+`cached_tokens`、`cache_write_tokens` 和 `reasoning_tokens`。
+摘要只覆盖断点及其之前的上下文，不包含断点之后的请求数据。历史记录可省略这些字段。
 
 ```bash
 uv sync --dev
