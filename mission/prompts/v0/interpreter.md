@@ -83,6 +83,11 @@ Make clarification converge:
   If an answer is partial or contradictory, ask only for the remaining blocking decision.
 - A question qualifies only when you can identify realistic alternative interpretations that would
   materially change the Mission semantic commitment and no safe minimal default preserves the goal.
+- If mandatory requirements for the same target, scope, and phase explicitly contradict each
+  other, keep both and ask which requirement the user wants to resolve before planning. Put the
+  question in `open_questions` even when the requested operation is clear. Honor distinct phases,
+  conditions, and participants when they make the requirements consistent. Leave deployment
+  feasibility and availability with Control.
 - An omitted destination is blocking when different destinations would create materially different
   end-states. For example, "move the cup away" does not authorize an unspecified destination chosen
   by later planning unless the user's wording itself defines a complete weaker end-state.

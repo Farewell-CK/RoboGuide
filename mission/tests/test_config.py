@@ -49,6 +49,21 @@ def test_review_static_prefix_cache_requires_explicit_boolean(tmp_path: Path) ->
         load_settings(config, repository_root=Path.cwd())
 
 
+def test_planner_service_tier_is_an_opt_in_provider_setting(tmp_path: Path) -> None:
+    """Load a Planner service tier with the original shared reasoning effort."""
+    path = Path("config/mission.toml")
+    assert load_settings(path, repository_root=Path.cwd()).llm.planner_service_tier is None
+    config = tmp_path / "mission.toml"
+    source = path.read_text(encoding="utf-8")
+    config.write_text(
+        source.replace("[mission.llm]", '[mission.llm]\nplanner_service_tier = "ultrafast"'),
+        encoding="utf-8",
+    )
+    settings = load_settings(config, repository_root=Path.cwd())
+    assert settings.llm.planner_service_tier == "ultrafast"
+    assert settings.llm.reasoning_effort == "xhigh"
+
+
 def test_remote_plaintext_provider_is_rejected_by_default() -> None:
     """Credentials cannot cross a remote plaintext HTTP endpoint accidentally."""
     settings = load_settings(Path("config/mission.toml"), repository_root=Path.cwd())

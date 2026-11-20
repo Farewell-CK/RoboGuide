@@ -62,6 +62,7 @@ class LlmSettings:
     network_access: str
     timeout_seconds: float
     review_static_prefix_cache: bool = False
+    planner_service_tier: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +212,11 @@ def load_settings(
                 _boolean(llm, "review_static_prefix_cache", "mission.llm")
                 if "review_static_prefix_cache" in llm
                 else False
+            ),
+            planner_service_tier=(
+                _string(llm, "planner_service_tier", "mission.llm")
+                if "planner_service_tier" in llm
+                else None
             ),
         ),
         provider=ProviderSettings(

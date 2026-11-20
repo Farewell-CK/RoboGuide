@@ -193,6 +193,11 @@ def build_engine(
             "review_model": planner_settings.llm.review_model,
             "reasoning_effort": planner_settings.llm.reasoning_effort,
             **(
+                {"planner_service_tier": planner_settings.llm.planner_service_tier}
+                if planner_settings.llm.planner_service_tier is not None
+                else {}
+            ),
+            **(
                 {
                     "planning_profile": {
                         "profile_id": planning_profile.profile_id,

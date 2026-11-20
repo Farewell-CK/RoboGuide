@@ -130,6 +130,8 @@ def provider_call(
     requested = payload.get("model")
     observed = response.get("model") if response is not None else None
     response_id = response.get("id") if response is not None else None
+    requested_tier = payload.get("service_tier")
+    observed_tier = response.get("service_tier") if response is not None else None
     evidence: JSONObject = {
         "ordinal": len(trace.calls) + 1,
         "call_id": f"{trace.trace_id}:{len(trace.calls) + 1}",
@@ -142,6 +144,12 @@ def provider_call(
         "finished_at_ms": finished_at_ms,
         "error_type": type(error).__name__ if error is not None else None,
     }
+    for name, tier in (
+        ("requested_service_tier", requested_tier),
+        ("observed_service_tier", observed_tier),
+    ):
+        if isinstance(tier, str) and 0 < len(tier) <= 256:
+            evidence[name] = tier
     trace.calls.append(json.dumps(evidence, sort_keys=True, separators=(",", ":")))
 
 
@@ -224,6 +232,10 @@ def validate_snapshot(value: JSONObject) -> None:
             or type(call.get("finished_at_ms")) is not int
         ):
             raise ValueError("provenance provider call identity is invalid")
+        for name in ("requested_service_tier", "observed_service_tier"):
+            setting = call.get(name)
+            if name in call and (not isinstance(setting, str) or not 0 < len(setting) <= 256):
+                raise ValueError("provenance provider request settings are invalid")
         if "plan_assembly" in call:
             _validate_plan_assembly(call["plan_assembly"])
 

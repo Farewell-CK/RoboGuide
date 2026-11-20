@@ -86,6 +86,20 @@ def test_missing_model_and_failed_call_stay_explicitly_unavailable() -> None:
         assert len({call["call_id"] for call in calls}) == 2
 
 
+def test_service_tier_provenance_records_requested_and_observed_separately() -> None:
+    """Preserve the actual service tier, including fallback and unavailable responses."""
+    with trace_deliberation("request", "input"):
+        provider_call({"service_tier": "ultrafast"}, {"service_tier": "default"}, None, 4, 5)
+        provider_call({"service_tier": "ultrafast"}, None, OSError("transport lost"), 6, 7)
+        trace = current_trace("request")
+        assert trace is not None
+        fallback, unavailable = (json.loads(item) for item in trace.calls)
+        assert fallback["requested_service_tier"] == "ultrafast"
+        assert fallback["observed_service_tier"] == "default"
+        assert unavailable["requested_service_tier"] == "ultrafast"
+        assert "observed_service_tier" not in unavailable
+
+
 def test_provider_limit_refuses_before_an_unrecordable_call() -> None:
     """Fence the next side effect before its evidence budget is exhausted."""
     with trace_deliberation("request", "input"):

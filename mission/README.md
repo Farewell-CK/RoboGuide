@@ -168,6 +168,15 @@ Reviewer Prompt 和配置的 Catalog。草稿、用户原话、Grounding 和运�
 可从 Provider 响应的 `usage.input_tokens_details.cached_tokens` 查看实际复用量。
 参见 [OpenAI Prompt Caching](https://developers.openai.com/api/docs/guides/prompt-caching)。
 
+## Planner 服务档位
+
+在支持对应档位的 Responses Provider 上，可通过 `[mission.llm]` 的
+`planner_service_tier = "ultrafast"` 加速 Planner 的草稿生成与结构重生成。
+此设置按请求传递。独立 Reviewer、Interpreter 和 Repairer 使用各自原有模型设置。
+Mission Request 的 provenance 记录请求的档位和 Provider 实际返回的档位。
+选择档位前可核对 [OpenAI 适用型号](https://developers.openai.com/api/docs/guides/ultrafast-mode)
+和 [计费](https://developers.openai.com/api/docs/pricing)。
+
 ```bash
 uv sync --dev
 uv run mission-service

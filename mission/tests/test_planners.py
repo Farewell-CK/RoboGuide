@@ -354,6 +354,54 @@ def _grounding(
     return EmptyMissionGroundingReader().capture("request-test", dialogue, 10)
 
 
+def test_planner_service_tier_applies_to_both_planner_attempts() -> None:
+    """Keep the tier opt-in scoped to first generation and its structural regeneration."""
+    fixture = _v0_8_plan()
+    plan = MissionPlan.from_json(fixture)
+    output = _provider_plan(fixture)
+    objective = plan.mission.objective
+    transport = FakeTransport(
+        [
+            _response(
+                {"objective": objective, "constraints": [], "assumptions": [], "open_questions": []}
+            ),
+            _response(output),
+            _response(output),
+            _response(_review_output()),
+            _response(output),
+        ]
+    )
+    original = _local_settings()
+    settings = replace(original, llm=replace(original.llm, planner_service_tier="ultrafast"))
+    environment = {"OPENAI_API_KEY": "test-only-key"}
+    context = _grounding()
+    catalog = _current_catalog()
+    assessment = ResponsesMissionInterpreter(settings, environment, transport).interpret(
+        (), context
+    )
+    intent = assessment.grounded_intent()
+    mission_id = plan.mission.mission_id
+    planner = ResponsesMissionPlanner(settings, environment, transport)
+    assert planner.plan(mission_id, intent, catalog, context) == plan
+    regenerated = planner.regenerate(
+        mission_id, intent, catalog, context, output, [{"message": "fixture rejection"}]
+    )
+    review = ResponsesMissionReviewer(settings, environment, transport).review(
+        intent, regenerated, catalog, context
+    )
+    repaired = ResponsesMissionRepairer(settings, environment, transport).repair(
+        mission_id, intent, regenerated, review, catalog, context
+    )
+    assert plan == regenerated == repaired
+    assert [payload.get("service_tier") for _, _, payload, _ in transport.requests] == [
+        None,
+        "ultrafast",
+        "ultrafast",
+        None,
+        None,
+    ]
+
+
 def _semantic_grounding() -> GroundingContextSnapshot:
     """Build a fixed joint-goal snapshot for Reviewer/Repairer input assertions."""
     evidence = AuthoritativeSemanticEvidence.create(

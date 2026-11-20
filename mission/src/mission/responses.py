@@ -440,6 +440,7 @@ class _ResponsesClient:
         input_text: str,
         schema_name: str,
         schema: JSONObject,
+        service_tier: str | None = None,
         cacheable_prefix: str | None = None,
         timeout_seconds: float | None = None,
     ) -> JSONObject:
@@ -466,6 +467,8 @@ class _ResponsesClient:
                 }
             },
         }
+        if service_tier is not None:
+            payload["service_tier"] = service_tier
         if cacheable_prefix is not None:
             payload.pop("instructions")
             payload["prompt_cache_options"] = {"mode": "explicit"}
@@ -657,6 +660,7 @@ class ResponsesMissionPlanner:
             ),
             schema_name="mission_plan_v0",
             schema=self._client._mission_plan_provider_schema(canonical_schema, mission_id),
+            service_tier=self._settings.llm.planner_service_tier,
         )
         generated_at_ms = int(time.time() * 1000)
         provider_output = self._client._extract_output_json(response)
