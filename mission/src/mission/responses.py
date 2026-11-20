@@ -267,6 +267,272 @@ def _validated_provider_draft(
         ) from error
 
 
+_STATIC_PLAN_PREFIX_KEYS: tuple[str, ...] = (
+    "capability_catalog",
+    "deployment_execution_profile",
+    "deployment_planning_profile",
+    "execution_planning_evidence",
+    "satisfaction_policy",
+)
+
+
+def _split_static_prefix(
+    payload: dict[str, JSONValue], static_keys: tuple[str, ...]
+) -> tuple[str | None, str]:
+    """Separate stable deployment inputs into an explicit prefix without altering JSON content."""
+    static_payload: dict[str, JSONValue] = {
+        key: payload.pop(key) for key in static_keys if key in payload
+    }
+    if not static_payload or not payload:
+        merged = {**static_payload, **payload}
+        return None, json.dumps(merged, ensure_ascii=False, sort_keys=True)
+    return (
+        json.dumps(static_payload, ensure_ascii=False, sort_keys=True)[:-1] + ", ",
+        json.dumps(payload, ensure_ascii=False, sort_keys=True)[1:],
+    )
+
+
+def _round_coordinate(value: JSONValue) -> JSONValue:
+    """Round finite numeric coordinates to millimetres and pass other values through unchanged."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return value
+    return round(float(value), 3)
+
+
+def _compact_reported_origin_content(content: JSONObject) -> JSONObject:
+    """Summarize verified reported-origin content while preserving identity and pose semantics."""
+    compact: dict[str, JSONValue] = {
+        key: content[key]
+        for key in (
+            "schema_version",
+            "memory_id",
+            "node_id",
+            "source_mission_id",
+            "source_task_id",
+            "localization_verified",
+            "motion_authorized",
+            "pose_measurement_time",
+        )
+        if key in content
+    }
+    position = content.get("position")
+    if isinstance(position, dict):
+        compact["position"] = {
+            key: _round_coordinate(position[key])
+            if key in {"x_m", "y_m", "yaw_rad"}
+            else position[key]
+            for key in ("map_id", "map_revision", "x_m", "y_m", "yaw_rad", "frame_basis")
+            if key in position
+        }
+    mapping_obs = content.get("mapping_observation")
+    if isinstance(mapping_obs, dict):
+        obs: dict[str, JSONValue] = {}
+        if "availability" in mapping_obs:
+            obs["availability"] = mapping_obs["availability"]
+        val = mapping_obs.get("value")
+        if isinstance(val, dict):
+            for key in ("map_id", "mode", "has_map", "has_backup"):
+                if key in val:
+                    obs[key] = val[key]
+        if obs:
+            compact["mapping_observation"] = obs
+    return compact
+
+
+def _compact_scene_regions(regions: JSONValue) -> JSONValue:
+    """Summarize scene region polygons by exact center and bounding box."""
+    if not isinstance(regions, list):
+        return regions
+    compact: list[JSONValue] = []
+    for region in regions:
+        if not isinstance(region, dict):
+            compact.append(region)
+            continue
+        entry: dict[str, JSONValue] = {
+            key: region[key]
+            for key in ("annotation_id", "name", "kind", "stale", "theta")
+            if key in region
+        }
+        pts = region.get("points")
+        if isinstance(pts, list) and pts:
+            coords = [
+                (float(p[0]), float(p[1]))
+                for p in pts
+                if isinstance(p, list)
+                and len(p) >= 2
+                and isinstance(p[0], int | float)
+                and isinstance(p[1], int | float)
+            ]
+            if coords:
+                xs = [p[0] for p in coords]
+                ys = [p[1] for p in coords]
+                entry["center_xy"] = [round(sum(xs) / len(xs), 3), round(sum(ys) / len(ys), 3)]
+                entry["bounds_xy"] = [
+                    round(min(xs), 3),
+                    round(min(ys), 3),
+                    round(max(xs), 3),
+                    round(max(ys), 3),
+                ]
+        compact.append(entry)
+    return compact
+
+
+def project_grounding_for_llm(grounding_context: GroundingContextSnapshot) -> JSONObject:
+    """Return a compact LLM view of grounding while leaving the audit snapshot untouched."""
+    raw = grounding_context.to_json()
+    state_list = raw.get("state_evidence")
+    if isinstance(state_list, list):
+        compact_state: list[JSONValue] = []
+        for item in state_list:
+            if not isinstance(item, dict):
+                compact_state.append(item)
+                continue
+            schema = item.get("payload_schema")
+            value = item.get("value")
+            if not isinstance(value, dict):
+                compact_state.append(item)
+                continue
+            projected_item: dict[str, JSONValue] = {
+                key: item[key]
+                for key in (
+                    "evidence_id",
+                    "object",
+                    "freshness",
+                    "payload_schema",
+                    "semantic",
+                    "source",
+                )
+                if key in item
+            }
+            if schema == "roboguide.world.robot-physical-observation/v0.1":
+                compact_val: dict[str, JSONValue] = {
+                    key: value[key]
+                    for key in (
+                        "physical_entity_id",
+                        "damping_state",
+                        "device_stop_verified",
+                        "arrival_verified",
+                        "motion_authorized",
+                        "remote_connection",
+                        "shared_frame_verified",
+                    )
+                    if key in value
+                }
+                mapping = value.get("mapping")
+                if isinstance(mapping, dict):
+                    compact_mapping: dict[str, JSONValue] = {
+                        k: mapping[k]
+                        for k in (
+                            "map_id",
+                            "mode",
+                            "map_revision_id",
+                            "localization_verified",
+                            "localization_quality",
+                            "pose_measurement_time",
+                            "response_availability",
+                        )
+                        if k in mapping
+                    }
+                    pose = mapping.get("reported_pose")
+                    if isinstance(pose, dict):
+                        compact_mapping["reported_pose"] = {
+                            k: _round_coordinate(pose[k]) for k in ("x", "y", "theta") if k in pose
+                        }
+                    compact_val["mapping"] = compact_mapping
+                posture = value.get("posture")
+                if isinstance(posture, dict):
+                    compact_val["posture"] = {
+                        k: posture[k] for k in ("availability", "reported_posture") if k in posture
+                    }
+                battery = value.get("battery")
+                if isinstance(battery, dict):
+                    compact_val["battery"] = {
+                        k: battery[k] for k in ("availability", "percent") if k in battery
+                    }
+                projected_item["value"] = compact_val
+            elif schema == "roboguide.world.scene-targets/v0.2":
+                compact_val = {
+                    key: value[key]
+                    for key in (
+                        "physical_entity_id",
+                        "availability",
+                        "localization_verified",
+                        "arrival_verified",
+                        "reason",
+                        "region_source_digest",
+                        "source_node_id",
+                    )
+                    if key in value
+                }
+                def_json = value.get("definition_json")
+                if isinstance(def_json, str):
+                    try:
+                        parsed = json.loads(def_json)
+                    except json.JSONDecodeError:
+                        compact_val["definition_json"] = def_json
+                    else:
+                        if isinstance(parsed, dict):
+                            scene: dict[str, JSONValue] = {}
+                            if "map_binding" in parsed:
+                                scene["map_binding"] = parsed["map_binding"]
+                            if "regions" in parsed:
+                                scene["regions"] = _compact_scene_regions(parsed["regions"])
+                            compact_val["scene"] = scene
+                        elif isinstance(parsed, list):
+                            compact_val["regions"] = _compact_scene_regions(parsed)
+                        else:
+                            compact_val["definition_json"] = def_json
+                else:
+                    compact_val["definition_json"] = def_json
+                projected_item["value"] = compact_val
+            else:
+                projected_item = item
+            compact_state.append(projected_item)
+        raw["state_evidence"] = compact_state
+    mem_list = raw.get("memory_evidence")
+    if isinstance(mem_list, list):
+        compact_mem: list[JSONValue] = []
+        for mem in mem_list:
+            if not isinstance(mem, dict):
+                compact_mem.append(mem)
+                continue
+            projected_mem: dict[str, JSONValue] = {
+                key: mem[key]
+                for key in (
+                    "evidence_id",
+                    "selector",
+                    "kind",
+                    "provider_id",
+                    "scope",
+                    "visibility",
+                    "payload_schema",
+                    "media_type",
+                    "content_status",
+                    "owner",
+                    "source_task_ref",
+                )
+                if key in mem
+            }
+            content = mem.get("content")
+            if isinstance(content, dict):
+                projected_mem["content"] = (
+                    _compact_reported_origin_content(content)
+                    if mem.get("payload_schema") == "roboguide.reported-origin/v0.1"
+                    else content
+                )
+            artifact = mem.get("artifact")
+            if isinstance(artifact, dict):
+                if mem.get("content_status") == "MetadataOnly":
+                    projected_mem["artifact"] = {
+                        k: artifact[k] for k in ("byte_size", "media_type") if k in artifact
+                    }
+                else:
+                    projected_mem["artifact"] = artifact
+            compact_mem.append(projected_mem)
+        raw["memory_evidence"] = compact_mem
+    return raw
+
+
 def _review_schema() -> JSONObject:
     """Return the strict provider schema for structured Mission review evidence."""
     return {
@@ -404,6 +670,7 @@ class _ResponsesClient:
             canonical_schema,
             mission_id=mission_id,
             profile=self._settings.provider_plan_profile,
+            bind_mission_id=not self._settings.llm.static_provider_schema,
         )
 
     def _plan_instructions(self, path: Path) -> str:
@@ -432,6 +699,14 @@ class _ResponsesClient:
         policy = self._settings.satisfaction_policy
         return None if policy is None else policy.to_json()
 
+    def _grounding_payload(self, grounding_context: GroundingContextSnapshot) -> JSONObject:
+        """Select either the raw canonical snapshot or compact LLM grounding view."""
+        return (
+            project_grounding_for_llm(grounding_context)
+            if self._settings.llm.compact_grounding_for_llm
+            else grounding_context.to_json()
+        )
+
     def _request(
         self,
         *,
@@ -442,10 +717,11 @@ class _ResponsesClient:
         schema: JSONObject,
         service_tier: str | None = None,
         cacheable_prefix: str | None = None,
+        cacheable_developer: bool = False,
         timeout_seconds: float | None = None,
         reasoning_effort: str | None = None,
     ) -> JSONObject:
-        """Send one bounded Responses request, optionally placing a breakpoint before input_text."""
+        """Send one bounded Responses request, optionally placing an explicit cache breakpoint."""
         if not model.strip() or len(model) > 256:
             raise MissionProviderError(
                 "requested model identity is invalid or too long", configuration_failure=True
@@ -492,6 +768,25 @@ class _ResponsesClient:
                         },
                         {"type": "input_text", "text": input_text},
                     ],
+                },
+            ]
+        elif cacheable_developer:
+            payload.pop("instructions")
+            payload["prompt_cache_options"] = {"mode": "explicit"}
+            payload["input"] = [
+                {
+                    "role": "developer",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": instructions,
+                            "prompt_cache_breakpoint": {"mode": "explicit"},
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": input_text}],
                 },
             ]
         ensure_provider_budget()
@@ -631,7 +926,7 @@ class ResponsesMissionPlanner:
             "grounded_intent": grounded_intent.to_json(),
             "satisfaction_policy": self._client._satisfaction_policy_input(),
             "capability_catalog": capability_catalog.to_json(),
-            "grounding_context": grounding_context.to_json(),
+            "grounding_context": self._client._grounding_payload(grounding_context),
             **(
                 {"deployment_execution_profile": self._execution_profile.to_json()}
                 if self._execution_profile is not None
@@ -650,22 +945,25 @@ class ResponsesMissionPlanner:
         }
         if feedback is not None:
             payload["prevalidation_recovery_feedback"] = feedback
+        plan_input = _with_planning_world_evidence(
+            _with_semantic_goal(payload, grounding_context, self._settings.satisfaction_policy),
+            grounding_context,
+        )
+        cacheable_prefix: str | None = None
+        if self._settings.llm.planner_static_prefix_cache:
+            cacheable_prefix, input_text = _split_static_prefix(
+                dict(plan_input), _STATIC_PLAN_PREFIX_KEYS
+            )
+        else:
+            input_text = json.dumps(plan_input, ensure_ascii=False, sort_keys=True)
         response = self._client._request(
-            model=self._settings.llm.model,
+            model=self._settings.llm.planner_model or self._settings.llm.model,
             instructions=self._client._plan_instructions(self._settings.prompts.planner_path),
-            input_text=json.dumps(
-                _with_planning_world_evidence(
-                    _with_semantic_goal(
-                        payload, grounding_context, self._settings.satisfaction_policy
-                    ),
-                    grounding_context,
-                ),
-                ensure_ascii=False,
-                sort_keys=True,
-            ),
+            input_text=input_text,
             schema_name="mission_plan_v0",
             schema=self._client._mission_plan_provider_schema(canonical_schema, mission_id),
             service_tier=self._settings.llm.planner_service_tier,
+            cacheable_prefix=cacheable_prefix,
             reasoning_effort=self._settings.llm.planner_reasoning_effort,
         )
         generated_at_ms = int(time.time() * 1000)
@@ -755,7 +1053,7 @@ class ResponsesMissionReviewer:
                 "mission_plan": plan.to_json(),
                 "satisfaction_policy": self._client._satisfaction_policy_input(),
                 "capability_catalog": capability_catalog.to_json(),
-                "grounding_context": grounding_context.to_json(),
+                "grounding_context": self._client._grounding_payload(grounding_context),
                 **(
                     {"runtime_replanning_context": runtime_context}
                     if runtime_context is not None
@@ -806,7 +1104,9 @@ class ResponsesMissionReviewer:
             input_text=input_text if cacheable_prefix is None else input_text[1:],
             schema_name="mission_review_v0",
             schema=_review_schema(),
+            service_tier=self._settings.llm.review_service_tier,
             cacheable_prefix=cacheable_prefix,
+            reasoning_effort=self._settings.llm.review_reasoning_effort,
         )
         return MissionPlanReview.from_json(self._client._extract_output_json(response))
 
@@ -885,7 +1185,7 @@ class ResponsesMissionRepairer:
             "reviewed_plan": reviewed_plan.to_json(),
             "initial_operation_assessment": assessment.to_json(),
             "capability_catalog": capability_catalog.to_json(),
-            "grounding_context": grounding_context.to_json(),
+            "grounding_context": self._client._grounding_payload(grounding_context),
             "satisfaction_policy": self._client._satisfaction_policy_input(),
             "recovery_budget": {
                 "max_attempts": session.max_attempts,
@@ -924,22 +1224,27 @@ class ResponsesMissionRepairer:
         remaining_seconds = (session.expires_at_ms - int(time.time() * 1000)) / 1000
         if remaining_seconds <= 0:
             raise TimeoutError("deployment recovery deadline expired before Provider call")
+        reconsider_input = _with_planning_world_evidence(
+            _with_semantic_goal(payload, grounding_context, self._settings.satisfaction_policy),
+            grounding_context,
+        )
+        reconsider_prefix: str | None = None
+        if self._settings.llm.repair_static_prefix_cache:
+            reconsider_prefix, reconsider_text = _split_static_prefix(
+                dict(reconsider_input), _STATIC_PLAN_PREFIX_KEYS
+            )
+        else:
+            reconsider_text = json.dumps(reconsider_input, ensure_ascii=False, sort_keys=True)
         response = self._client._request(
-            model=self._settings.llm.model,
+            model=self._settings.llm.repair_model or self._settings.llm.model,
             instructions=self._client._plan_instructions(self._settings.prompts.repairer_path),
-            input_text=json.dumps(
-                _with_planning_world_evidence(
-                    _with_semantic_goal(
-                        payload, grounding_context, self._settings.satisfaction_policy
-                    ),
-                    grounding_context,
-                ),
-                ensure_ascii=False,
-                sort_keys=True,
-            ),
+            input_text=reconsider_text,
             schema_name="deployment_recovery_v0",
             schema=schema,
+            service_tier=self._settings.llm.repair_service_tier,
+            cacheable_prefix=reconsider_prefix,
             timeout_seconds=remaining_seconds,
+            reasoning_effort=self._settings.llm.repair_reasoning_effort,
         )
         try:
             raw = self._client._extract_output_json(response)
@@ -1079,7 +1384,7 @@ class ResponsesMissionRepairer:
             "satisfaction_policy": self._client._satisfaction_policy_input(),
             "review": review.to_json() if review is not None else None,
             "capability_catalog": capability_catalog.to_json(),
-            "grounding_context": grounding_context.to_json(),
+            "grounding_context": self._client._grounding_payload(grounding_context),
             **(
                 {"deployment_execution_profile": self._execution_profile.to_json()}
                 if self._execution_profile is not None
@@ -1108,19 +1413,23 @@ class ResponsesMissionRepairer:
         repair_payload = _with_operation_effect_review(
             repair_payload, rejected_plan, self._planning_profile
         )
+        repair_input = _with_planning_world_evidence(repair_payload, grounding_context)
+        repair_prefix: str | None = None
+        if self._settings.llm.repair_static_prefix_cache:
+            repair_prefix, repair_text = _split_static_prefix(
+                dict(repair_input), _STATIC_PLAN_PREFIX_KEYS
+            )
+        else:
+            repair_text = json.dumps(repair_input, ensure_ascii=False, sort_keys=True)
         response = self._client._request(
-            model=self._settings.llm.model,
+            model=self._settings.llm.repair_model or self._settings.llm.model,
             instructions=self._client._plan_instructions(self._settings.prompts.repairer_path),
-            input_text=json.dumps(
-                _with_planning_world_evidence(
-                    repair_payload,
-                    grounding_context,
-                ),
-                ensure_ascii=False,
-                sort_keys=True,
-            ),
+            input_text=repair_text,
             schema_name="mission_plan_repair_v0",
             schema=self._client._mission_plan_provider_schema(canonical_schema, mission_id),
+            service_tier=self._settings.llm.repair_service_tier,
+            cacheable_prefix=repair_prefix,
+            reasoning_effort=self._settings.llm.repair_reasoning_effort,
         )
         generated_at_ms = int(time.time() * 1000)
         return _validated_provider_draft(
@@ -1190,17 +1499,20 @@ class ResponsesMissionInterpreter:
             },
         }
         response = self._client._request(
-            model=self._settings.llm.model,
+            model=self._settings.llm.interpreter_model or self._settings.llm.model,
             instructions=self._client._load_prompt(self._settings.prompts.interpreter_path),
             input_text=json.dumps(
                 {
                     "dialogue": [turn.to_json() for turn in dialogue],
-                    "grounding_context": grounding_context.to_json(),
+                    "grounding_context": self._client._grounding_payload(grounding_context),
                 },
                 ensure_ascii=False,
                 sort_keys=True,
             ),
             schema_name="mission_intent_v0",
             schema=schema,
+            service_tier=self._settings.llm.interpreter_service_tier,
+            cacheable_developer=self._settings.llm.interpreter_static_prefix_cache,
+            reasoning_effort=self._settings.llm.interpreter_reasoning_effort,
         )
         return IntentAssessment.from_json(self._client._extract_output_json(response))

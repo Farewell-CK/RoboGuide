@@ -110,6 +110,7 @@ def build_mission_plan_provider_schema(
     *,
     mission_id: str,
     profile: str = ECHO_OBJECTIVE_PROFILE,
+    bind_mission_id: bool = True,
 ) -> JSONObject:
     """Build a strict provider DTO fenced to one request's Mission ID.
 
@@ -133,7 +134,8 @@ def build_mission_plan_provider_schema(
     )
     if mission_id_schema.get("$ref") != "#/$defs/id":
         raise ProviderMissionPlanError("provider Mission identity schema is unexpected")
-    mission_properties["id"] = {"type": "string", "enum": [mission_id]}
+    if bind_mission_id:
+        mission_properties["id"] = {"type": "string", "enum": [mission_id]}
     if profile == HOST_OBJECTIVE_PROFILE:
         if mission_properties.get("objective") != {"type": "string"}:
             raise ProviderMissionPlanError("canonical Mission objective schema is unexpected")

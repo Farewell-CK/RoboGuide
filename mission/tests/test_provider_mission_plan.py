@@ -334,3 +334,23 @@ def test_malformed_non_null_optional_value_still_fails_canonical_validation(
 
     with pytest.raises(MissionPlanError, match="physical_entity must be nonblank text"):
         MissionPlan.from_json(normalized)
+
+
+def test_static_provider_schema_mode_stays_invariant_across_mission_ids() -> None:
+    """Unbound Mission ID keeps the strict provider schema identical across Missions."""
+    canonical = _canonical_schema()
+    first = build_mission_plan_provider_schema(
+        canonical, mission_id="mission-one", bind_mission_id=False
+    )
+    second = build_mission_plan_provider_schema(
+        canonical, mission_id="mission-two", bind_mission_id=False
+    )
+    assert first == second
+    id_schema = cast(
+        JSONObject,
+        cast(
+            JSONObject,
+            cast(JSONObject, cast(JSONObject, first["properties"])["mission"])["properties"],
+        )["id"],
+    )
+    assert id_schema == {"$ref": "#/$defs/id"}

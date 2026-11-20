@@ -61,9 +61,23 @@ class LlmSettings:
     disable_response_storage: bool
     network_access: str
     timeout_seconds: float
+    interpreter_model: str | None = None
+    interpreter_reasoning_effort: str | None = None
+    interpreter_service_tier: str | None = None
+    interpreter_static_prefix_cache: bool = False
+    planner_model: str | None = None
     planner_reasoning_effort: str | None = None
+    planner_static_prefix_cache: bool = False
+    review_reasoning_effort: str | None = None
+    review_service_tier: str | None = None
     review_static_prefix_cache: bool = False
+    repair_model: str | None = None
+    repair_reasoning_effort: str | None = None
+    repair_service_tier: str | None = None
+    repair_static_prefix_cache: bool = False
     planner_service_tier: str | None = None
+    compact_grounding_for_llm: bool = False
+    static_provider_schema: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,12 +130,24 @@ def _string(table: Mapping[str, object], key: str, path: str) -> str:
     return value
 
 
+def _optional_string(table: Mapping[str, object], key: str, path: str) -> str | None:
+    """Read an optional nonblank text setting while rejecting empty whitespace overrides."""
+    return _string(table, key, path) if key in table else None
+
+
 def _boolean(table: Mapping[str, object], key: str, path: str) -> bool:
     """Read a required Boolean without accepting integer coercion."""
     value = table.get(key)
     if not isinstance(value, bool):
         raise MissionConfigError(f"{path}.{key} must be a boolean")
     return value
+
+
+def _optional_boolean(
+    table: Mapping[str, object], key: str, path: str, *, default: bool = False
+) -> bool:
+    """Read an optional strict Boolean without integer coercion."""
+    return _boolean(table, key, path) if key in table else default
 
 
 def _positive_number(table: Mapping[str, object], key: str, path: str) -> float:
@@ -209,21 +235,39 @@ def load_settings(
             disable_response_storage=_boolean(llm, "disable_response_storage", "mission.llm"),
             network_access=_string(llm, "network_access", "mission.llm"),
             timeout_seconds=_positive_number(llm, "timeout_seconds", "mission.llm"),
-            review_static_prefix_cache=(
-                _boolean(llm, "review_static_prefix_cache", "mission.llm")
-                if "review_static_prefix_cache" in llm
-                else False
+            interpreter_model=_optional_string(llm, "interpreter_model", "mission.llm"),
+            interpreter_reasoning_effort=_optional_string(
+                llm, "interpreter_reasoning_effort", "mission.llm"
             ),
-            planner_service_tier=(
-                _string(llm, "planner_service_tier", "mission.llm")
-                if "planner_service_tier" in llm
-                else None
+            interpreter_service_tier=_optional_string(
+                llm, "interpreter_service_tier", "mission.llm"
             ),
-            planner_reasoning_effort=(
-                _string(llm, "planner_reasoning_effort", "mission.llm")
-                if "planner_reasoning_effort" in llm
-                else None
+            interpreter_static_prefix_cache=_optional_boolean(
+                llm, "interpreter_static_prefix_cache", "mission.llm"
             ),
+            planner_model=_optional_string(llm, "planner_model", "mission.llm"),
+            planner_reasoning_effort=_optional_string(
+                llm, "planner_reasoning_effort", "mission.llm"
+            ),
+            planner_static_prefix_cache=_optional_boolean(
+                llm, "planner_static_prefix_cache", "mission.llm"
+            ),
+            review_reasoning_effort=_optional_string(llm, "review_reasoning_effort", "mission.llm"),
+            review_service_tier=_optional_string(llm, "review_service_tier", "mission.llm"),
+            review_static_prefix_cache=_optional_boolean(
+                llm, "review_static_prefix_cache", "mission.llm"
+            ),
+            repair_model=_optional_string(llm, "repair_model", "mission.llm"),
+            repair_reasoning_effort=_optional_string(llm, "repair_reasoning_effort", "mission.llm"),
+            repair_service_tier=_optional_string(llm, "repair_service_tier", "mission.llm"),
+            repair_static_prefix_cache=_optional_boolean(
+                llm, "repair_static_prefix_cache", "mission.llm"
+            ),
+            planner_service_tier=_optional_string(llm, "planner_service_tier", "mission.llm"),
+            compact_grounding_for_llm=_optional_boolean(
+                llm, "compact_grounding_for_llm", "mission.llm"
+            ),
+            static_provider_schema=_optional_boolean(llm, "static_provider_schema", "mission.llm"),
         ),
         provider=ProviderSettings(
             name=_string(provider, "name", f"model_providers.{provider_name}"),

@@ -189,6 +189,27 @@ Mission Request 的 provenance 记录请求的档位和 Provider 实际返回的
 选择档位前可核对 [OpenAI 适用型号](https://developers.openai.com/api/docs/guides/ultrafast-mode)
 和 [计费](https://developers.openai.com/api/docs/pricing)。
 
+## 分阶段模型、缓存与紧凑 Grounding 视图
+
+为避免 `Interpreter`、`Reviewer` 与 `Repairer` 共享高推理档位或高价服务档位拖慢整体规划耗时，
+`[mission.llm]` 还支持按阶段独立覆盖（省略时全部保持既有默认）：
+
+- **Interpreter**：`interpreter_model`、`interpreter_reasoning_effort`、
+  `interpreter_service_tier`、`interpreter_static_prefix_cache = true`（缓存开发者指令前缀）
+- **Planner / Repairer**：`planner_model`、`planner_static_prefix_cache = true`、
+  `repair_model`、`repair_reasoning_effort`、`repair_service_tier`、`repair_static_prefix_cache = true`
+  （复用静态部署资产与 Catalog 前缀断点，同样作用于 `mission-runtime-replanner`）
+- **Reviewer**：`review_reasoning_effort`、`review_service_tier`
+- **紧凑 Grounding 投影**：`compact_grounding_for_llm = true` 仅在送入模型的 JSON 中
+  整理物理观测、解析并摘要 `scene-targets` 中心/包围盒及精简 `MetadataOnly` 内存条目，
+  （含 `reported-origin/v0.1` 冗余字段）不修改持久化审计快照、摘要计算或确定性校验。
+- **跨请求静态输出 Schema**：`static_provider_schema = true` 使 Planner / Repairer
+  的 strict `json_schema` 在不同 `mission_id` 间保持一致（继续由宿主 `_validate_plan_output`
+  与用户侧动态字段强校验 `mission.id`，避免每次请求生成新 UUID 击穿约 1 万 token 的前缀缓存）。
+
+Mission provenance 在响应携带 `usage` 时同步记录 `token_usage` 整数统计（含 `cached_tokens`
+与 `reasoning_tokens`）。
+
 ```bash
 uv sync --dev
 uv run mission-service

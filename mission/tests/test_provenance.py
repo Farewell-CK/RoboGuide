@@ -262,3 +262,41 @@ def test_live_prompt_change_is_rejected_before_transport(tmp_path: Path) -> None
     with pytest.raises(MissionProviderError, match="changed since startup"):
         client._load_prompt(prompt)
     assert transport.requests == []
+
+
+def test_token_usage_is_recorded_and_validated_when_present() -> None:
+    """Capture bounded token usage counts cleanly without breaking snapshots lacking usage."""
+    from mission.provenance import validate_snapshot
+
+    with trace_deliberation("request-usage", "input"):
+        provider_call(
+            {"model": "gpt-6.1-sol"},
+            {
+                "model": "gpt-6.1-sol",
+                "id": "resp-usage",
+                "status": "completed",
+                "usage": {
+                    "input_tokens": 1200,
+                    "output_tokens": 85,
+                    "total_tokens": 1285,
+                    "input_tokens_details": {"cached_tokens": 900},
+                    "output_tokens_details": {"reasoning_tokens": 12},
+                },
+            },
+            None,
+            10,
+            20,
+        )
+        snap = snapshot("{}", "request-usage", "input", "sha256:" + "a" * 64, None, 1, "Drafted")
+        validate_snapshot(snap)
+        calls = cast(list[JSONObject], snap["provider_calls"])
+        assert calls[0]["token_usage"] == {
+            "input_tokens": 1200,
+            "output_tokens": 85,
+            "total_tokens": 1285,
+            "cached_tokens": 900,
+            "reasoning_tokens": 12,
+        }
+        calls[0]["token_usage"] = {"cached_tokens": -1}
+        with pytest.raises(ValueError, match="token_usage"):
+            validate_snapshot(snap)

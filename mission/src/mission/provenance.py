@@ -159,6 +159,21 @@ def provider_call(
         evidence["requested_reasoning_effort"] = requested_effort
     if isinstance(schema_name, str) and 0 < len(schema_name) <= 256:
         evidence["response_schema_name"] = schema_name
+    usage = response.get("usage") if response is not None else None
+    if isinstance(usage, dict):
+        token_usage: dict[str, int] = {}
+        for key in ("input_tokens", "output_tokens", "total_tokens"):
+            val = usage.get(key)
+            if type(val) is int and val >= 0:
+                token_usage[key] = val
+        in_details = usage.get("input_tokens_details")
+        if isinstance(in_details, dict) and type(in_details.get("cached_tokens")) is int:
+            token_usage["cached_tokens"] = cast(int, in_details["cached_tokens"])
+        out_details = usage.get("output_tokens_details")
+        if isinstance(out_details, dict) and type(out_details.get("reasoning_tokens")) is int:
+            token_usage["reasoning_tokens"] = cast(int, out_details["reasoning_tokens"])
+        if token_usage:
+            evidence["token_usage"] = cast(JSONValue, token_usage)
     trace.calls.append(json.dumps(evidence, sort_keys=True, separators=(",", ":")))
 
 
@@ -250,6 +265,13 @@ def validate_snapshot(value: JSONObject) -> None:
             setting = call.get(name)
             if name in call and (not isinstance(setting, str) or not 0 < len(setting) <= 256):
                 raise ValueError("provenance provider request settings are invalid")
+        if "token_usage" in call:
+            token_usage = call["token_usage"]
+            if not isinstance(token_usage, dict) or any(
+                not isinstance(k, str) or type(v) is not int or v < 0
+                for k, v in token_usage.items()
+            ):
+                raise ValueError("provenance token_usage must contain non-negative integer counts")
         if "plan_assembly" in call:
             _validate_plan_assembly(call["plan_assembly"])
 

@@ -219,3 +219,54 @@ def test_prompts_preserve_joint_effects_without_inventing_physical_identity() ->
     assert "Additional Actor names alone do not repair an effect conflict" in normalized["repairer"]
     benchmark_terms = ("Episode3", "Episode51", "any_targets", "Spot", "Fetch")
     assert all(term not in prompt for prompt in prompts.values() for term in benchmark_terms)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("interpreter_model", '"gpt-5.4-mini"'),
+        ("interpreter_reasoning_effort", '"low"'),
+        ("interpreter_service_tier", '"ultrafast"'),
+        ("planner_model", '"gpt-6.1-sol"'),
+        ("review_reasoning_effort", '"low"'),
+        ("review_service_tier", '"ultrafast"'),
+        ("repair_model", '"gpt-6.1-sol"'),
+        ("repair_reasoning_effort", '"medium"'),
+        ("repair_service_tier", '"ultrafast"'),
+    ],
+)
+def test_per_stage_llm_string_overrides_and_blank_rejection(
+    tmp_path: Path, key: str, value: str
+) -> None:
+    """Each optional per-stage model, effort, and service-tier knob validates cleanly."""
+    source = Path("config/mission.toml").read_text(encoding="utf-8")
+    config = tmp_path / "mission.toml"
+    config.write_text(source.replace("[mission.llm]", f"[mission.llm]\n{key} = {value}"))
+    settings = load_settings(config, repository_root=Path.cwd())
+    assert getattr(settings.llm, key) == value.strip('"')
+    config.write_text(source.replace("[mission.llm]", f'[mission.llm]\n{key} = "   "'))
+    with pytest.raises(MissionConfigError, match=key):
+        load_settings(config, repository_root=Path.cwd())
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "interpreter_static_prefix_cache",
+        "planner_static_prefix_cache",
+        "repair_static_prefix_cache",
+        "compact_grounding_for_llm",
+        "static_provider_schema",
+    ],
+)
+def test_latency_boolean_flags_require_strict_booleans(tmp_path: Path, key: str) -> None:
+    """Keep static caching and compact grounding opt-in and strictly boolean typed."""
+    source = Path("config/mission.toml").read_text(encoding="utf-8")
+    defaults = load_settings(Path("config/mission.toml"), repository_root=Path.cwd())
+    assert getattr(defaults.llm, key) is False
+    config = tmp_path / "mission.toml"
+    config.write_text(source.replace("[mission.llm]", f"[mission.llm]\n{key} = true"))
+    assert getattr(load_settings(config, repository_root=Path.cwd()).llm, key) is True
+    config.write_text(source.replace("[mission.llm]", f'[mission.llm]\n{key} = "true"'))
+    with pytest.raises(MissionConfigError, match=key):
+        load_settings(config, repository_root=Path.cwd())
