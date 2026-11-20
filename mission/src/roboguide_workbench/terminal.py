@@ -75,6 +75,7 @@ COMMANDS = [
 # queued text is not a new permission to perform a Mission effect.
 MAX_QUEUED_REQUESTS = 3
 SLOW_NOTICE_DELAYS = (15.0, 30.0)
+PREVIEW_INTERVAL = 0.15
 
 # Read-only commands can safely run after the current writer drains.  Watches
 # and quit are handled immediately below because they own separate lifecycle
@@ -238,7 +239,8 @@ async def interactive(session: WorkbenchSession) -> int:
     started_at: float | None = None
     phase = "待命"
     loop = asyncio.get_running_loop()
-    stream_buffer = ""
+    stream_buffer: list[str] = []
+    preview_timer: asyncio.TimerHandle | None = None
     previewed = ""
     preview_tasks: list[asyncio.Task[None]] = []
     preview_lock = asyncio.Lock()
@@ -426,19 +428,31 @@ async def interactive(session: WorkbenchSession) -> int:
             with set_app(prompt.app):
                 await run_in_terminal(write)
 
+    def cancel_preview_timer() -> None:
+        """Clear the scheduled flush before ending the current terminal turn."""
+        nonlocal preview_timer
+        if preview_timer is not None:
+            preview_timer.cancel()
+            preview_timer = None
+
+    def flush_preview() -> None:
+        """Render accumulated public text once its short display interval ends."""
+        cancel_preview_timer()
+        if stream_buffer and not muted and not closing:
+            preview_tasks.append(asyncio.create_task(show_preview("".join(stream_buffer))))
+        stream_buffer.clear()
+
     def update_stream(delta: str) -> None:
-        """Buffer real tokens into short lines and schedule their rendering on the UI owner."""
+        """Batch public text without making a short fragment wait for the final response."""
 
         def record() -> None:
-            """Avoid full input-frame refreshes for each individual Provider token."""
-            nonlocal stream_buffer
-            if muted or closing:
+            """Schedule at most one flush per interval on the terminal owner."""
+            nonlocal preview_timer
+            if not delta or muted or closing:
                 return
-            stream_buffer += delta
-            while len(stream_buffer) >= 80 or "\n" in stream_buffer:
-                split = stream_buffer.find("\n") + 1 if "\n" in stream_buffer else 80
-                text, stream_buffer = stream_buffer[:split], stream_buffer[split:]
-                preview_tasks.append(asyncio.create_task(show_preview(text)))
+            stream_buffer.append(delta)
+            if preview_timer is None:
+                preview_timer = loop.call_later(PREVIEW_INTERVAL, flush_preview)
 
         loop.call_soon_threadsafe(record)
 
@@ -490,9 +504,9 @@ async def interactive(session: WorkbenchSession) -> int:
         """Run one serialized turn and start the next queued question after its receipt drains."""
         nonlocal muted, unavailable, foreground, started_at, phase
         nonlocal visible_references, visible_history
-        nonlocal stream_buffer, previewed
+        nonlocal previewed
         started_at, phase = time.monotonic(), "处理中"
-        stream_buffer, previewed = "", ""
+        previewed = ""
         preview_tasks.clear()
         refresh_toolbar()
         turn = DisplayTurn(session)
@@ -512,9 +526,7 @@ async def interactive(session: WorkbenchSession) -> int:
             result = await asyncio.to_thread(session.ask, text)
             outcome = session.query_status
             await asyncio.sleep(0)
-            if stream_buffer:
-                preview_tasks.append(asyncio.create_task(show_preview(stream_buffer)))
-                stream_buffer = ""
+            flush_preview()
             if preview_tasks:
                 await asyncio.gather(*preview_tasks)
             turn.stage()
@@ -539,9 +551,10 @@ async def interactive(session: WorkbenchSession) -> int:
         finally:
             waiting.cancel()
             await asyncio.gather(waiting, return_exceptions=True)
+            cancel_preview_timer()
+            stream_buffer.clear()
             if preview_tasks:
                 await asyncio.gather(*preview_tasks, return_exceptions=True)
-            stream_buffer = ""
             session.input_references = None
             session.input_history = None
             try:

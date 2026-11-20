@@ -20,6 +20,8 @@ from roboguide_workbench.views import (
     safe_text,
 )
 
+LOCAL_SNAPSHOT_COMMANDS = frozenset({"/history", "/raw"})
+
 HELP = """可询问：接入了几个节点？各节点有什么功能？第二个节点呢？哪些支持建图？
 也可询问：任务 mission-x 到哪一步了？
 无需模型的命令：

@@ -22,7 +22,7 @@ from roboguide_workbench.mission_views import render_mission_list
 from roboguide_workbench.persistence import SessionStore
 from roboguide_workbench.plan_view import LIFECYCLE_LABELS, plan_document, plan_overview
 from roboguide_workbench.routing import Query, Router
-from roboguide_workbench.session import HELP, Session
+from roboguide_workbench.session import HELP, LOCAL_SNAPSHOT_COMMANDS, Session
 from roboguide_workbench.state_queries import choices, discover, fields, read_state
 from roboguide_workbench.task_context import TaskDialogue
 from roboguide_workbench.views import inventory_view, render_mission, render_nodes, safe_text
@@ -342,6 +342,7 @@ class WorkbenchSession(Session):
         if question.startswith("/") and question.partition(" ")[0] != "/choose":
             self.suggestion = None
         self.query_status = "complete"
+        record_history = question not in LOCAL_SNAPSHOT_COMMANDS
         if not question.startswith("/"):
             self.input_turn_id = self.display_turn_id or uuid.uuid4().hex
             self.task_dialogue.sync_visible(self.store.data.get("messages"))
@@ -353,10 +354,12 @@ class WorkbenchSession(Session):
             result = self._turn(question)
         except (ValueError, OSError) as error:
             self.query_status = "failed"
-            self._remember(question, "查询/操作未确定：" + str(error))
+            if record_history:
+                self._remember(question, "查询/操作未确定：" + str(error))
             raise
         else:
-            self._remember(question, result)
+            if record_history:
+                self._remember(question, result)
         finally:
             self.input_turn_id = None
         return result
