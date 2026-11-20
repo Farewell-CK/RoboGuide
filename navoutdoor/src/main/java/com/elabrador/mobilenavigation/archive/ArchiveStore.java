@@ -19,9 +19,11 @@ import java.security.MessageDigest;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ConcurrentHashMap;
@@ -39,6 +41,7 @@ final class ArchiveStore implements AutoCloseable {
     static final long MAX_QUEUED_BYTES = 24L * 1024 * 1024;
     static final int MAX_QUEUED_RECORDS = 4096;
     private static final int EVENT_SEGMENT_BYTES = 1024 * 1024;
+    private static final long CHECKPOINT_INTERVAL_NS = TimeUnit.SECONDS.toNanos(1);
     final File root;
     private final Object lock = new Object();
     private final ArrayDeque<Work> queue = new ArrayDeque<>();
@@ -73,7 +76,7 @@ final class ArchiveStore implements AutoCloseable {
         FileOutputStream eventFile;
         File currentEventFile;
         int eventSegment;
-        long eventBytes, eventCount, blobCount, sequence, lastSync;
+        long eventBytes, eventCount, blobCount, sequence, lastSync, lastCheckpoint;
         Session(String id, File dir, JSONObject manifest) {
             this.id = id; this.dir = dir; this.manifest = manifest;
         }
@@ -181,7 +184,9 @@ final class ArchiveStore implements AutoCloseable {
                         JSONObject entry=fileEntry(session.dir,destination,type);addSummary(entry,owned);session.files.put(entry);session.blobCount++;
                         JSONObject record=json("session_id",session.id,"type","artifact","wall_time_ms",wall,"elapsed_time_ns",elapsed,
                             "data",json("artifact_type",type,"path",entry.optString("path"),"size",destination.length(),"sha256",entry.optString("sha256"),"metadata",owned));
-                        writeEvent(session,(record.toString()+"\n").getBytes(StandardCharsets.UTF_8));checkpoint(session);
+                        writeEvent(session,(record.toString()+"\n").getBytes(StandardCharsets.UTF_8));
+                        session.events.flush();
+                        checkpointWhenDue(session);
                     }catch(Exception error){fail(session,error);}
                 });
             }catch(Exception error){fail(session,error);return false;}
@@ -268,7 +273,7 @@ final class ArchiveStore implements AutoCloseable {
                 closeEvents(session); openEvents(session);
             }
             session.events.write(bytes); session.eventBytes += bytes.length; session.eventCount++;
-            if (System.nanoTime() - session.lastSync >= TimeUnit.SECONDS.toNanos(1)) {
+            if (System.nanoTime() - session.lastSync >= CHECKPOINT_INTERVAL_NS) {
                 session.events.flush(); session.eventFile.getFD().sync(); session.lastSync = System.nanoTime();
             }
         } catch (Exception error) { fail(session, error); }
@@ -300,8 +305,22 @@ final class ArchiveStore implements AutoCloseable {
                     "path", entry.optString("path"), "size", bytes.length,
                     "sha256", entry.optString("sha256"), "metadata", metadata));
             writeEvent(session, (record.toString() + "\n").getBytes(StandardCharsets.UTF_8));
-            checkpoint(session);
+            session.events.flush();
+            checkpointWhenDue(session);
         } catch (Exception error) { fail(session, error); }
+    }
+
+    private void checkpointWhenDue(Session session) throws IOException {
+        // Each asset is already synced. Batch the growing manifest, and sync the
+        // artifact events first so recovery can also describe unlisted assets.
+        long now = System.nanoTime();
+        if (session.lastCheckpoint != 0 && now - session.lastCheckpoint < CHECKPOINT_INTERVAL_NS) return;
+        if (session.events != null) {
+            session.events.flush();
+            session.eventFile.getFD().sync();
+            session.lastSync = now;
+        }
+        checkpoint(session);
     }
 
     private static void addSummary(JSONObject entry,JSONObject metadata) {
@@ -323,6 +342,7 @@ final class ArchiveStore implements AutoCloseable {
             session.manifest.put("dropped_records", session.dropped.get());
             session.manifest.put("write_errors", session.errors.get());
             atomicJson(new File(session.dir, "manifest.json"), session.manifest);
+            session.lastCheckpoint = System.nanoTime();
         } catch (Exception error) { throw new IOException(error); }
     }
 
@@ -383,17 +403,30 @@ final class ArchiveStore implements AutoCloseable {
             if (!state.equals("recording")) continue;
             try {
                 JSONArray recoveredFiles = new JSONArray();
-                java.util.Map<String,JSONObject> known=new java.util.HashMap<>();
+                Map<String, JSONObject> known = new HashMap<>();
                 JSONArray old=manifest.optJSONArray("files");if(old!=null)for(int i=0;i<old.length();i++){JSONObject entry=old.optJSONObject(i);if(entry!=null)known.put(entry.optString("path"),entry);}
-                for (File file : descendants(dir)) {
+                List<File> filesOnDisk = descendants(dir);
+                Map<String, JSONObject> artifactEvents = new HashMap<>();
+                for (File file : filesOnDisk) {
+                    if (!relative(dir, file).matches("events-[0-9]+\\.jsonl")) continue;
+                    trimJsonl(file);
+                    collectArtifactEvents(file, artifactEvents);
+                }
+                for (File file : filesOnDisk) {
                     String relative = relative(dir, file);
                     if (relative.startsWith("staging/") || relative.endsWith(".partial") || relative.endsWith(".tmp") || relative.endsWith(".pending")) { file.delete(); continue; }
                     if (!archivedFile(relative)) continue;
-                    if (relative.endsWith(".jsonl")) trimJsonl(file);
                     if(relative.equals(ArchiveReport.README)||relative.equals(ArchiveReport.SUMMARY)||relative.equals(ArchiveReport.DICTIONARY))continue;
                     String[] parts=relative.split("/");String type=relative.endsWith(".jsonl")?"events":parts.length>2&&parts[0].equals("artifacts")?parts[1]:"recovered_artifact";
                     JSONObject entry=fileEntry(dir,file,type),previous=known.get(relative);
-                    if(previous!=null&&entry.optLong("size")==previous.optLong("size")&&entry.optString("sha256").equals(previous.optString("sha256")))entry=previous;
+                    if (sameFile(entry, previous)) {
+                        entry = previous;
+                    } else {
+                        JSONObject event = artifactEvents.get(relative);
+                        if (sameFile(entry, event) && event.optJSONObject("metadata") != null) {
+                            addSummary(entry, event.getJSONObject("metadata"));
+                        }
+                    }
                     recoveredFiles.put(entry);
                 }
                 manifest.put("files", recoveredFiles).put("state", "interrupted").put("capture_complete", false)
@@ -406,6 +439,27 @@ final class ArchiveStore implements AutoCloseable {
                     recoveredFiles.put(fileEntry(dir,new File(dir,item[0]),item[1]));
                 atomicJson(manifestFile, manifest);
             } catch (Exception error) { lastError = "Recovery failed: " + error; }
+        }
+    }
+
+    private static boolean sameFile(JSONObject actual, JSONObject recorded) {
+        return recorded != null && actual.optLong("size") == recorded.optLong("size", -1)
+                && actual.optString("sha256").equals(recorded.optString("sha256"));
+    }
+
+    private static void collectArtifactEvents(File file, Map<String, JSONObject> artifacts) throws IOException {
+        try (java.io.BufferedReader reader = Files.newBufferedReader(file.toPath(), StandardCharsets.UTF_8)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                try {
+                    JSONObject event = new JSONObject(line);
+                    if (!"artifact".equals(event.optString("type"))) continue;
+                    JSONObject data = event.optJSONObject("data");
+                    if (data != null) artifacts.put(data.optString("path"), data);
+                } catch (org.json.JSONException ignored) {
+                    // An unreadable event cannot establish an artifact's metadata.
+                }
+            }
         }
     }
 

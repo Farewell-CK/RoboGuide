@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.os.*;
 import android.util.Base64;
+import android.util.Log;
 import java.io.*;
 import java.net.URI;
 import java.util.*;
@@ -239,8 +240,30 @@ final class QwenVisionHints implements AutoCloseable {
         ui.post(()->{if(!closed&&g==generation.get())listener.show(displayPrimary,displayDiagnostic,snapshot);});
     }
     private void execute(Runnable task){try{worker.execute(task);}catch(RejectedExecutionException ignored){}}
-    @Override public void close(){cancelActiveArchive("closed");closed=true;generation.incrementAndGet();Call call=activeCall;if(call!=null)call.cancel();
-        latest.set(null);worker.shutdownNow();http.dispatcher().executorService().shutdown();http.connectionPool().evictAll();ui.removeCallbacksAndMessages(null);}
+    @Override public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        generation.incrementAndGet();
+        latest.set(null);
+        ui.removeCallbacksAndMessages(null);
+
+        // Closing an HTTPS socket can write a TLS alert. Keep it off the UI thread,
+        // and run after any request the worker was already preparing.
+        worker.execute(() -> {
+            try {
+                cancelActiveArchive("closed");
+                http.dispatcher().cancelAll();
+                http.connectionPool().evictAll();
+            } catch (RuntimeException error) {
+                Log.w("QwenVisionHints", "Unable to close visual hint connections", error);
+            } finally {
+                activeCall = null;
+                frames.clear();
+                http.dispatcher().executorService().shutdown();
+            }
+        });
+        worker.shutdown();
+    }
     private static final class Raw {final byte[] rgb;final int width,height,stride;final long capture,generation;
         Raw(byte[] rgb,int width,int height,int stride,long capture,long generation){this.rgb=rgb;this.width=width;this.height=height;this.stride=stride;this.capture=capture;this.generation=generation;}}
     private static final class Frame {final byte[] jpeg;final long capture;final int width,height;

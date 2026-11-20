@@ -133,6 +133,34 @@ public class ArchiveStoreTest {
         }
     }
 
+    @Test public void interruptedRecordingRestoresArtifactMetadataSinceLastCheckpoint() throws Exception {
+        File root = directory();
+        File dir = new File(root, "nav-batched-checkpoint");
+        File artifact = new File(dir, "artifacts/inference_rgb/0001.jpg");
+        assertTrue(artifact.getParentFile().mkdirs());
+        Files.write(artifact.toPath(), new byte[]{7, 8});
+        ArchiveStore.atomicJson(new File(dir, "manifest.json"),
+                ArchiveStore.json("session_id", dir.getName(), "state", "recording", "files", new JSONArray()));
+        JSONObject data = ArchiveStore.fileEntry(dir, artifact, "inference_rgb")
+                .put("metadata", ArchiveStore.json("inference_id", "example", "width", 640));
+        JSONObject event = ArchiveStore.json("type", "artifact", "data", data);
+        Files.write(new File(dir, "events-00000.jsonl").toPath(),
+                (event + "\n").getBytes(StandardCharsets.UTF_8));
+        try (ArchiveStore store = new ArchiveStore(root, System::nanoTime)) {
+            JSONArray files = ArchiveStore.readJson(new File(store.sessionDirectory(dir.getName()),
+                    "manifest.json")).getJSONArray("files");
+            JSONObject recovered = null;
+            for (int i = 0; i < files.length(); i++) {
+                JSONObject entry = files.getJSONObject(i);
+                if (data.getString("path").equals(entry.getString("path"))) recovered = entry;
+            }
+            assertNotNull(recovered);
+            assertEquals(data.getString("sha256"), recovered.getString("sha256"));
+            assertEquals("example", recovered.getJSONObject("metadata").getString("inference_id"));
+            assertEquals(640, recovered.getJSONObject("metadata").getInt("width"));
+        }
+    }
+
     @Test public void uploaderRejectsRemotePlaintextAndEmbeddedCredentials() {
         assertEquals("https://example.test/base", ArchiveUploader.validateEndpoint("https://example.test/base/", false));
         assertEquals("http://127.0.0.1:8080", ArchiveUploader.validateEndpoint("http://127.0.0.1:8080", true));

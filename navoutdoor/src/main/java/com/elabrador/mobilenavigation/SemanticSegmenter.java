@@ -368,6 +368,11 @@ final class SemanticSegmenter implements AutoCloseable {
             queuedInference = () -> {
                 try {
                     if (closed || generation != vinsGeneration.get()) return;
+                    if (USE_SWINL && !SemanticObservationPolicy.usable(evidence,SystemClock.elapsedRealtime())) {
+                        NavigationAudit.log("SEMANTIC_INPUT_DROP frame=" + frameTimestampSeconds
+                                + " reason=capture_expired_before_inference");
+                        return;
+                    }
                     com.elabrador.mobilenavigation.archive.NavigationArchive.trackProcessing(evidence.recordingSessionId,evidence.inferenceId,"semantic_inference");
                     InferenceInputRecorder.offer(rgb,width,height,stride,depth,depthWidth,depthHeight,depthStride,depthUnits,recordingCapture,evidence);
                     Result result = runInference(rgb, width, height, stride, depth,

@@ -203,10 +203,11 @@ class OutdoorNavController(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private fun runOnUiThread(action: () -> Unit) {
-        mainHandler.post(action)
+        if (released) return
+        mainHandler.post { if (!released) action() }
     }
 
-    private var released = false
+    @Volatile private var released = false
 
     private val streaming = AtomicBoolean(false)
     private val diagnosticRgbWritten = AtomicBoolean(false)
@@ -214,6 +215,7 @@ class OutdoorNavController(
     private val previewUpdatePending = AtomicBoolean(false)
     private val colorPreviewPending = AtomicBoolean(false)
     @Volatile private var colorPreviewGeneration = 0L
+    private val imuWatchdog = D455ImuWatchdog()
     private val uiUpdatePending = AtomicBoolean(false)
     private var previewDepthBuffer: ByteArray? = null
     private var previewAlternateDepthBuffer: ByteArray? = null
@@ -225,7 +227,7 @@ class OutdoorNavController(
 
     private var rsContext: RsContext? = null
     private var streamingThread: Thread? = null
-    private var activityResumed = false
+    @Volatile private var activityResumed = false
     private var restartStreamingWhenStopped = false
 
     private var phonePoseTracker: PhonePoseTracker? = null
@@ -617,11 +619,12 @@ class OutdoorNavController(
     }
 
     fun onDestroy() {
+        if (released) return
+        released = true
         visionHints.close()
         mainHandler.removeCallbacksAndMessages(null)
         colorPreviewGeneration++
         listener.onColorPreview(null)
-        released = true
         releaseNavigationWakeLock()
         stopStreaming()
         rsContext?.close()
@@ -1088,12 +1091,12 @@ class OutdoorNavController(
 
     @Synchronized
     private fun startStreaming() {
-        if (!hasCameraPermission()) {
+        if (released || !hasCameraPermission()) {
             return
         }
         val existing = streamingThread
         if (existing != null && existing.isAlive) {
-            restartStreamingWhenStopped = activityResumed
+            if (!streaming.get()) restartStreamingWhenStopped = activityResumed
             return
         }
         restartStreamingWhenStopped = false
@@ -1153,6 +1156,7 @@ class OutdoorNavController(
                     }
                 }
 
+                imuWatchdog.onStreamStart(SystemClock.elapsedRealtime())
                 val profile: PipelineProfile = pipeline.start(config, callback)
                 try {
                     val align = Align(StreamType.COLOR)
@@ -1177,6 +1181,18 @@ class OutdoorNavController(
                                         continue
                                     }
                                     consecutiveVideoTimeouts = 0
+                                    if (navigationActive && activityResumed &&
+                                        imuWatchdog.shouldRestart(SystemClock.elapsedRealtime())) {
+                                        queued.close()
+                                        NavigationAudit.log("D455_IMU_INTERRUPTED action=restart_camera")
+                                        RuntimeRecordingConfiguration.observe("camera_state", NavigationRecording.j(
+                                            "available", false, "state", "restarting", "reason", "d455_imu_timeout"))
+                                        synchronized(this) {
+                                            if (streaming.get()) restartStreamingWhenStopped = true
+                                        }
+                                        runOnUiThread { listener.onCameraStatus("相机惯性数据中断，正在重新连接") }
+                                        break
+                                    }
                                     val frames = queued
                                     val colorFrame: Frame? = frames.first(StreamType.COLOR)
                                     try {
@@ -1290,6 +1306,11 @@ class OutdoorNavController(
                 pipeline.stop()
             } catch (ignored: Exception) {
                 // Pipeline may already be stopped after a USB disconnect.
+            }
+            try {
+                pipeline.close()
+            } catch (error: Exception) {
+                Log.w(TAG, "Unable to close RealSense pipeline", error)
             }
             var queued = videoFrames.poll()
             while (queued != null) {
@@ -1801,11 +1822,15 @@ class OutdoorNavController(
             val domain: TimestampDomain = frame.timestampDomain
             val timestamp = vinsTimestampMapper.toSystemTimeMilliseconds(
                 frame.timestamp, domain, System.currentTimeMillis().toDouble())
-            NavigationRecording.safe { NavigationRecording.imu(if (profile.type == StreamType.GYRO) 1 else 2, frame.timestamp, domain.name, timestamp, value) }
-            if (profile.type == StreamType.GYRO) {
+            val type = profile.type
+            val receivedAt = SystemClock.elapsedRealtime()
+            NavigationRecording.safe { NavigationRecording.imu(if (type == StreamType.GYRO) 1 else 2, frame.timestamp, domain.name, timestamp, value) }
+            if (type == StreamType.GYRO) {
                 vinsInput.addGyroscope(timestamp, value[0], value[1], value[2])
-            } else if (profile.type == StreamType.ACCEL) {
+                imuWatchdog.onGyro(receivedAt)
+            } else if (type == StreamType.ACCEL) {
                 vinsInput.addAccelerometer(timestamp, value[0], value[1], value[2])
+                imuWatchdog.onAccel(receivedAt)
             }
         } finally {
             profile.close()
@@ -1972,8 +1997,7 @@ class OutdoorNavController(
         val evidence = published.evidence
         val observationFresh = semanticObservationUsable(evidence,now) &&
             semanticSegmenter?.isCurrentEvidence(evidence) == true
-        val poseFresh = latestVinsPose?.initialized == true &&
-            now - latestPoseCaptureMillis >= 0L && now - latestPoseCaptureMillis < 1500L
+        val poseFresh = hasFreshVinsPose(now)
         if (!navigationActive) {
             guidance = ""
         } else if (
@@ -1998,7 +2022,7 @@ class OutdoorNavController(
                 !dynamicHeadingCalibrator.isReady() -> "等待地理方向对齐"
                 else -> cuePlan.waitingReason.orEmpty()
             }
-            guidance = if (!semanticObservationUsable(cueEvidence,now)) "停止" else ""
+            guidance = if (!poseFresh || !semanticObservationUsable(cueEvidence,now)) "停止" else ""
         }
 
         guidance = guidanceStabilizer.updateValidated(
@@ -2290,10 +2314,10 @@ class OutdoorNavController(
             return
         }
         if (SOURCE_SWINL) {
-            val age = semantic.evidence?.ageMillis(SystemClock.elapsedRealtime()) ?: -1L
             listener.onSemanticOverlay(String.format(Locale.CHINA,
-                "Swin-L 语义：%s · NPU推理 %.2f 秒 · 采集距今 %.1f 秒\n地图仅随新的 Swin-L 语义结果更新",
-                semantic.label, semantic.inferenceMillis / 1000f, age / 1000f), GuidanceLevel.MUTED)
+                "Swin-L 语义：%s · NPU推理 %.2f 秒 · 采集距今 %s\n地图仅随新的 Swin-L 语义结果更新",
+                semantic.label, semantic.inferenceMillis / 1000f,
+                captureAgeText(semantic.evidence, SystemClock.elapsedRealtime())), GuidanceLevel.MUTED)
             return
         }
         if (!semantic.centerCost.isFinite()) {
@@ -2342,6 +2366,9 @@ class OutdoorNavController(
         if (vinsMono == null) {
             text = "VINS：等待深度相机\n尚未启动图像和 IMU 处理"
             level = GuidanceLevel.MUTED
+        } else if (pose != null && pose.initialized && !hasFreshVinsPose(SystemClock.elapsedRealtime())) {
+            text = "VINS：位姿更新中断\n等待新的图像与 IMU 同步结果"
+            level = GuidanceLevel.WARNING
         } else if (pose != null && pose.initialized) {
             val ageSeconds = if (latestVinsPoseNanos > 0L)
                 (SystemClock.elapsedRealtimeNanos() - latestVinsPoseNanos) / 1_000_000_000f
@@ -2378,14 +2405,14 @@ class OutdoorNavController(
             String.format(Locale.CHINA, "%.1f ms", latestLocalPlanDurationNanos / 1_000_000f) else "--"
         val refresh = if (latestLocalPlanRefreshNanos >= 0L)
             String.format(Locale.CHINA, "%.0f ms", latestLocalPlanRefreshNanos / 1_000_000f) else "--"
-        val semanticAge = latestSemanticResult.evidence?.let {
-            String.format(Locale.CHINA, "%.1f 秒", it.ageMillis(now) / 1000f) } ?: "--"
+        val semanticAge = captureAgeText(latestPlanEvidence, now)
         val silence = renderedObservations.silentMillis(now).let {
             if (it >= 0) String.format(Locale.CHINA, "%.1f 秒", it / 1000f) else "--" }
         val timing=semanticSegmenter?.latestInference()
         val model=timing?.let { String.format(Locale.CHINA,"%.3f 秒",it.modelMillis()/1000) } ?: "等待首帧"
         val pipeline=timing?.takeIf { it.mapNanos > 0 }?.let {
-            String.format(Locale.CHINA,"%.3f 秒",it.pipelineMillis()/1000) } ?: "建图中"
+            String.format(Locale.CHINA,"%.3f 秒",it.pipelineMillis()/1000)
+        } ?: if (hasFreshVinsPose(now)) "等待建图" else "等待 VINS 位姿"
         val displayedAge=renderedObservations.captureToDrawMillis().let {
             if(it>=0)String.format(Locale.CHINA,"%.3f 秒",it/1000.0) else "等待首图" }
         return String.format(Locale.CHINA,
@@ -2395,6 +2422,18 @@ class OutdoorNavController(
 
     private fun semanticObservationUsable(evidence: FrameEvidence?,now: Long): Boolean =
         if (SOURCE_SWINL) SemanticObservationPolicy.usable(evidence,now) else evidence?.fresh(now)==true
+
+    private fun hasFreshVinsPose(now: Long): Boolean {
+        val capturedAt = latestPoseCaptureMillis
+        return latestVinsPose?.initialized == true && capturedAt >= 0L &&
+            now - capturedAt in 0L until FrameEvidence.MAX_AGE_MILLIS
+    }
+
+    private fun captureAgeText(evidence: FrameEvidence?, now: Long): String {
+        val age = evidence?.ageMillis(now) ?: return "--"
+        return if (age >= 0 && age != Long.MAX_VALUE)
+            String.format(Locale.CHINA, "%.1f 秒", age / 1000.0) else "--"
+    }
 
     private fun resetLocalPlanning() {
         localPlanGeneration.incrementAndGet()
