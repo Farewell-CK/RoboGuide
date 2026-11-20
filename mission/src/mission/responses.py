@@ -281,7 +281,7 @@ _STATIC_PLAN_PREFIX_KEYS: tuple[str, ...] = (
 def _split_static_prefix(
     payload: dict[str, JSONValue], static_keys: tuple[str, ...]
 ) -> tuple[str | None, str]:
-    """Separate stable deployment inputs into an explicit prefix without altering JSON content."""
+    """Keep the stable prefix byte-for-byte and serialize the dynamic fields compactly."""
     static_payload: dict[str, JSONValue] = {
         key: payload.pop(key) for key in static_keys if key in payload
     }
@@ -290,7 +290,7 @@ def _split_static_prefix(
         return None, json.dumps(merged, ensure_ascii=False, sort_keys=True)
     return (
         json.dumps(static_payload, ensure_ascii=False, sort_keys=True)[:-1] + ", ",
-        json.dumps(payload, ensure_ascii=False, sort_keys=True)[1:],
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))[1:],
     )
 
 

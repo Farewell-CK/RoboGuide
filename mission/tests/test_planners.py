@@ -833,6 +833,14 @@ def test_review_static_prefix_cache_preserves_the_complete_review_input() -> Non
     assert json.loads(prefix_text + cast(str, suffix["text"])) == json.loads(
         cast(str, standard_payload["input"])
     )
+    suffix_text = cast(str, suffix["text"])
+    dynamic = json.loads("{" + suffix_text)
+    assert "runtime_replanning_context" in dynamic
+    assert "grounding_context" in dynamic
+    assert (
+        suffix_text
+        == json.dumps(dynamic, ensure_ascii=False, sort_keys=True, separators=(",", ":"))[1:]
+    )
     for field in ("model", "store", "text", "reasoning"):
         assert cached_payload[field] == standard_payload[field]
 
@@ -1336,7 +1344,7 @@ def test_compact_grounding_for_llm_preserves_semantics_without_mutating_snapshot
         gaps=(),
     )
     states_by_type = {
-        s["object"]["object_type"]: s
+        cast(str, cast(JSONObject, s["object"])["object_type"]): s
         for s in cast(list[JSONObject], project_grounding_for_llm(snap)["state_evidence"])
     }
     before_raw = snap.to_json()
