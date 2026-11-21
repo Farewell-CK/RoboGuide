@@ -1,6 +1,7 @@
 //! Production HTTP contract queries preserve authority and keep valid serial/concurrent plans.
 
 use super::*;
+use domain::TimestampMs;
 
 /// Builds neutral delivery slots with explicit Actor reuse and evidence publication dependencies.
 fn plan(final_tasks: &[usize], ordered: bool, actors: usize, count: usize) -> serde_json::Value {
@@ -62,6 +63,295 @@ fn feed(directory: &tempfile::TempDir) -> TaskVerifierFeed {
 /// Decodes only an actual handler response, never a synthetic accepted-plan receipt.
 fn body(response: &str) -> serde_json::Value {
     serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap()
+}
+
+/// Uses the retained rendezvous intervals to distinguish a risk from a hard admission failure.
+#[tokio::test]
+async fn timing_preview_replays_rendezvous_with_one_changed_completion_window() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let live = controller(&log);
+    let viewer = OperatorPrincipal {
+        role: Some("viewer".into()),
+        ..Default::default()
+    };
+    let before = server_checkpoint_json(&live.lock().unwrap()).unwrap();
+    let sequence = log.latest_sequence().unwrap();
+    let ids = [
+        "dog2-go",
+        "dog2-shoot",
+        "dog1-verify",
+        "dog1-go",
+        "dog1-shoot",
+    ];
+    let mut value = plan(&[], true, 1, ids.len());
+    let source = |index: usize| format!("sha256:{}", if index == 4 { "b" } else { "a" }.repeat(64));
+    let estimates: Vec<_> = ids
+        .iter()
+        .copied()
+        .zip([19_160, 4_192, 8_060, 125_137, 2_700])
+        .enumerate()
+        .map(|(index, (task_id, duration_ms))| {
+            serde_json::json!({
+                "task_id":task_id, "duration_ms":duration_ms, "sample_count":1,
+                "source_digest":source(index),
+            })
+        })
+        .collect();
+    for (index, task) in value["tasks"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        task["id"] = ids[index].into();
+        task["depends_on"] = index.checked_sub(1).map_or_else(
+            || serde_json::json!([]),
+            |parent| serde_json::json!([ids[parent]]),
+        );
+        task["timing"]["completion_deadline_offset_ms"] =
+            [300_000, 120_000, 180_000, 300_000, 120_000][index].into();
+    }
+    for (deadline, expected) in [(120_000, "estimated_risk"), (180_000, "within_estimate")] {
+        value["tasks"][4]["timing"]["completion_deadline_offset_ms"] = deadline.into();
+        let encoded = serde_json::to_vec(&value).unwrap();
+        let input = serde_json::json!({
+            "schema_version": "roboguide.plan-timing-history/v0.1",
+            "plan": value,
+            "estimates": estimates,
+        });
+        let bytes = serde_json::to_vec(&input).unwrap();
+        let reply = route_with_sources(
+            &live,
+            &log,
+            &viewer,
+            &request(
+                "POST",
+                "/v1/missions/validate-plan?timing=history-v0.1",
+                &bytes,
+                None,
+            ),
+            None,
+            None,
+        )
+        .await;
+        assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+        let result = body(&reply);
+        assert_eq!(
+            result["schema_version"],
+            "roboguide.plan-timing-preview/v0.1"
+        );
+        assert_eq!(result["assessment"]["decision"], "not_blocked");
+        assert_eq!(result["assessment"]["issues"], serde_json::json!([]));
+        assert_eq!(
+            result["assessment"]["plan_body_sha256"],
+            format!("sha256:{:x}", Sha256::digest(&encoded)),
+        );
+        let row = result["timing"]["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["task_id"] == "dog1-shoot")
+            .unwrap();
+        assert_eq!(row["status"], expected);
+        assert_eq!(row["estimated_ready_ms"], 156_549);
+        assert_eq!(row["estimated_completion_ms"], 159_249);
+        assert_eq!(row["critical_path"], serde_json::json!(ids));
+        assert_eq!(result["timing"]["estimates"][4]["source_digest"], source(4));
+        assert_eq!(result["timing"]["estimates"][4]["sample_count"], 1);
+    }
+    assert_eq!(
+        server_checkpoint_json(&live.lock().unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(log.latest_sequence().unwrap(), sequence);
+}
+
+/// Checks exact declaration-only conflicts at admission and the inclusive equality boundary.
+#[tokio::test]
+async fn timing_preview_and_submission_share_declared_dependency_bounds() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+    let live = controller(&log);
+    let principal = OperatorPrincipal::default();
+    let before = server_checkpoint_json(&live.lock().unwrap()).unwrap();
+    let sequence = log.latest_sequence().unwrap();
+    let mut value = plan(&[], false, 1, 3);
+    value["tasks"][0]["timing"]["earliest_start_offset_ms"] = 60.into();
+    value["tasks"][1]["timing"]["earliest_start_offset_ms"] = 70.into();
+    value["tasks"][2]["depends_on"] = serde_json::json!(["delivery-0", "delivery-1"]);
+    for (deadline, allowed) in [(69, false), (70, true)] {
+        value["tasks"][2]["timing"]["completion_deadline_offset_ms"] = deadline.into();
+        let encoded = serde_json::to_vec(&value).unwrap();
+        let old = route_with_sources(
+            &live,
+            &log,
+            &principal,
+            &request("POST", "/v1/missions/validate-plan", &encoded, None),
+            None,
+            None,
+        )
+        .await;
+        let old = body(&old);
+        assert_eq!(old["schema_version"], "roboguide.plan-validation/v0.2");
+        assert_eq!(
+            old["decision"],
+            if allowed { "not_blocked" } else { "blocked" }
+        );
+        assert!(old.get("timing").is_none());
+        let preview = route_with_sources(
+            &live,
+            &log,
+            &principal,
+            &request(
+                "POST",
+                "/v1/missions/validate-plan?timing=v0.1",
+                &encoded,
+                None,
+            ),
+            None,
+            None,
+        )
+        .await;
+        let preview = body(&preview);
+        assert_eq!(preview["assessment"], old);
+        let row = preview["timing"]["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["task_id"] == "delivery-2")
+            .unwrap();
+        assert_eq!(row["declared_ready_lower_bound_ms"], 70);
+        assert_eq!(row["estimated_ready_ms"], serde_json::Value::Null);
+        assert_eq!(
+            row["status"],
+            if allowed {
+                "insufficient_estimates"
+            } else {
+                "declared_conflict"
+            }
+        );
+        if !allowed {
+            assert_eq!(
+                row["critical_path"],
+                serde_json::json!(["delivery-1", "delivery-2"])
+            );
+            let rejected = route_with_sources(
+                &live,
+                &log,
+                &principal,
+                &request("POST", "/v1/missions", &encoded, None),
+                None,
+                None,
+            )
+            .await;
+            assert!(rejected.starts_with("HTTP/1.1 422"), "{rejected}");
+            assert_eq!(body(&rejected)["error"], old["issues"][0]["message"]);
+            assert_eq!(
+                old["issues"][0]["path"],
+                "/tasks/2/timing/completion_deadline_offset_ms"
+            );
+        }
+    }
+    assert_eq!(
+        server_checkpoint_json(&live.lock().unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(log.latest_sequence().unwrap(), sequence);
+}
+
+/// The real Mission view distinguishes a temporary shortage from an exhausted scheduling window.
+#[tokio::test]
+async fn mission_detail_reports_the_original_scheduling_deferral() {
+    for (has_node, reason, allows_retry) in [
+        (false, "no-candidate", true),
+        (true, "window-missed", false),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut log = state::SqliteEventLog::open(directory.path().join("events.sqlite3")).unwrap();
+        let live = controller(&log);
+        let mut document = plan(&[], false, 1, 1);
+        document["tasks"][0]["timing"] = serde_json::json!({
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": 50,
+            "completion_deadline_offset_ms": null,
+        });
+        let operation = serde_json::json!({"namespace":"compute", "name":"work", "version":"v1"});
+        let role = &mut document["tasks"][0]["roles"][0];
+        role["requirements"] = serde_json::json!({
+            "capabilities":[{"contract":operation, "constraints":[]}], "resources":[]
+        });
+        role["execution_intent"]["operation"] = operation;
+        let plan = decode_mission_plan(&document.to_string()).unwrap();
+        let mission = plan.goal().mission_id().clone();
+        let task = plan.task_graph().tasks()[0]
+            .requirement()
+            .task_ref()
+            .clone();
+        let correlation = domain::CorrelationId::new("timing-deferral").unwrap();
+        {
+            let mut controller = live.lock().unwrap();
+            let ControllerState {
+                bridge,
+                orchestrator,
+                ..
+            } = &mut *controller;
+            let mut node_state = bridge.state().clone();
+            if has_node {
+                bridge
+                    .control_mut()
+                    .register_node(
+                        &mut node_state,
+                        crate::tests::recovery_driver_node(
+                            "timer-test-node",
+                            "timer-test-resource",
+                        ),
+                        domain::NodeStatus::new(domain::NodeHealth::Online, TimestampMs::new(0)),
+                        TimestampMs::new(0),
+                        &correlation,
+                        &mut log,
+                    )
+                    .unwrap();
+            }
+            orchestrator
+                .submit(
+                    plan,
+                    domain::ExecutionGroupId::new("timing-view-group").unwrap(),
+                    bridge.control_mut(),
+                    TimestampMs::new(0),
+                    &correlation,
+                    &mut log,
+                )
+                .unwrap();
+            assert!(
+                orchestrator
+                    .prepare_task(
+                        &mission,
+                        &task,
+                        &node_state,
+                        bridge.control_mut(),
+                        TimestampMs::new(if has_node { 51 } else { 25 }),
+                        &correlation,
+                        &mut log,
+                    )
+                    .is_err()
+            );
+        }
+        let reply = route(
+            &live,
+            &log,
+            &OperatorPrincipal::default(),
+            &request("GET", &format!("/v1/missions/{mission}"), b"", None),
+        )
+        .await;
+        assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+        let row = &body(&reply)["tasks"][0];
+        assert_eq!(row["status"], "Ready");
+        assert_eq!(
+            row["scheduling_deferral"],
+            serde_json::json!({"reason":reason, "allows_retry":allows_retry}),
+        );
+    }
 }
 
 /// Queries cannot write checkpoints/events, and serial reuse remains distinct from final-world waiting.

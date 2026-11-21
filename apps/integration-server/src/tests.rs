@@ -208,7 +208,7 @@ async fn verifier_plan_without_deployment_source_is_not_submitted() {
 }
 
 /// Builds one eligible node for the recovery-driver fixture.
-fn recovery_driver_node(node_id: &str, resource_id: &str) -> domain::NodeRegistration {
+pub(crate) fn recovery_driver_node(node_id: &str, resource_id: &str) -> domain::NodeRegistration {
     recovery_driver_node_with_support(
         node_id,
         resource_id,

@@ -1,5 +1,6 @@
 //! Read-only published-contract checks shared with Mission submission; no resource authority.
 
+use super::plan_timing::{SCHEMA as TIMING_SCHEMA, TimingScenario};
 use super::{DeploymentFeasibility, TaskVerifierFeed};
 use crate::*;
 use serde::Serialize;
@@ -85,7 +86,26 @@ pub(crate) fn assess(
     feed: Option<&TaskVerifierFeed>,
     node_preflight: Option<&node_service::NodePlanPreflight>,
     body: &[u8],
+    timing: Option<&TimingScenario>,
 ) -> serde_json::Value {
+    let no_durations = BTreeMap::new();
+    let offsets = orchestration::project_plan_timing(
+        plan,
+        timing
+            .map(TimingScenario::durations)
+            .unwrap_or(&no_durations),
+    );
+    issues.extend(
+        orchestration::plan_timing_conflicts(plan, &offsets)
+            .take(MAX_PLAN_ISSUES + 1)
+            .map(|conflict| {
+                PlanIssue::new(
+                    "deployment.contract_incompatible",
+                    conflict.path(),
+                    conflict.message(plan),
+                )
+            }),
+    );
     if let Some(preflight) = node_preflight {
         issues.extend(
             preflight
@@ -120,6 +140,13 @@ pub(crate) fn assess(
         result["node_preflight"] = serde_json::json!({
             "scope": preflight.source_scope(),
             "source_digest": preflight.source_digest(),
+        });
+    }
+    if let Some(scenario) = timing {
+        return serde_json::json!({
+            "schema_version": TIMING_SCHEMA,
+            "assessment": result,
+            "timing": scenario.preview(plan, &offsets),
         });
     }
     result

@@ -193,7 +193,7 @@ def render_mission(raw: JSONObject, mission_id: str) -> str:
         or not isinstance(tasks, list)
     ):
         raise WorkbenchError("任务响应缺失或身份不匹配；任务状态未知。")
-    rows: list[tuple[str, str]] = []
+    rows: list[tuple[str, str, str]] = []
     for task in tasks:
         if not isinstance(task, dict):
             raise WorkbenchError("Task 状态响应不完整；未生成部分统计。")
@@ -204,16 +204,25 @@ def render_mission(raw: JSONObject, mission_id: str) -> str:
             or task_status not in TASK_STATES
         ):
             raise WorkbenchError("Task 状态响应不完整；未生成部分统计。")
-        rows.append((identifier(task_id), task_status))
-    if len({task_id for task_id, _ in rows}) != len(rows):
+        detail = ""
+        deferral = task.get("scheduling_deferral")
+        if task_status == "Ready" and isinstance(deferral, dict):
+            reason = deferral.get("reason")
+            allows_retry = deferral.get("allows_retry")
+            if reason == "window-missed" and allows_retry is False:
+                detail = "（窗口已过，自动调度已停止）"
+            elif isinstance(reason, str) and allows_retry is True:
+                detail = f"（调度暂缓，允许重试 · {safe_text(reason)}）"
+        rows.append((identifier(task_id), task_status, detail))
+    if len({task_id for task_id, _, _ in rows}) != len(rows):
         raise WorkbenchError("任务响应含重复 Task ID。")
-    counts = Counter(state for _, state in rows)
+    counts = Counter(state for _, state, _ in rows)
     lines = [
         f"Mission {safe_text(mission_id)}：{status}",
         f"Group：{safe_text(identifier(group))}",
         f"Task 共 {len(rows)} 个："
         + ("、".join(f"{s}={n}" for s, n in sorted(counts.items())) or "无"),
-        *(f"  {safe_text(task)}：{state}" for task, state in rows[:DISPLAY_LIMIT]),
+        *(f"  {safe_text(task)}：{state}{detail}" for task, state, detail in rows[:DISPLAY_LIMIT]),
     ]
     if len(rows) > DISPLAY_LIMIT:
         lines.append(f"仅展示前 {DISPLAY_LIMIT} 个 Task；统计覆盖完整响应。")

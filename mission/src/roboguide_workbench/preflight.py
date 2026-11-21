@@ -9,7 +9,7 @@ from typing import cast
 
 from mission.deployment_assessment import InitialOperationAssessment
 from mission.models import JSONObject
-from mission.plan_assessment import validate_assessment
+from mission.plan_assessment import TIMING_PREVIEW_SCHEMA, validate_assessment
 from mission.plan_validation import PlanValidationError
 from mission.request_record import MissionRequestRecord
 
@@ -30,7 +30,7 @@ def check_plan(connection: ReadOnlyController, record: MissionRequestRecord) -> 
     components: list[JSONObject] = []
     deadline = time.monotonic() + connection.timeout
     for label, path in (
-        ("已发布合同", "/v1/missions/validate-plan"),
+        ("已发布合同", "/v1/missions/validate-plan?timing=v0.1"),
         ("初始部署支持", "/v1/missions/assess-initial-support"),
     ):
         component: JSONObject = {"source": label, "complete": False}
@@ -46,7 +46,12 @@ def check_plan(connection: ReadOnlyController, record: MissionRequestRecord) -> 
                     validate_assessment(raw, plan)
                 except PlanValidationError:
                     pass  # Typed blocked feedback is a complete observation, never permission.
-                decision = cast(str, raw["decision"])
+                assessment_body = (
+                    cast(JSONObject, raw["assessment"])
+                    if raw.get("schema_version") == TIMING_PREVIEW_SCHEMA
+                    else raw
+                )
+                decision = cast(str, assessment_body["decision"])
             else:
                 assessment = InitialOperationAssessment.from_json(raw)
                 if not assessment.matches_plan(plan):
