@@ -213,6 +213,9 @@ Mission Request 的 provenance 记录请求的档位和 Provider 实际返回的
 `execution-report` 省略空的 `verifier`，未声明的 Memory 前置条件省略 `memories`。
 宿主恢复标准 MissionPlan 后按原流程校验。Reviewer、Repairer 和持久化合同使用原格式。
 
+发送 Prompt 前先核验启动时冻结的原始文件摘要，再将 CRLF 转为 LF。
+同一份提示词在 Windows 和 Linux 检出时可以生成相同的缓存前缀。
+
 Mission provenance 记录模型调用阶段和显式缓存前缀摘要，并在 Provider 返回时记录
 `cached_tokens`、`cache_write_tokens` 和 `reasoning_tokens`。
 摘要只覆盖断点及其之前的上下文，不包含断点之后的请求数据。历史记录可省略这些字段。

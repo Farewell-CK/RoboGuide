@@ -693,8 +693,8 @@ class _ResponsesClient:
         return prompt
 
     def _load_prompt(self, path: Path) -> str:
-        """Load a nonblank, versioned prompt asset without interpolating mission data."""
-        prompt = self._read_frozen_asset(path).strip()
+        """Check the original asset bytes, then use stable LF line endings on the wire."""
+        prompt = self._read_frozen_asset(path).replace("\r\n", "\n").strip()
         if not prompt:
             raise MissionProviderError(
                 f"Mission prompt is empty: {path}", configuration_failure=True
