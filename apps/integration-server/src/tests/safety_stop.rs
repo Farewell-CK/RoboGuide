@@ -936,9 +936,27 @@ fn active_hazard_revocation_stops_under_its_original_policy() {
     application::hazards::validate_restored(&fixture.controller).unwrap();
 }
 
-/// Replays a failed Task after real predecessor satisfaction through the live stop reducer.
+/// Builds a synthetic device observation bound to the current attempt and generation.
+fn natural_device_payload(fixture: &stop_recovery::Fixture) -> serde_json::Value {
+    let command = fixture.attempt.command();
+    let generation = fixture
+        .controller
+        .bridge
+        .current_attempt_generation(command.group_id(), command.task_ref(), command.role_id())
+        .unwrap();
+    serde_json::json!({"observations":[{
+        "execution_id": fixture.attempt.execution_id(),
+        "execution_generation": generation,
+        "command_id": null,
+        "safe_state": true,
+        "assurance": "device-observation",
+        "terminal_state": "FAILED",
+    }]})
+}
+
+/// Replays a failed Task after a satisfied predecessor using the live stop reducer.
 #[test]
-fn low_battery_natural_failure_retains_ownership_after_device_safe_state() {
+fn low_battery_natural_failure_confirms_stop_after_device_safe_state() {
     let mut fixture = with_observation_source(
         stop_recovery::Fixture::with_completed_predecessor(),
         domain::SAFE_STATE_OBSERVATION_SCHEMA,
@@ -969,28 +987,23 @@ fn low_battery_natural_failure_retains_ownership_after_device_safe_state() {
         &attempt
     ));
 
-    let generation = fixture
-        .controller
-        .bridge
-        .current_attempt_generation(command.group_id(), command.task_ref(), command.role_id())
-        .unwrap();
-    observe(
-        &mut fixture,
-        "s1",
-        9,
-        serde_json::json!({"observations":[{
-            "execution_id":attempt,
-            "execution_generation":generation,
-            "command_id":null,
-            "safe_state":true,
-            "assurance":"device-observation",
-            "terminal_state":"FAILED",
-        }]}),
-        Some(900_000),
-    );
-    for clock in [10, 11] {
+    let payload = natural_device_payload(&fixture);
+    observe(&mut fixture, "s1", 9, payload, Some(900_000));
+    safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(10)).unwrap();
+    let checkpoint = serde_json::to_value(&fixture.controller.safety_stops).unwrap();
+    assert!(checkpoint[&attempt]["accepted_at"].is_null());
+    assert!(checkpoint[&attempt]["receipt_digest"].is_null());
+    assert_eq!(checkpoint[&attempt]["record"]["confirmed_at"], 9);
+    fixture.controller.safety_stops = serde_json::from_value(checkpoint.clone()).unwrap();
+    assert!(!safety_stop::validate_restored(&fixture.controller).unwrap());
+    for clock in [11, 200] {
         safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(clock)).unwrap();
     }
+    assert_eq!(
+        serde_json::to_value(&fixture.controller.safety_stops).unwrap(),
+        checkpoint,
+        "reduction cannot repeat or renew the original confirmation"
+    );
     let control = fixture.controller.bridge.control();
     let group = control.group(command.group_id()).unwrap();
     let finished = domain::TaskRef::new(
@@ -1007,14 +1020,108 @@ fn low_battery_natural_failure_retains_ownership_after_device_safe_state() {
         fixture.controller.bridge.execution_status(&attempt),
         Some(orchestration::RemoteExecutionStatus::Failed),
     );
-    assert_eq!(phase(&fixture), "stop_requested");
-    assert!(safety_stop::blocks_release(
+    assert_eq!(phase(&fixture), "stop_confirmed");
+    assert!(safety_stop::attempt_confirmed(
+        &fixture.controller,
+        &attempt
+    ));
+    assert!(!safety_stop::blocks_release(
         &fixture.controller,
         command.mission_id()
     ));
-    println!(
-        "low battery simulation: prepare=Completed, work=Failed, attempts=2, stop=stop_requested"
+}
+
+/// The Controller timer commits the live observation along with its original Failed attempt.
+#[test]
+fn natural_device_stop_persists_in_the_controller_timer_transaction() {
+    let mut fixture =
+        fixture_with_schema(domain::SAFE_STATE_OBSERVATION_SCHEMA, "device-observation");
+    fixture.fact(2, wire::ExecutionPhase::Failed, 5);
+    admit(&mut fixture);
+    let proof = natural_device_payload(&fixture);
+    observe(&mut fixture, "s1", 8, proof, Some(900_000));
+    let attempt = fixture.attempt.execution_id().to_owned();
+    let controller = Arc::new(Mutex::new(fixture.controller));
+    let writer = Arc::new(application::ApplicationWriter::default());
+    application::drive_application_timer(
+        &controller,
+        &fixture.events,
+        &writer,
+        domain::TimestampMs::new(10),
+        None,
+    )
+    .unwrap();
+    let checkpoint = fixture.events.load_checkpoint().unwrap().unwrap();
+    let persisted: serde_json::Value = serde_json::from_str(&checkpoint.checkpoint_json).unwrap();
+    let stop = &persisted["safety_stops"][&attempt];
+    assert_eq!(stop["record"]["phase"], "stop_confirmed");
+    assert_eq!(stop["record"]["confirmed_at"], 8);
+    assert!(stop["receipt_digest"].is_null());
+    let live = controller.lock().unwrap();
+    assert!(safety_stop::attempt_confirmed(&live, &attempt));
+    assert_eq!(
+        live.bridge.execution_status(&attempt),
+        Some(orchestration::RemoteExecutionStatus::Failed)
     );
+    assert_eq!(live.bridge.attempt_history().len(), 1);
+}
+
+/// Invalid, mistimed, or mixed evidence leaves the original stop purpose and ownership held.
+#[test]
+fn live_natural_device_stop_rejects_mismatched_evidence() {
+    for case in [
+        "no-failure",
+        "observation-before-failure",
+        "stale",
+        "expired-stop",
+        "old-generation",
+        "wrong-execution",
+        "wrong-session",
+        "unsafe-device",
+        "ambiguous-batch",
+        "already-accepted-cancel",
+    ] {
+        let mut fixture =
+            fixture_with_schema(domain::SAFE_STATE_OBSERVATION_SCHEMA, "device-observation");
+        if !matches!(case, "no-failure" | "observation-before-failure") {
+            fixture.fact(2, wire::ExecutionPhase::Failed, 5);
+        }
+        admit(&mut fixture);
+        if case == "already-accepted-cancel" {
+            receipt(&mut fixture);
+        }
+        let original = fixture.allocations();
+        let mut data = natural_device_payload(&fixture);
+        let mut session = "s1";
+        let mut now = 10;
+        match case {
+            "stale" => now = 20,
+            "expired-stop" => now = 106,
+            "old-generation" => data["observations"][0]["execution_generation"] = 0.into(),
+            "wrong-execution" => data["observations"][0]["execution_id"] = "another-attempt".into(),
+            "wrong-session" => session = "previous-session",
+            "unsafe-device" => data["observations"][0]["safe_state"] = false.into(),
+            "ambiguous-batch" => {
+                let duplicate = data["observations"][0].clone();
+                data["observations"].as_array_mut().unwrap().push(duplicate);
+            }
+            _ => {}
+        }
+        let received = if case == "expired-stop" { 106 } else { 8 };
+        observe(&mut fixture, session, received, data, Some(900_000));
+        if case == "observation-before-failure" {
+            fixture.fact(2, wire::ExecutionPhase::Failed, 9);
+        }
+        safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(now)).unwrap();
+        assert!(
+            safety_stop::blocks_release(
+                &fixture.controller,
+                fixture.attempt.command().mission_id()
+            ),
+            "{case} unexpectedly cleared the stop barrier"
+        );
+        assert_eq!(fixture.allocations(), original, "{case}");
+    }
 }
 
 /// Builds a sealed checkpoint fixture for a natural device failure without a synthetic Cancel receipt.

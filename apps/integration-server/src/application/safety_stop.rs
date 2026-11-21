@@ -1,7 +1,10 @@
 //! Durable operation-owned stop evidence, Mission holds and lifecycle release fences.
 
 use crate::*;
-use domain::{SafetyStopIdentity, SafetyStopPhase, SafetyStopRecord, TaskRef, TimestampMs};
+use domain::{
+    NATURAL_DEVICE_FAILURE_STOP_SOURCE, SafetyStopIdentity, SafetyStopPhase, SafetyStopRecord,
+    TaskRef, TimestampMs,
+};
 
 mod settlement;
 use settlement::StopSettlement;
@@ -119,21 +122,23 @@ fn natural_process_exit(proof: &SafetyObservationProof) -> bool {
         )
 }
 
-/// Retained evidence source recorded for natural device failures observed safe without Cancel.
-const NATURAL_DEVICE_FAILURE_SOURCE: &str = "natural-failure-and-independent-device-safe-state";
+/// Identifies a device observation of an original failure, without Cancel or software evidence.
+fn natural_device_observation(schema: &str, observation: &SafeStateObservation) -> bool {
+    schema == domain::SAFE_STATE_OBSERVATION_SCHEMA
+        && observation.assurance == domain::SafetyAssurance::DeviceObservation
+        && observation.safe_state
+        && observation.command_id.is_none()
+        && observation.process_exit.is_none()
+        && observation.task_effects.is_none()
+        && observation.terminal_state.as_deref() == Some("FAILED")
+}
 
-/// Identifies a retained natural device failure proof closed without a synthetic Cancel receipt.
+/// Identifies a retained confirmation already closed by original failure and device evidence.
 fn natural_device_failure(purpose: &SafetyStopPurpose, proof: &SafetyObservationProof) -> bool {
-    purpose.record.last_evidence_source == NATURAL_DEVICE_FAILURE_SOURCE
+    purpose.record.last_evidence_source == NATURAL_DEVICE_FAILURE_STOP_SOURCE
         && purpose.accepted_at.is_none()
         && purpose.receipt_digest.is_none()
-        && proof.record.payload_schema() == domain::SAFE_STATE_OBSERVATION_SCHEMA
-        && proof.observation.assurance == domain::SafetyAssurance::DeviceObservation
-        && proof.observation.safe_state
-        && proof.observation.command_id.is_none()
-        && proof.observation.process_exit.is_none()
-        && proof.observation.task_effects.is_none()
-        && proof.observation.terminal_state.as_deref() == Some("FAILED")
+        && natural_device_observation(proof.record.payload_schema(), &proof.observation)
 }
 
 /// One fixed State export may observe multiple independent local handles without changing its object key.
@@ -835,6 +840,19 @@ fn safe_proof(
         {
             return None;
         }
+    } else if natural_device_observation(record.payload_schema(), &observation) {
+        if purpose.record.phase != SafetyStopPhase::StopRequested
+            || purpose.accepted_at.is_some()
+            || purpose.receipt_digest.is_some()
+            || controller.bridge.execution_status(&identity.execution_id)
+                != Some(orchestration::RemoteExecutionStatus::Failed)
+            || controller
+                .bridge
+                .terminal_received_at(&identity.execution_id)
+                .is_none_or(|failed_at| failed_at > record.received_at())
+        {
+            return None;
+        }
     } else if observation.task_effects.is_some()
         || observation.assurance == domain::SafetyAssurance::NoEffects
         || observation.process_exit.is_some()
@@ -924,6 +942,8 @@ pub(crate) fn tick(controller: &mut ControllerState, now: TimestampMs) -> Result
                 .map_err(|error| error.to_string())?;
         }
         if let Some(proof) = proof {
+            let natural_device =
+                natural_device_observation(proof.record.payload_schema(), &proof.observation);
             if natural_process_exit(&proof) {
                 if purpose.record.phase == SafetyStopPhase::StopRequested {
                     purpose
@@ -939,6 +959,19 @@ pub(crate) fn tick(controller: &mut ControllerState, now: TimestampMs) -> Result
                 }
                 purpose.stopped_at.get_or_insert(proof.received_at);
                 purpose.safe_at.get_or_insert(proof.received_at);
+            } else if natural_device {
+                purpose
+                    .record
+                    .advance(
+                        &identity,
+                        SafetyStopPhase::SafeStateObserved,
+                        proof.received_at,
+                        NATURAL_DEVICE_FAILURE_STOP_SOURCE,
+                        &proof.record_digest,
+                    )
+                    .map_err(|error| error.to_string())?;
+                purpose.stopped_at = Some(proof.received_at);
+                purpose.safe_at = Some(proof.received_at);
             }
             if purpose.record.phase == SafetyStopPhase::StopCommandAccepted {
                 purpose
@@ -971,6 +1004,8 @@ pub(crate) fn tick(controller: &mut ControllerState, now: TimestampMs) -> Result
                         confirmation_time,
                         if natural_process_exit(&proof) {
                             "original-worker-exit-and-natural-terminal"
+                        } else if natural_device {
+                            NATURAL_DEVICE_FAILURE_STOP_SOURCE
                         } else {
                             "terminal-cancel-and-independent-safe-state"
                         },
@@ -1388,7 +1423,7 @@ pub(crate) fn seal_natural_device_failure_for_test(
     purpose.safe_at = Some(proof.received_at);
     purpose.record.confirmed_at = Some(proof.received_at);
     purpose.record.phase = SafetyStopPhase::StopConfirmed;
-    purpose.record.last_evidence_source = NATURAL_DEVICE_FAILURE_SOURCE.into();
+    purpose.record.last_evidence_source = NATURAL_DEVICE_FAILURE_STOP_SOURCE.into();
     purpose.record.last_evidence_digest = confirmation_digest;
     purpose.safe_proof = Some(proof);
     Ok(())
