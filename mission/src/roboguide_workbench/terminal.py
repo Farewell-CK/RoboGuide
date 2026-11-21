@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import copy
 import inspect
-import json
 import re
 import sys
 import time
@@ -124,7 +123,7 @@ class WatchManager:
         self.tasks[mission] = asyncio.create_task(self._watch(mission))
 
     async def _watch(self, mission: str) -> None:
-        """Notify only changed observations; cancellation drains the current bounded GET."""
+        """Notify when the displayed Mission changes and drain the current GET on cancel."""
         prior = ""
         try:
             for _ in range(self.samples):
@@ -138,10 +137,9 @@ class WatchManager:
                         pass
                     raise
                 rendered = render_mission(raw, mission)
-                signature = json.dumps(raw, sort_keys=True)
-                if signature != prior:
+                if rendered != prior:
                     self.emit("任务更新 · " + rendered)
-                    prior = signature
+                    prior = rendered
                 if raw.get("status") in {"Completed", "Failed", "Cancelled"}:
                     return
                 await asyncio.sleep(self.interval)

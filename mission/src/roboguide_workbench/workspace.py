@@ -847,14 +847,18 @@ class WorkbenchSession(Session):
     def watch(
         self, target: str, emit: Callable[[str], None], *, interval: float = 2, samples: int = 150
     ) -> None:
-        """Poll a fixed Mission at most five minutes; interrupt only the local observation."""
+        """Poll one Mission and display changes while retaining the newest observation."""
         mission_id = self._mission_target(target)
         self.last_mission = mission_id
         self.checkpoint()
+        prior = ""
         try:
             for index in range(samples):
                 raw = self.controller.mission(mission_id)
-                emit(render_mission(raw, mission_id))
+                rendered = render_mission(raw, mission_id)
+                if rendered != prior:
+                    emit(rendered)
+                    prior = rendered
                 self.last_raw = raw
                 self.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
                 if raw.get("status") in {"Completed", "Failed", "Cancelled"}:
