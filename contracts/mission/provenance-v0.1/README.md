@@ -10,6 +10,14 @@ returned metadata stays null. These fields report the transport response; they d
 backend's actual loaded model. Call IDs distinguish separate actual effects even when bytes repeat.
 Credentials and full HTTP headers are excluded.
 
+Calls through the MI urllib transport can include `http_timing`. It records monotonic elapsed
+milliseconds, the offset at response headers, the time to finish reading the body after headers,
+and the observed status and `x-request-id`. Waiting for headers covers connect, proxy, send and
+upstream processing time. `failure_phase` identifies an incomplete request, an HTTP rejection,
+or a response decoding error. A boundary the transport did not reach has a null timing.
+The HTTP request ID and the JSON `response_id` identify different parts of the call.
+Historical snapshots and other transports can omit HTTP timing.
+
 Snapshot configuration contains actual installed MI source/Python/dependency identity plus the
 startup-frozen Catalog/approval/configuration/Prompt hashes. An unavailable deployment lockfile is
 null; installed dependency versions remain independently observed. The original deliberation binding
