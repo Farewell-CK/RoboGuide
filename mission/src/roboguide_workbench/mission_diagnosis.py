@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import cast
+import re
+from typing import Literal, cast
 
 from mission.models import JSONObject
 
@@ -10,6 +11,22 @@ from roboguide_workbench.client import ReadOnlyController, WorkbenchError, ident
 from roboguide_workbench.evidence import ReadResult
 from roboguide_workbench.views import render_mission, safe_text
 
+_SUBJECT = r"(?:(?:这个|这条|那个|那条|刚才的|刚才那个|当前)?任务)"
+_ASK_WHY = r"(?:为什么|怎么|为何)"
+_CANCELLING = (
+    r"(?:(?:一直|仍然|还|仍|总)?(?:在|处于|卡在|显示)?取消中"
+    r"|取消(?:一直|还)?没(?:结束|完成)|(?:还|一直)?没取消完)"
+)
+_DIAGNOSIS_QUESTION = re.compile(
+    rf"(?:请)?(?:帮我)?(?:查(?:一下|查|下)?|看看)?"
+    rf"(?:{_ASK_WHY}{_SUBJECT}?|{_SUBJECT}{_ASK_WHY}){_CANCELLING}(?:呢)?"
+)
+_SHOWN_ORDINAL = re.compile(
+    r"(?:查(?:看)?|看|选(?:择)?)?(?:第|#)?"
+    r"([0-9]{1,3}|[一二两三四五六七八九])(?:个|条|项)?(?:任务)?(?:吧)?"
+)
+_DISPLAY_NUMBERS = dict(zip("一二三四五六七八九", range(1, 10), strict=True))
+_DISPLAY_NUMBERS["两"] = 2
 _ATTEMPT_FIELDS = ("execution_id", "group_id", "task_id", "role_id", "node_id", "status")
 _IN_FLIGHT = frozenset({"Dispatched", "Accepted", "Running", "Unknown"})
 _TERMINAL = frozenset({"Completed", "Failed", "Cancelled"})
@@ -33,6 +50,27 @@ _RECEIPTS = {
     "stopped_at": "执行终止记录",
     "safe_proof": "安全状态观测",
 }
+
+
+def cancellation_diagnosis_intent(question: str) -> Literal["focused", "cohort"] | None:
+    """Recognize simple cancellation questions while leaving compound requests to the Agent."""
+    text = re.sub(r"\s+", "", question).rstrip("？?。！!")
+    if _DIAGNOSIS_QUESTION.fullmatch(text) is None:
+        return None
+    subjects = ("这个任务", "这条任务", "那个任务", "那条任务", "刚才的任务", "刚才那个任务")
+    return "focused" if any(subject in text for subject in subjects) else "cohort"
+
+
+def diagnosis_ordinal(question: str) -> int | None:
+    """Parse a bare reply that can refer to an already displayed choice."""
+    text = re.sub(r"\s+", "", question).rstrip("？?。！!")
+    match = _SHOWN_ORDINAL.fullmatch(text)
+    if match is None:
+        return None
+    value = match[1]
+    if value in _DISPLAY_NUMBERS:
+        return _DISPLAY_NUMBERS[value]
+    return int(value)
 
 
 def _current_attempts(
@@ -188,7 +226,7 @@ def read_mission_diagnosis(
         if task_id:
             lines.append("这个步骤仍对应多条执行记录，请查看原记录确认相关尝试。")
         else:
-            lines.append("可以用 /diagnose MissionID TaskID 缩小范围。")
+            lines.append("可以直接说你想查哪个步骤。")
         components.append({"source": "停止记录关联", "complete": False})
         return finish()
 

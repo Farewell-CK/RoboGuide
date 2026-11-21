@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import copy
+import io
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import NoReturn
 
 import pytest
 from mission.models import JSONObject, JSONValue
 from roboguide_workbench.actions import MissionActions
+from roboguide_workbench.cli import display_question
 from roboguide_workbench.client import ReadOnlyController, WorkbenchError
 from roboguide_workbench.conversation import ConversationSession
 from roboguide_workbench.mission_diagnosis import read_mission_diagnosis
 from roboguide_workbench.persistence import SessionStore
+from test_workbench import no_model
 from test_workbench_agent_loop import Responses, _call, _message, _response
 from test_workbench_dialogue import _router
 from test_workbench_v2 import ObservedController
@@ -211,3 +216,97 @@ def test_mission_diagnosis_command_with_explicit_task(tmp_path: Path) -> None:
         assert session.query_status == "complete" and store.data["commands"] == []
     finally:
         store.close()
+
+
+def test_natural_cancellation_question_uses_the_single_live_target(tmp_path: Path) -> None:
+    """A plain question resolves a unique cancellation and follow-up without a model."""
+    client = DiagnosisController()
+    store = SessionStore(tmp_path / "sessions", "single", {}, False)
+    session = ConversationSession(client, no_model, store, MissionActions(client, store))
+    try:
+        text = session.ask("这个任务为什么还在取消中？")
+        assert "原执行 Unknown" in text and "需要人工处理" in text
+        assert "当前身份可见 Mission" not in text
+        assert client.reads == ["missions", "mission", "attempts", "stop"]
+        assert session.last_mission == MISSION_ID and store.data["commands"] == []
+        text = session.ask("刚才那个任务怎么一直没取消完呢？")
+        assert "关注步骤 publish" in text
+        assert client.reads[4:] == ["mission", "attempts", "stop"]
+    finally:
+        store.close()
+
+
+class MultipleCancellations(DiagnosisController):
+    """Give natural selection two source-qualified candidates with distinct identities."""
+
+    def missions(self) -> JSONObject:
+        """Put the diagnosable fixture Mission second in the current list."""
+        result = super().missions()
+        rows = result["records"]
+        assert isinstance(rows, list)
+        first = copy.deepcopy(rows)
+        for record in first:
+            assert isinstance(record, dict)
+            obj = record["object"]
+            assert isinstance(obj, dict)
+            obj["object_id"] = "mission-other"
+        return {**result, "records": [*first, *rows]}
+
+
+def test_natural_choice_uses_the_acknowledged_list_after_resume(tmp_path: Path) -> None:
+    """A spoken ordinal resolves the same displayed Mission after session recovery."""
+    client = MultipleCancellations()
+    directory = tmp_path / "sessions"
+    store = SessionStore(directory, "menu", {}, False)
+    session = ConversationSession(client, no_model, store, MissionActions(client, store))
+    with redirect_stdout(io.StringIO()) as output:
+        try:
+            display_question(session, "为什么任务一直在取消中？")
+            lines = output.getvalue().splitlines()
+            assert any(line.startswith("1.") and "mission-other" in line for line in lines)
+            assert any(line.startswith("2.") and MISSION_ID in line for line in lines)
+            assert session.diagnosis_selection and client.reads == ["missions"]
+        finally:
+            store.close()
+        store = SessionStore(directory, "menu", {}, True)
+        restored = ConversationSession(client, no_model, store, MissionActions(client, store))
+        try:
+            display_question(restored, "第三个")
+            assert "请回复刚才列表里显示的序号" in output.getvalue()
+            assert client.reads == ["missions"]
+            display_question(restored, "查第二个")
+            assert "关注步骤 publish" in output.getvalue()
+            assert client.reads == ["missions", "mission", "attempts", "stop"]
+            assert restored.last_mission == MISSION_ID and not restored.diagnosis_selection
+            assert store.data["commands"] == []
+        finally:
+            store.close()
+
+
+def test_unseen_diagnosis_menu_cannot_supply_an_ordinal(tmp_path: Path) -> None:
+    """Reject a menu when output fails before its choices become visible."""
+    client = MultipleCancellations()
+    directory = tmp_path / "sessions"
+    store = SessionStore(directory, "unseen", {}, False)
+    session = ConversationSession(client, no_model, store, MissionActions(client, store))
+
+    class BrokenOutput(io.StringIO):
+        """Simulate a terminal that closes before the user sees the menu."""
+
+        def write(self, value: str, /) -> int:
+            """Reject the write before the normal acknowledgement boundary."""
+            raise OSError("output closed")
+
+    try:
+        with redirect_stdout(BrokenOutput()), pytest.raises(OSError, match="output closed"):
+            display_question(session, "这个任务为什么还在取消中？")
+        assert not session.diagnosis_selection and session.displayed_missions == []
+        assert client.reads == ["missions"]
+    finally:
+        store.close()
+    reopened = SessionStore(directory, "unseen", {}, True)
+    try:
+        fresh = ConversationSession(client, no_model, reopened, MissionActions(client, reopened))
+        assert not fresh.diagnosis_selection and fresh.displayed_missions == []
+    finally:
+        reopened.close()

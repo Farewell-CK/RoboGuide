@@ -160,6 +160,12 @@ def _summaries(raw: JSONObject) -> tuple[list[MissionSummary], bool, int, int]:
     return summaries, complete, ignored, malformed
 
 
+def cancelling_missions(raw: JSONObject) -> tuple[list[MissionSummary], bool]:
+    """Return current, source-qualified Cancelling missions and view completeness."""
+    summaries, complete, _, _ = _summaries(raw)
+    return [item for item in summaries if item.lifecycle == "Cancelling"], complete
+
+
 def _objective(value: str) -> str:
     """Bound escaped user objectives without silently presenting their prefix as complete."""
     value = safe_text(value)

@@ -33,6 +33,7 @@ EXTRA_HELP = """可以直接提问：有哪些设备？dog2 还有多少电？�
 Agent 会查能力、补问和调用 MI；原有权限、风险审批与执行准入照常检查。
 新计划与修改版本会完整展示；查询已展示且未变化的计划时显示简洁进度。
 直接说“展开计划”可再次查看完整参数。
+排障也可以直接问“这个任务为什么还在取消中？”，有多个候选时回复序号。
 
 设备与状态（无需模型）：
   /nodes、/node ID       查看节点；/node #2 查询上次展示的第二个节点
@@ -213,6 +214,10 @@ class WorkbenchSession(Session):
             raise WorkbenchError("会话上下文损坏。")
         self.displayed_nodes = self._ids(context.get("nodes", []))
         self.displayed_missions = self._ids(context.get("missions", []))
+        diagnosis_selection = context.get("diagnosis_selection", False)
+        if not isinstance(diagnosis_selection, bool):
+            raise WorkbenchError("会话的诊断选择损坏。")
+        self.diagnosis_selection = diagnosis_selection and bool(self.displayed_missions)
         self.displayed_states = self._ids(context.get("states", []))
         self.last_state = self._optional_id(context.get("last_state"))
         self.last_node = self._optional_id(context.get("last_node"))
@@ -281,6 +286,7 @@ class WorkbenchSession(Session):
         references: JSONObject = {
             "displayed_nodes": list(self.displayed_nodes),
             "displayed_missions": list(self.displayed_missions),
+            "diagnosis_selection": self.diagnosis_selection,
             "last_node": self.last_node,
             "last_mission": self.last_mission,
             "state_targets": list(self.displayed_states),
@@ -319,6 +325,7 @@ class WorkbenchSession(Session):
         context: JSONObject = {
             "nodes": list(self.displayed_nodes),
             "missions": list(self.displayed_missions),
+            "diagnosis_selection": self.diagnosis_selection,
             "last_node": self.last_node,
             "last_mission": self.last_mission,
             "states": list(self.displayed_states),
@@ -329,7 +336,15 @@ class WorkbenchSession(Session):
             "task_dialogue": self.task_dialogue.export(),
         }
         if self.reference_checkpoint is not None:
-            for field in ("nodes", "missions", "last_node", "last_mission", "states", "last_state"):
+            for field in (
+                "nodes",
+                "missions",
+                "last_node",
+                "last_mission",
+                "states",
+                "last_state",
+                "diagnosis_selection",
+            ):
                 if field in self.reference_checkpoint:
                     context[field] = self.reference_checkpoint[field]
             context["raw_query"] = self.reference_checkpoint.get("raw_query")

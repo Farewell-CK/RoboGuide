@@ -21,13 +21,18 @@ from roboguide_workbench.answers import (
     local_response,
 )
 from roboguide_workbench.client import WorkbenchError
-from roboguide_workbench.evidence import ReadResult
+from roboguide_workbench.evidence import READ_COSTS, ReadResult
+from roboguide_workbench.mission_diagnosis import cancellation_diagnosis_intent, diagnosis_ordinal
+from roboguide_workbench.mission_views import cancelling_missions
 from roboguide_workbench.plan_view import same_plan
 from roboguide_workbench.routing import Query, ResponsesRouter
+from roboguide_workbench.session import LOCAL_SNAPSHOT_COMMANDS
 from roboguide_workbench.task_tools import TaskTools
 from roboguide_workbench.task_tools import definitions as task_definitions
 from roboguide_workbench.views import safe_text
 from roboguide_workbench.workspace import WorkbenchSession, render_request
+
+_DIAGNOSIS_CHOICES = 6
 
 
 class ConversationSession(WorkbenchSession):
@@ -46,8 +51,13 @@ class ConversationSession(WorkbenchSession):
         """Keep commands verbatim and route natural text through native read and task tools."""
         if not question.startswith("/cancel"):
             self.pending_cancel = None
-        if question == "/help":
+        if question in LOCAL_SNAPSHOT_COMMANDS or question == "/help":
             return super()._turn(question)
+        if self.answer_mode in {"agent", "grounded"} and not question.startswith("/"):
+            diagnosis = self._natural_diagnosis(question)
+            if diagnosis is not None:
+                return diagnosis
+        self.diagnosis_selection = False
         if question.startswith("/"):
             if question == "/reset":
                 self.evidence = []
@@ -56,6 +66,74 @@ class ConversationSession(WorkbenchSession):
         if self.answer_mode in {"agent", "grounded"}:
             return self._agent_turn(question)
         return self._legacy_turn(question)
+
+    def _natural_diagnosis(self, question: str) -> str | None:
+        """Resolve a plain read-only question or its displayed ordinal before using a model."""
+        intent = cancellation_diagnosis_intent(question)
+        ordinal = diagnosis_ordinal(question)
+        if intent is None and ordinal is None:
+            return None
+        references = self.query_references()
+        selecting = references.get("diagnosis_selection") is True
+        if intent is None and not selecting:
+            return None
+
+        target: str | None = None
+        if ordinal is not None and selecting:
+            displayed = self._ids(references.get("displayed_missions", []))
+            if not 1 <= ordinal <= len(displayed):
+                return "请回复刚才列表里显示的序号。"
+            target = displayed[ordinal - 1]
+        elif intent == "focused":
+            target = self._optional_id(references.get("last_mission"))
+        self.suggestion = None
+        self.diagnosis_selection = False
+        self.evidence = []
+
+        cost = READ_COSTS["read_mission_diagnosis"] + (1 if target is None else 0)
+        original_timeout = self.controller.timeout
+        self.controller.timeout = min(original_timeout, self.turn_seconds / cost)
+        try:
+            if target is None:
+                self.progress("正在查看哪些任务还在取消中")
+                matches, complete = cancelling_missions(self.controller.missions())
+                if not self.task_dialogue.pinned:
+                    self.task_dialogue.clear()
+                if not matches:
+                    if not complete:
+                        self.query_status = "partial"
+                        return "当前任务列表有缺口，暂时无法确认哪些任务在取消中。"
+                    return "当前没有查到处于取消中的任务。"
+                if len(matches) != 1 or not complete:
+                    shown = matches[:_DIAGNOSIS_CHOICES]
+                    self.displayed_missions = [item.mission_id for item in shown]
+                    self.last_mission = None
+                    self.diagnosis_selection = True
+                    self.query_status = "complete" if complete else "partial"
+                    head = f"查到 {len(matches)} 个处于取消中的任务。"
+                    if not complete:
+                        head += "当前列表有缺口。"
+                    if len(matches) > len(shown):
+                        head += f"先列出前 {len(shown)} 个。"
+                    rows = [
+                        f"{i}. {item.display_objective} · {safe_text(item.mission_id)}"
+                        for i, item in enumerate(shown, 1)
+                    ]
+                    return "\n".join([head, *rows, "想查哪个？回复序号就行。"])
+                target = matches[0].mission_id
+            if self.tool_limit < cost:
+                self.query_status = "failed"
+                return "本轮读取预算不足，暂时无法完成任务诊断。"
+            self.progress("正在核对原执行与停止记录")
+            result = self.diagnose_mission(target)
+            if not self.task_dialogue.pinned:
+                self.task_dialogue.clear()
+            return result.text
+        except (ValueError, OSError) as error:
+            self.query_status = "failed"
+            return "暂时无法完成任务诊断。" + safe_text(str(error))
+        finally:
+            self.controller.timeout = original_timeout
 
     def _agent_turn(self, question: str) -> str:
         """Use original user text with host-checked tools rather than generated task commands."""
