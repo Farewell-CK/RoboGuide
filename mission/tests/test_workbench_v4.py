@@ -201,8 +201,9 @@ def test_cancel_preview_requires_successful_display_and_confirm(tmp_path: Path) 
 
 
 @pytest.mark.parametrize("blocked", [False, True])
+@pytest.mark.parametrize("timing_preview", [False, True])
 def test_check_complete_actual_http_is_bound_to_received_plan_bytes(
-    tmp_path: Path, blocked: bool
+    tmp_path: Path, blocked: bool, timing_preview: bool
 ) -> None:
     """A usable full-support reply must match exactly the bytes sent to each assessment endpoint."""
     import hashlib
@@ -227,7 +228,7 @@ def test_check_complete_actual_http_is_bound_to_received_plan_bytes(
             digest = "sha256:" + hashlib.sha256(body).hexdigest()
             calls.append((self.path, digest))
             raw: JSONObject
-            if self.path.endswith("validate-plan"):
+            if self.path.split("?", 1)[0].endswith("validate-plan"):
                 raw = {
                     "schema_version": "roboguide.plan-validation/v0.1",
                     "scope": "published-contracts",
@@ -241,6 +242,17 @@ def test_check_complete_actual_http_is_bound_to_received_plan_bytes(
                     "issues": [],
                     "issues_truncated": False,
                 }
+                if timing_preview:
+                    assert self.path.endswith("?timing=v0.1")
+                    raw = {
+                        "schema_version": "roboguide.plan-timing-preview/v0.1",
+                        "assessment": raw,
+                        "timing": {
+                            "anchor": "mission_acceptance",
+                            "estimate_scope": "caller_supplied_advisory",
+                            "tasks": [],
+                        },
+                    }
             else:
                 roots = [task for task in plan.tasks if not task.depends_on]
                 roles = []

@@ -17,6 +17,7 @@ SCHEMA = "roboguide.plan-validation/v0.2"
 COMPLETE_NODE_PREFLIGHT_SCHEMA = "roboguide.plan-validation/v0.4"
 NODE_PREFLIGHT_SCHEMA = "roboguide.plan-validation/v0.3"
 LEGACY_SCHEMA = "roboguide.plan-validation/v0.1"
+TIMING_PREVIEW_SCHEMA = "roboguide.plan-timing-preview/v0.1"
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _CODES = {
     "verifier.source_unavailable",
@@ -59,6 +60,19 @@ def validate_assessment(
     ValueError means a configuration/transport/source problem, never a draft
     defect. PlanValidationError means the exact checked draft has known issues.
     """
+    if value.get("schema_version") == TIMING_PREVIEW_SCHEMA:
+        assessment = value.get("assessment")
+        timing = value.get("timing")
+        if (
+            set(value) != {"schema_version", "assessment", "timing"}
+            or not isinstance(assessment, dict)
+            or not isinstance(timing, dict)
+            or timing.get("anchor") != "mission_acceptance"
+            or timing.get("estimate_scope") != "caller_supplied_advisory"
+        ):
+            raise ValueError("Controller plan timing preview is invalid")
+        # Only the source-bound published-contract assessment can reject the draft.
+        value = assessment
     schema = value.get("schema_version")
     if not isinstance(schema, str):
         raise ValueError("Controller plan assessment is invalid or detached")

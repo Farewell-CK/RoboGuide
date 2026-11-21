@@ -2359,6 +2359,11 @@ empty placeholders or a top-level `src/`.
 
 ## Build, Test, and Development Commands
 
+ADR-0259 defines the dependency-window projection in Orchestration and its opt-in Controller view.
+Submission and readonly validation share the declaration-only lower bound. Caller-supplied history
+stays advisory. The Mission view and Workbench expose the scheduler's existing retry disposition.
+See the Controller timing preview and rendezvous replay tests before changing either boundary.
+
 ADR-0256 adds opt-in `complete-sources/v0.1` private preflight evidence: Controller v0.4 and
 CLI node-plan-preflight v0.2 bind exact TOML, once-acquired descriptor bytes and the canonical
 resolution base. Legacy v0.3 retains TOML-only meaning. `core/node-service/src/source_io.rs`

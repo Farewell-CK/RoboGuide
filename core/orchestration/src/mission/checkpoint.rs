@@ -315,6 +315,7 @@ impl MissionOrchestrator {
             )));
         }
         validate_plan_timing_anchor(&plan, timestamp)?;
+        validate_plan_dependency_windows(&plan)?;
         self.validate_admission_capacity(&plan)?;
         control.create_mission_group(group_id.clone(), &plan, timestamp, correlation_id, events)?;
         self.executions.insert(

@@ -810,6 +810,10 @@ Edge 提供共享算力；A 故障后保留 Execution Group 上下文，只重�
 以具体 code/path 区分模式、能力和资源冲突；旧 v0.1 缺失字段不被推断为新能力。
 字段与共享合成回归见[发布的执行拓扑合同](contracts/mission/execution-planning-v0.2/README.md)。
 
+截止时间前检沿任务依赖计算最早开始时间，保持历史样本推算的超期提示独立于提交判定。
+Mission 详情还会显示已过期窗口和其他调度暂缓原因。见
+[ADR-0259](docs/decisions/0259-dependency-window-preflight.md)。
+
 负责 Mission Understanding、Clarification、Task Planning、Task Graph 和 Execution
 Requirements，回答 `What needs to be achieved?`。外部用户只提交文本 instruction；仅当存在
 阻止 Mission semantic commitment 的 open questions 时停在 `NeedsClarification`，不会创建

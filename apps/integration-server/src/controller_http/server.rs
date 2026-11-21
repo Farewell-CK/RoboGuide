@@ -2497,7 +2497,22 @@ where
             ("200 OK", serde_json::json!({"attempts": attempts}))
         }
         ("POST", "/v1/missions/validate-plan") => {
-            let plan = match decode_mission_plan(request_body) {
+            let timing_version = parse_query(query).get("timing").copied();
+            let (plan_body, timing) = match application::plan_timing::TimingScenario::read(
+                request_body,
+                timing_version,
+            ) {
+                Ok(input) => input,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error":error}),
+                    )
+                    .await;
+                }
+            };
+            let plan = match decode_mission_plan(plan_body) {
                 Ok(plan) => plan,
                 Err(error) => {
                     return write_http_response(
@@ -2508,6 +2523,16 @@ where
                     .await;
                 }
             };
+            if let Some(scenario) = &timing
+                && let Err(error) = scenario.check_tasks(&plan)
+            {
+                return write_http_response(
+                    stream,
+                    "400 Bad Request",
+                    serde_json::json!({"error":error}),
+                )
+                .await;
+            }
             let result = {
                 let live = controller
                     .lock()
@@ -2539,7 +2564,8 @@ where
                         deployment_feasibility,
                         verifier_feed,
                         node_preflight,
-                        &request.body,
+                        plan_body.as_bytes(),
+                        timing.as_ref(),
                     ),
                 ),
                 Err(error) => (
@@ -2613,6 +2639,15 @@ where
                     stream,
                     "422 Unprocessable Entity",
                     serde_json::json!({"error": error}),
+                )
+                .await;
+            }
+            if let Err(error) = orchestration::validate_plan_dependency_windows(&plan) {
+                drop(_write_guard);
+                return write_http_response(
+                    stream,
+                    "422 Unprocessable Entity",
+                    serde_json::json!({"error": error.to_string()}),
                 )
                 .await;
             }
@@ -2904,11 +2939,20 @@ where
                             group
                                 .task_executions()
                                 .map(|task| {
-                                    serde_json::json!({
+                                    let mut view = serde_json::json!({
                                         "task_id": task.task_ref().task_id().as_str(),
                                         "context_id": task.context_id().as_str(),
                                         "status": format!("{:?}", task.lifecycle())
-                                    })
+                                    });
+                                    if let Some(reason) =
+                                        execution.scheduling_deferral(task.task_ref().task_id())
+                                    {
+                                        view["scheduling_deferral"] = serde_json::json!({
+                                            "reason": reason.as_str(),
+                                            "allows_retry": reason.allows_retry(),
+                                        });
+                                    }
+                                    view
                                 })
                                 .collect::<Vec<_>>()
                         })
