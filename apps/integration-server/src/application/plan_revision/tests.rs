@@ -1,4 +1,4 @@
-//! Durable revision application unit fixtures with real SQL/files and zero registered Nodes or devices.
+//! Durable revision application fixtures using real SQL and simulated Node facts.
 
 mod memory_tests;
 
@@ -23,15 +23,12 @@ struct Fixture {
 }
 
 impl Fixture {
-    /// Accepts a published unit plan and actual file-backed principal/source grants without selecting an executor.
-    fn new() -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let log = state::SqliteEventLog::open(root.path().join("events.sqlite3")).unwrap();
-        let plan = orchestration::decode_mission_plan(include_str!(
-            "../../../../../scenarios/phase1-mission-v0.2/mission-plan.json"
-        ))
-        .unwrap();
-        let mut control = control::ControlPlane::new();
+    /// Records exact fixture principals and an independent original goal source.
+    fn install_authority(
+        root: &Path,
+        control: &mut control::ControlPlane,
+        plan: &domain::MissionPlan,
+    ) {
         let grants: BTreeMap<_, _> = [
             ("administrator", "recovery-admin"),
             ("proposer", "operator"),
@@ -60,7 +57,7 @@ impl Fixture {
             grants,
         };
         std::fs::write(
-            root.path().join("operator.json"),
+            root.join("operator.json"),
             serde_json::to_vec(&authorization).unwrap(),
         )
         .unwrap();
@@ -80,6 +77,18 @@ impl Fixture {
         control
             .accept_semantic_verifier_registry(source, 0)
             .unwrap();
+    }
+
+    /// Accepts a published unit plan and actual file-backed principal/source grants without selecting an executor.
+    fn new() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let log = state::SqliteEventLog::open(root.path().join("events.sqlite3")).unwrap();
+        let plan = orchestration::decode_mission_plan(include_str!(
+            "../../../../../scenarios/phase1-mission-v0.2/mission-plan.json"
+        ))
+        .unwrap();
+        let mut control = control::ControlPlane::new();
+        Self::install_authority(root.path(), &mut control, &plan);
         let mut orchestrator = MissionOrchestrator::new();
         orchestrator
             .submit(
@@ -121,6 +130,39 @@ impl Fixture {
             clock: runtime::FixedClock::new(domain::TimestampMs::new(10)),
             plan,
         }
+    }
+
+    /// Uses the real two-node stop fixture and installs the same file-backed unit authority.
+    fn from_simulation(simulation: &crate::tests::stop_recovery::Fixture) -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let mut controller = simulation.controller.clone();
+        let plan = controller
+            .orchestrator
+            .execution(simulation.attempt.command().mission_id())
+            .unwrap()
+            .plan()
+            .clone();
+        Self::install_authority(root.path(), controller.bridge.control_mut(), &plan);
+        Self {
+            root,
+            log: simulation.events.clone(),
+            controller: Arc::new(Mutex::new(controller)),
+            writer: Arc::new(crate::application::ApplicationWriter::default()),
+            clock: runtime::FixedClock::new(domain::TimestampMs::new(10)),
+            plan,
+        }
+    }
+
+    /// Runs the production timer and commits its original proofs, revision and scheduling decisions.
+    fn tick(&self, now: u64) {
+        crate::application::drive_application_timer(
+            &self.controller,
+            &self.log,
+            &self.writer,
+            domain::TimestampMs::new(now),
+            None,
+        )
+        .unwrap();
     }
 
     /// Sends a closed application action using explicit unit principals; no HTTP/TLS claim is made.
@@ -219,6 +261,202 @@ impl Fixture {
             }
         }
         plan
+    }
+}
+
+/// Real automatic revision waits for device evidence, then handles available and absent standbys.
+#[test]
+fn reviewed_device_failover_waits_for_stop_and_dispatches_at_most_once() {
+    use crate::tests::safety_stop as simulated;
+
+    for standby_present in [true, false] {
+        let mut node = simulated::device_fixture_with_completed_predecessor();
+        let original = node.attempt.command().clone();
+        let failed_id = node.attempt.execution_id().to_owned();
+        let mission = original.mission_id();
+        let fixture = Fixture::from_simulation(&node);
+        fixture.install_for_trigger(true);
+        let target_actor = "standby-worker";
+        let standby = domain::NodeId::new(if !standby_present {
+            "absent-standby"
+        } else if original.node_id().as_str() == "node-a" {
+            "node-b"
+        } else {
+            "node-a"
+        })
+        .unwrap();
+        fixture.transition(|controller| {
+            controller
+                .bridge
+                .control_mut()
+                .set_actor_candidate_restriction(
+                    mission.clone(),
+                    domain::ActorId::new(target_actor).unwrap(),
+                    BTreeSet::from([standby.clone()]),
+                    format!("sha256:{}", "b".repeat(64)),
+                )
+                .unwrap();
+        });
+        let mut alternate = orchestration::mission_plan_document(&fixture.plan);
+        let role = alternate["contexts"][0]["roles"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|role| role["id"] == "worker")
+            .unwrap();
+        role["actor"] = target_actor.into();
+        let work = alternate["tasks"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|task| task["id"] == "work")
+            .unwrap();
+        work["id"] = "work-replacement".into();
+        work["roles"][0]["actor"] = target_actor.into();
+        fixture
+            .command(
+                "approve-standby",
+                1,
+                serde_json::json!({
+                    "kind": "approve-alternative",
+                    "ticket_id": "standby",
+                    "plan": alternate,
+                    "completion_precondition": ["prepare"],
+                }),
+                "administrator",
+            )
+            .unwrap();
+        node.controller = fixture.controller.lock().unwrap().clone();
+        node.fact_with_reason(
+            2,
+            integration::grpc::v0_4::ExecutionPhase::Failed,
+            "simulated low battery",
+            11,
+        );
+        *fixture.controller.lock().unwrap() = node.controller.clone();
+        fixture.tick(12);
+        node.controller = fixture.controller.lock().unwrap().clone();
+        node.fact_with_reason(
+            2,
+            integration::grpc::v0_4::ExecutionPhase::Failed,
+            "simulated low battery",
+            13,
+        );
+        *fixture.controller.lock().unwrap() = node.controller.clone();
+        fixture.tick(13);
+        {
+            let held = fixture.controller.lock().unwrap();
+            assert_eq!(
+                held.orchestrator.execution(mission).unwrap().group_id(),
+                original.group_id()
+            );
+            assert_eq!(held.bridge.attempt_history().len(), 2);
+            assert!(!crate::application::safety_stop::attempt_confirmed(
+                &held, &failed_id
+            ));
+            assert_eq!(held.runtime_revisions[mission.as_str()].switches.len(), 1);
+            assert_eq!(
+                held.runtime_revisions[mission.as_str()].switches[0].phase,
+                Phase::Stopping
+            );
+        }
+        node.controller = fixture.controller.lock().unwrap().clone();
+        let proof = simulated::natural_device_payload(&node);
+        simulated::observe(&mut node, "s1", 14, proof, Some(900_000));
+        *fixture.controller.lock().unwrap() = node.controller.clone();
+        fixture.tick(15);
+        {
+            let held = fixture.controller.lock().unwrap();
+            assert_eq!(
+                held.orchestrator
+                    .execution(mission)
+                    .unwrap()
+                    .plan_revision(),
+                0
+            );
+            assert!(crate::application::safety_stop::attempt_confirmed(
+                &held, &failed_id
+            ));
+        }
+        node.controller = fixture.controller.lock().unwrap().clone();
+        simulated::observe_predecessor_exit(&mut node, 16);
+        *fixture.controller.lock().unwrap() = node.controller.clone();
+        fixture.tick(17);
+        fixture.tick(18);
+        fixture.tick(19);
+        let live = fixture.controller.lock().unwrap();
+        let execution = live.orchestrator.execution(mission).unwrap();
+        assert_eq!(execution.plan_revision(), 1);
+        assert_ne!(execution.group_id(), original.group_id());
+        assert_eq!(
+            execution.plan_revisions()[0].source_group_id,
+            *original.group_id()
+        );
+        assert_eq!(
+            execution.plan_revisions()[0].target_group_id,
+            *execution.group_id()
+        );
+        assert_eq!(
+            execution.plan_revisions()[0].completed_tasks,
+            BTreeSet::from([domain::TaskId::new("prepare").unwrap()])
+        );
+        assert!(crate::application::safety_stop::attempt_confirmed(
+            &live, &failed_id
+        ));
+        let attempts = live.bridge.attempt_history();
+        assert_eq!(attempts.len(), 2 + usize::from(standby_present));
+        assert_eq!(
+            attempts
+                .iter()
+                .filter(|a| a.command().task_ref().task_id().as_str() == "prepare")
+                .count(),
+            1,
+            "a satisfied Task must not execute again"
+        );
+        if standby_present {
+            let replacement = attempts
+                .iter()
+                .find(|a| a.command().task_ref().task_id().as_str() == "work-replacement")
+                .unwrap();
+            assert_eq!(replacement.command().mission_id(), mission);
+            assert_eq!(replacement.command().node_id(), &standby);
+            assert_eq!(replacement.command().group_id(), execution.group_id());
+            let replacement_task = replacement.command().task_ref().clone();
+            let replacement_group = execution.group_id().clone();
+            node.controller = live.clone();
+            node.attempt = replacement.clone();
+            drop(live);
+            node.fact_with_reason(1, integration::grpc::v0_4::ExecutionPhase::Started, "", 20);
+            node.fact_with_reason(
+                2,
+                integration::grpc::v0_4::ExecutionPhase::Completed,
+                "",
+                21,
+            );
+            *fixture.controller.lock().unwrap() = node.controller.clone();
+            fixture.tick(22);
+            let result = fixture.controller.lock().unwrap();
+            assert_eq!(
+                result
+                    .bridge
+                    .control()
+                    .group(&replacement_group)
+                    .unwrap()
+                    .task_execution(&replacement_task)
+                    .unwrap()
+                    .lifecycle(),
+                domain::TaskExecutionLifecycle::Completed,
+            );
+            assert_eq!(result.bridge.attempt_history().len(), 3);
+        } else {
+            assert!(
+                live.orchestrator
+                    .ready_tasks(mission, live.bridge.control())
+                    .iter()
+                    .any(|task| task.task_id().as_str() == "work-replacement"),
+                "the revised Task must stay ready while the eligible standby is absent"
+            );
+        }
     }
 }
 

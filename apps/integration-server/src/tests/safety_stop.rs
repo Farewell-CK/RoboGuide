@@ -23,7 +23,7 @@ fn fixture_with_process_exit(process: bool) -> stop_recovery::Fixture {
 }
 
 /// Uses actual registration with a versioned source contract, independently of producer text.
-pub(super) fn fixture_with_schema(schema: &str, assurance: &str) -> stop_recovery::Fixture {
+pub(crate) fn fixture_with_schema(schema: &str, assurance: &str) -> stop_recovery::Fixture {
     with_observation_source(stop_recovery::Fixture::new(), schema, assurance, 5)
 }
 
@@ -34,8 +34,29 @@ fn with_observation_source(
     assurance: &str,
     received: u64,
 ) -> stop_recovery::Fixture {
+    let attempt = fixture.attempt.clone();
+    declare_observation_source(
+        &mut fixture,
+        &attempt,
+        "safe-process",
+        schema,
+        assurance,
+        received,
+    );
+    fixture
+}
+
+/// Declares each operation's independent export without displacing the predecessor's evidence.
+fn declare_observation_source(
+    fixture: &mut stop_recovery::Fixture,
+    attempt: &runtime::ExecutionAttemptSnapshot,
+    export_id: &str,
+    schema: &str,
+    assurance: &str,
+    received: u64,
+) {
     let process = schema == domain::PROCESS_EXIT_OBSERVATION_SCHEMA;
-    let node = fixture.attempt.command().node_id().clone();
+    let node = attempt.command().node_id().clone();
     let registration = fixture
         .controller
         .bridge
@@ -44,20 +65,26 @@ fn with_observation_source(
         .unwrap()
         .registration();
     let owner = registration
-        .operation_owner(fixture.attempt.command().intent().operation())
+        .operation_owner(attempt.command().intent().operation())
         .unwrap()
         .clone();
     let mut encoded = serde_json::to_value(registration).unwrap();
-    encoded["local_systems"][0]["metadata"][domain::EXECUTION_SAFETY_METADATA_KEY] = serde_json::Value::String(serde_json::json!({
-        "schema": if assurance == "no-effects" { "roboguide.execution-safety/v0.2" } else { "roboguide.execution-safety/v0.1" }, "operations": [{
-            "operation": fixture.attempt.command().intent().operation(), "safe_state_export_id": "safe-process",
-            "max_evidence_age_ms": 10, "stop_deadline_ms": 100, "min_confidence_millionths": if process || assurance == "no-effects" { None } else { Some(800000) },
-            "assurance": assurance
-        }]
-    }).to_string());
+    let mut exports = registration.state_exports().to_vec();
+    let contract =
+        &mut encoded["local_systems"][0]["metadata"][domain::EXECUTION_SAFETY_METADATA_KEY];
+    let mut profile = contract.as_str().map_or_else(
+        || serde_json::json!({"schema": if assurance == "no-effects" { "roboguide.execution-safety/v0.2" } else { "roboguide.execution-safety/v0.1" }, "operations": []}),
+        |profile| serde_json::from_str(profile).unwrap(),
+    );
+    profile["operations"].as_array_mut().unwrap().push(serde_json::json!({
+        "operation": attempt.command().intent().operation(), "safe_state_export_id": export_id,
+        "max_evidence_age_ms": 10, "stop_deadline_ms": 100, "min_confidence_millionths": if process || assurance == "no-effects" { None } else { Some(800000) },
+        "assurance": assurance
+    }));
+    *contract = serde_json::Value::String(profile.to_string());
     let registration: domain::NodeRegistration = serde_json::from_value(encoded).unwrap();
     let export = domain::StateExportDescriptor::new(
-        "safe-process",
+        export_id,
         owner,
         domain::StateObjectRef::new(
             domain::StateObjectClass::Node,
@@ -70,8 +97,9 @@ fn with_observation_source(
         10,
     )
     .unwrap();
+    exports.push(export);
     let registration = registration
-        .with_state_memory_exports(vec![export], Vec::new())
+        .with_state_memory_exports(exports, Vec::new())
         .unwrap();
     let mut state = fixture.controller.bridge.state().clone();
     fixture
@@ -97,6 +125,31 @@ fn with_observation_source(
         .control_mut()
         .register_node_session(&node, "s1", 10_000)
         .unwrap();
+}
+
+/// Exposes separate predecessor-process and failed-device evidence in one two-node replay.
+pub(crate) fn device_fixture_with_completed_predecessor() -> stop_recovery::Fixture {
+    let mut fixture = with_observation_source(
+        stop_recovery::Fixture::with_completed_predecessor(),
+        domain::SAFE_STATE_OBSERVATION_SCHEMA,
+        "device-observation",
+        6,
+    );
+    let predecessor = fixture
+        .controller
+        .bridge
+        .attempt_history()
+        .into_iter()
+        .find(|attempt| attempt.command().task_ref().task_id().as_str() == "prepare")
+        .unwrap();
+    declare_observation_source(
+        &mut fixture,
+        &predecessor,
+        "prepare-process",
+        domain::PROCESS_EXIT_OBSERVATION_SCHEMA,
+        "software-process",
+        6,
+    );
     fixture
 }
 
@@ -148,9 +201,29 @@ fn observation(fixture: &stop_recovery::Fixture) -> serde_json::Value {
 }
 
 /// Ingests the declared State batch through the maintained Node Protocol projection, with original time.
-pub(super) fn observe(
+pub(crate) fn observe(
     fixture: &mut stop_recovery::Fixture,
     session: &str,
+    received: u64,
+    payload: serde_json::Value,
+    confidence: Option<u32>,
+) {
+    let attempt = fixture.attempt.clone();
+    observe_from(
+        fixture,
+        &attempt,
+        (session, 1, "safe-process"),
+        received,
+        payload,
+        confidence,
+    );
+}
+
+/// Sends a specific declared source observation through the real Node reducer.
+fn observe_from(
+    fixture: &mut stop_recovery::Fixture,
+    attempt: &runtime::ExecutionAttemptSnapshot,
+    (session, sequence, export_id): (&str, u64, &str),
     received: u64,
     payload: serde_json::Value,
     confidence: Option<u32>,
@@ -160,15 +233,15 @@ pub(super) fn observe(
         .bridge
         .consume(
             integration::GrpcNodeEvent::NodeMessage {
-                node_id: fixture.attempt.command().node_id().to_string(),
+                node_id: attempt.command().node_id().to_string(),
                 session_id: session.into(),
                 message: wire::NodeMessage {
                     message: Some(NodePayload::StateObservationBatch(
                         wire::StateObservationBatch {
                             session_id: session.into(),
-                            sequence: 1,
+                            sequence,
                             observations: vec![wire::StateObservation {
-                                export_id: "safe-process".into(),
+                                export_id: export_id.into(),
                                 json_value: serde_json::to_vec(&payload).unwrap(),
                                 has_source_observed_at: true,
                                 source_observed_at_ms: 999_999_999,
@@ -183,6 +256,48 @@ pub(super) fn observe(
             &fixture.correlation,
         )
         .unwrap();
+}
+
+/// Publishes the predecessor's independent exit with the frozen Group attempt coverage.
+pub(crate) fn observe_predecessor_exit(fixture: &mut stop_recovery::Fixture, received: u64) {
+    let history = fixture.controller.bridge.attempt_history();
+    let predecessor = history
+        .iter()
+        .find(|attempt| attempt.command().task_ref().task_id().as_str() == "prepare")
+        .unwrap();
+    let payloads: Vec<_> = history.iter().map(|attempt| {
+        let command = attempt.command();
+        let generation = fixture.controller.bridge.current_attempt_generation(
+            command.group_id(), command.task_ref(), command.role_id()
+        ).unwrap();
+        serde_json::json!({"execution_id":attempt.execution_id(), "execution_generation":generation})
+    }).collect();
+    let generation = payloads
+        .iter()
+        .find(|row| row["execution_id"] == predecessor.execution_id())
+        .unwrap()["execution_generation"]
+        .clone();
+    let sequence = if predecessor.command().node_id() == fixture.attempt.command().node_id() {
+        2
+    } else {
+        1
+    };
+    observe_from(
+        fixture,
+        predecessor,
+        ("s1", sequence, "prepare-process"),
+        received,
+        serde_json::json!({
+            "observations":[{
+                "execution_id": predecessor.execution_id(), "execution_generation": generation,
+                "command_id": null, "safe_state": true, "assurance": "software-process",
+                "terminal_state": "COMPLETED",
+                "process_exit": {"instance_id":"simulated-prepare-process", "pid":17, "exit_code":0,
+                    "group_id":predecessor.command().group_id(), "attempts":payloads}
+            }]
+        }),
+        None,
+    );
 }
 
 /// Reads the serialized authority phase without giving tests a second lifecycle map.
@@ -937,7 +1052,7 @@ fn active_hazard_revocation_stops_under_its_original_policy() {
 }
 
 /// Builds a synthetic device observation bound to the current attempt and generation.
-fn natural_device_payload(fixture: &stop_recovery::Fixture) -> serde_json::Value {
+pub(crate) fn natural_device_payload(fixture: &stop_recovery::Fixture) -> serde_json::Value {
     let command = fixture.attempt.command();
     let generation = fixture
         .controller

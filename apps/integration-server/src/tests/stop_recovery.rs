@@ -5,15 +5,15 @@ use domain::{NodeHealth, TimestampMs};
 use integration::grpc::v0_4::{ExecutionPhase, NodeMessage, node_message::Message as NodePayload};
 
 /// Keeps a running resource-bearing Mission and isolated persistence for recovery tests.
-pub(super) struct Fixture {
+pub(crate) struct Fixture {
     /// Keeps the isolated SQLite event database alive.
     _directory: tempfile::TempDir,
     /// Original application authority, with one independently bound role.
-    pub(super) controller: ControllerState,
+    pub(crate) controller: ControllerState,
     /// Shared durable event and checkpoint sink.
-    pub(super) events: state::SqliteEventLog,
+    pub(crate) events: state::SqliteEventLog,
     /// Original physical attempt selected by actual scheduling.
-    pub(super) attempt: runtime::ExecutionAttemptSnapshot,
+    pub(crate) attempt: runtime::ExecutionAttemptSnapshot,
     /// Stable evidence correlation.
     pub(super) correlation: domain::CorrelationId,
 }
@@ -37,11 +37,16 @@ impl Fixture {
         let correlation = domain::CorrelationId::new("confirmed-stop-test").expect("correlation");
         let mut control = control::ControlPlane::new();
         let mut state = state::InMemorySharedNodeState::new();
+        let operations: &[&str] = if predecessor {
+            &["work", "prepare"]
+        } else {
+            &["work"]
+        };
         for (node, resource) in [("node-a", "cpu-a"), ("node-b", "cpu-b")] {
             control
                 .register_node(
                     &mut state,
-                    recovery_driver_node_with_support(node, resource, support),
+                    recovery_driver_node_with_operations(node, resource, support, operations),
                     domain::NodeStatus::new(NodeHealth::Online, TimestampMs::new(1)),
                     TimestampMs::new(1),
                     &correlation,
@@ -64,8 +69,16 @@ impl Fixture {
             let tasks = plan["tasks"].as_array_mut().expect("fixture tasks");
             let mut prepare = tasks[0].clone();
             prepare["id"] = "prepare".into();
+            prepare["roles"][0]["actor"] = "preparer".into();
+            prepare["roles"][0]["context_role"] = "preparer".into();
+            prepare["roles"][0]["contract"]["name"] = "prepare".into();
+            prepare["roles"][0]["execution"]["capability_contract"]["name"] = "prepare".into();
             tasks[0]["depends_on"] = serde_json::json!(["prepare"]);
             tasks.insert(0, prepare);
+            plan["contexts"][0]["roles"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({"id":"preparer","actor":"preparer"}));
         }
         let plan = decode_mission_plan(&plan.to_string())
             .expect("canonical plan with serializable continuity");
@@ -128,7 +141,7 @@ impl Fixture {
     }
 
     /// Finishes the first real Task and starts only its successor on the original assigned node.
-    pub(super) fn with_completed_predecessor() -> Self {
+    pub(crate) fn with_completed_predecessor() -> Self {
         let mut fixture = Self::with_workflow(Some(("execution", "repeat-after-stop")), true);
         assert_eq!(
             fixture.attempt.command().task_ref().task_id().as_str(),
@@ -168,7 +181,7 @@ impl Fixture {
     }
 
     /// Supplies an original node fault label through the normal Runtime message path.
-    pub(super) fn fact_with_reason(
+    pub(crate) fn fact_with_reason(
         &mut self,
         sequence: u64,
         phase: ExecutionPhase,

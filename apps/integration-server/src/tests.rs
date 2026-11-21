@@ -29,10 +29,10 @@ mod memory_import;
 mod mission_isolation;
 mod runtime_contract;
 mod runtime_replay;
-mod safety_stop;
+pub(crate) mod safety_stop;
 mod scheduling_disposition;
 mod semantic_verifier;
-mod stop_recovery;
+pub(crate) mod stop_recovery;
 mod task_settlement;
 mod worker_isolation;
 
@@ -222,9 +222,26 @@ fn recovery_driver_node_with_support(
     resource_id: &str,
     support: Option<(&str, &str)>,
 ) -> domain::NodeRegistration {
+    recovery_driver_node_with_operations(node_id, resource_id, support, &["work"])
+}
+
+/// Declares the fixture operations independently of the Mission's requested work.
+fn recovery_driver_node_with_operations(
+    node_id: &str,
+    resource_id: &str,
+    support: Option<(&str, &str)>,
+    names: &[&str],
+) -> domain::NodeRegistration {
     let owner = domain::LocalSystemId::new("fixture-runtime").expect("owner");
-    let contract = domain::CapabilityContractRef::new("compute", "work", "v1").expect("contract");
-    let operation = domain::OperationRef::from(contract.clone());
+    let contracts = names
+        .iter()
+        .map(|name| domain::CapabilityContractRef::new("compute", *name, "v1").expect("contract"))
+        .collect::<Vec<_>>();
+    let operations = contracts
+        .iter()
+        .cloned()
+        .map(domain::OperationRef::from)
+        .collect::<Vec<_>>();
     let resource = domain::Resource::new(
         domain::ResourceId::new(resource_id).expect("resource"),
         domain::ResourceKind::Compute,
@@ -236,8 +253,11 @@ fn recovery_driver_node_with_support(
             domain::EXECUTION_RECOVERY_METADATA_KEY.to_string(),
             serde_json::json!({
                 "schema_version": domain::EXECUTION_RECOVERY_PROFILE_SCHEMA,
-                "operations": [{"operation": operation, "stop_scope": stop_scope, "continuation": continuation}]
-            }).to_string(),
+                "operations": operations.iter().map(|operation| serde_json::json!({
+                    "operation": operation, "stop_scope": stop_scope, "continuation": continuation
+                })).collect::<Vec<_>>()
+            })
+            .to_string(),
         )])
     });
     domain::NodeRegistration::new_with_local_systems(
@@ -252,13 +272,21 @@ fn recovery_driver_node_with_support(
             domain::CapabilityKind::Compute,
             true,
         )],
-        BTreeMap::from([(contract, owner.clone())]),
+        contracts
+            .into_iter()
+            .map(|contract| (contract, owner.clone()))
+            .collect(),
         Vec::new(),
         vec![resource.clone()],
         BTreeMap::from([(resource.id().clone(), owner.clone())]),
     )
     .expect("registration")
-    .with_operation_support(vec![domain::OperationSupport::new(operation, owner)])
+    .with_operation_support(
+        operations
+            .into_iter()
+            .map(|operation| domain::OperationSupport::new(operation, owner.clone()))
+            .collect(),
+    )
     .expect("exact operation ownership")
 }
 
