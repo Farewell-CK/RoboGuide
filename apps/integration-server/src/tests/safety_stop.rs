@@ -24,8 +24,17 @@ fn fixture_with_process_exit(process: bool) -> stop_recovery::Fixture {
 
 /// Uses actual registration with a versioned source contract, independently of producer text.
 pub(super) fn fixture_with_schema(schema: &str, assurance: &str) -> stop_recovery::Fixture {
+    with_observation_source(stop_recovery::Fixture::new(), schema, assurance, 5)
+}
+
+/// Advertise synthetic stop evidence from the operation's existing declared owner.
+fn with_observation_source(
+    mut fixture: stop_recovery::Fixture,
+    schema: &str,
+    assurance: &str,
+    received: u64,
+) -> stop_recovery::Fixture {
     let process = schema == domain::PROCESS_EXIT_OBSERVATION_SCHEMA;
-    let mut fixture = stop_recovery::Fixture::new();
     let node = fixture.attempt.command().node_id().clone();
     let registration = fixture
         .controller
@@ -72,8 +81,11 @@ pub(super) fn fixture_with_schema(schema: &str, assurance: &str) -> stop_recover
         .register_node(
             &mut state,
             registration,
-            domain::NodeStatus::new(domain::NodeHealth::Online, domain::TimestampMs::new(5)),
-            domain::TimestampMs::new(5),
+            domain::NodeStatus::new(
+                domain::NodeHealth::Online,
+                domain::TimestampMs::new(received),
+            ),
+            domain::TimestampMs::new(received),
             &fixture.correlation,
             &mut fixture.events.clone(),
         )
@@ -922,6 +934,87 @@ fn active_hazard_revocation_stops_under_its_original_policy() {
         domain::TimestampMs::new(8)
     ));
     application::hazards::validate_restored(&fixture.controller).unwrap();
+}
+
+/// Replays a failed Task after real predecessor satisfaction through the live stop reducer.
+#[test]
+fn low_battery_natural_failure_retains_ownership_after_device_safe_state() {
+    let mut fixture = with_observation_source(
+        stop_recovery::Fixture::with_completed_predecessor(),
+        domain::SAFE_STATE_OBSERVATION_SCHEMA,
+        "device-observation",
+        6,
+    );
+    let command = fixture.attempt.command().clone();
+    let attempt = fixture.attempt.execution_id().to_owned();
+    let admission = fixture.allocations();
+    fixture.fact_with_reason(
+        2,
+        wire::ExecutionPhase::Failed,
+        "simulated local low battery",
+        7,
+    );
+    safety_stop::admit(
+        &mut fixture.controller,
+        command.group_id(),
+        command.task_ref(),
+        command.role_id(),
+        domain::TimestampMs::new(8),
+        100,
+    )
+    .unwrap();
+    safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(8)).unwrap();
+    assert!(!safety_stop::attempt_confirmed(
+        &fixture.controller,
+        &attempt
+    ));
+
+    let generation = fixture
+        .controller
+        .bridge
+        .current_attempt_generation(command.group_id(), command.task_ref(), command.role_id())
+        .unwrap();
+    observe(
+        &mut fixture,
+        "s1",
+        9,
+        serde_json::json!({"observations":[{
+            "execution_id":attempt,
+            "execution_generation":generation,
+            "command_id":null,
+            "safe_state":true,
+            "assurance":"device-observation",
+            "terminal_state":"FAILED",
+        }]}),
+        Some(900_000),
+    );
+    for clock in [10, 11] {
+        safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(clock)).unwrap();
+    }
+    let control = fixture.controller.bridge.control();
+    let group = control.group(command.group_id()).unwrap();
+    let finished = domain::TaskRef::new(
+        command.mission_id().clone(),
+        domain::TaskId::new("prepare").unwrap(),
+    );
+    assert_eq!(
+        group.task_execution(&finished).unwrap().lifecycle(),
+        domain::TaskExecutionLifecycle::Completed,
+    );
+    assert_eq!(fixture.controller.bridge.attempt_history().len(), 2);
+    assert_eq!(fixture.allocations(), admission);
+    assert_eq!(
+        fixture.controller.bridge.execution_status(&attempt),
+        Some(orchestration::RemoteExecutionStatus::Failed),
+    );
+    assert_eq!(phase(&fixture), "stop_requested");
+    assert!(safety_stop::blocks_release(
+        &fixture.controller,
+        command.mission_id()
+    ));
+    println!(
+        "low battery simulation: prepare=Completed, work=Failed, attempts=2, stop=stop_requested"
+    );
 }
 
 /// Builds a sealed checkpoint fixture for a natural device failure without a synthetic Cancel receipt.
