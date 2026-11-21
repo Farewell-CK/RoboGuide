@@ -513,32 +513,6 @@ def test_fixture_planner_rejects_unrepresented_grounding_facts() -> None:
         )
 
 
-def test_planner_cache_prefix_survives_checkout_line_endings(tmp_path: Path) -> None:
-    """Equivalent prompt assets should reach the cache in the same wire representation."""
-    prompt = tmp_path / "planner.md"
-    content = b"Preserve original constraints.\nReturn the strict draft.\n"
-    plan_json = cast(JSONObject, json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8")))
-    mission = cast(JSONObject, plan_json["mission"])
-    transport = FakeTransport([_response(_provider_plan(plan_json)) for _ in range(2)])
-    settings = _local_settings()
-    settings = replace(
-        settings,
-        llm=replace(settings.llm, planner_static_prefix_cache=True),
-        prompts=replace(settings.prompts, planner_path=prompt),
-    )
-    for asset in (content, content.replace(b"\n", b"\r\n")):
-        prompt.write_bytes(asset)
-        planner = ResponsesMissionPlanner(settings, {"OPENAI_API_KEY": "fixture-key"}, transport)
-        planner.plan(
-            cast(str, mission["id"]),
-            GroundedIntent(cast(str, mission["objective"]), (), ()),
-            _current_catalog(),
-            _grounding(),
-        )
-    first, second = (request[2] for request in transport.requests)
-    assert json.dumps(first, ensure_ascii=False) == json.dumps(second, ensure_ascii=False)
-
-
 def test_responses_planner_uses_strict_output_without_hiding_review() -> None:
     """The Planner returns one validated draft without invoking semantic Review internally."""
     plan_json = cast(JSONObject, json.loads(CURRENT_FIXTURE.read_text(encoding="utf-8")))
@@ -568,7 +542,7 @@ def test_responses_planner_uses_strict_output_without_hiding_review() -> None:
     assert planning_payload["model"] == "gpt-5.6-luna"
     assert (
         planning_payload["instructions"]
-        == Path("mission/prompts/v0/planner.md").read_text(encoding="utf-8").strip()
+        == Path("mission/prompts/v0/planner.md").read_bytes().decode("utf-8").strip()
     )
     assert planning_payload["store"] is False
     planning_input = json.loads(cast(str, planning_payload["input"]))

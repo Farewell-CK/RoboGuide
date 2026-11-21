@@ -1,0 +1,2 @@
+# These versioned bytes contribute to provider cache keys and frozen asset digests.
+*.md text eol=lf

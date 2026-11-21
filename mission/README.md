@@ -213,8 +213,8 @@ Mission Request 的 provenance 记录请求的档位和 Provider 实际返回的
 `execution-report` 省略空的 `verifier`，未声明的 Memory 前置条件省略 `memories`。
 宿主恢复标准 MissionPlan 后按原流程校验。Reviewer、Repairer 和持久化合同使用原格式。
 
-发送 Prompt 前先核验启动时冻结的原始文件摘要，再将 CRLF 转为 LF。
-同一份提示词在 Windows 和 Linux 检出时可以生成相同的缓存前缀。
+`mission/prompts/.gitattributes` 让 Git 在 Windows 和 Linux 上都以 LF 检出版本化 Prompt。
+同一提交生成相同的缓存前缀，MI 沿用原始文件的摘要和读取方式。
 
 Mission provenance 记录模型调用阶段和显式缓存前缀摘要，并在 Provider 返回时记录
 `cached_tokens`、`cache_write_tokens` 和 `reasoning_tokens`。
