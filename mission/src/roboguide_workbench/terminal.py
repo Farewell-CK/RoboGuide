@@ -17,7 +17,10 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.application.current import set_app
 from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.data_structures import Size
+from prompt_toolkit.filters import Condition, is_done
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
+from prompt_toolkit.layout import ConditionalContainer, FormattedTextControl, HSplit, Layout, Window
 from prompt_toolkit.output.vt100 import Vt100_Output
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
@@ -76,6 +79,8 @@ COMMANDS = [
 MAX_QUEUED_REQUESTS = 3
 SLOW_NOTICE_DELAYS = (15.0, 30.0)
 PREVIEW_INTERVAL = 0.15
+PREVIEW_TAIL_CHARS = 1024
+PREVIEW_MAX_LINES = 3
 
 # Read-only commands can safely run after the current writer drains.  Watches
 # and quit are handled immediately below because they own separate lifecycle
@@ -223,6 +228,31 @@ def _message_preview(text: str, width: int = 80) -> str:
     return result + "…"
 
 
+def _mount_composer_context(
+    prompt: PromptSession[str], status: Callable[[], str], preview: Callable[[], str]
+) -> None:
+    """Keep live context out of input and scrollback, including when CPR is disabled."""
+    layout = getattr(prompt, "layout", None)
+    if not isinstance(layout, Layout):
+        return
+    layout.container = HSplit(
+        [
+            ConditionalContainer(
+                Window(
+                    FormattedTextControl(preview),
+                    dont_extend_height=True,
+                ),
+                filter=~is_done & Condition(lambda: bool(preview())),
+            ),
+            ConditionalContainer(
+                Window(FormattedTextControl(status), style="class:composer-status", height=1),
+                filter=~is_done,
+            ),
+            layout.container,
+        ]
+    )
+
+
 async def interactive(session: WorkbenchSession) -> int:
     """Run a scrollback-friendly chat shell with serialized, bounded foreground work."""
     keys = KeyBindings()
@@ -238,11 +268,9 @@ async def interactive(session: WorkbenchSession) -> int:
     started_at: float | None = None
     phase = "待命"
     loop = asyncio.get_running_loop()
-    stream_buffer: list[str] = []
+    stream_tail = ""
     preview_timer: asyncio.TimerHandle | None = None
-    previewed = ""
-    preview_tasks: list[asyncio.Task[None]] = []
-    preview_lock = asyncio.Lock()
+    visible_preview = ""
 
     @keys.add("enter")
     def submit_line(event: KeyPressEvent) -> None:
@@ -286,7 +314,7 @@ async def interactive(session: WorkbenchSession) -> int:
             text, _, _ = queued.pop()
             event.app.current_buffer.text = text
             event.app.current_buffer.cursor_position = len(text)
-            refresh_toolbar()
+            refresh_composer()
 
     @keys.add("escape", "backspace")
     def delete_pending(event: KeyPressEvent) -> None:
@@ -294,7 +322,7 @@ async def interactive(session: WorkbenchSession) -> int:
         if queued:
             text, _, _ = queued.pop()
             notify("已撤回待发消息：" + safe_text(text))
-            refresh_toolbar()
+            refresh_composer()
 
     # Keep the constructor surface used by the plain test harness.  The live
     # session receives the richer multiline behavior through attributes below.
@@ -321,7 +349,7 @@ async def interactive(session: WorkbenchSession) -> int:
         {
             "frame.border": "#5f6f86",
             "prompt": "bold #81a9ed",
-            "bottom-toolbar": "bg:#202631 #c1cad8",
+            "composer-status": "bold",
             "completion-menu.completion": "bg:#202631 #c1cad8",
             "completion-menu.completion.current": "bg:#35455d #ffffff",
         }
@@ -337,38 +365,64 @@ async def interactive(session: WorkbenchSession) -> int:
         """Read the configured model label or a stable local fallback."""
         return safe_text(str(getattr(session, "model_label", "未配置")))
 
-    def toolbar() -> str:
-        """Render connection, elapsed work, progress and queue count in the bottom status bar."""
-        waiting = f" · 队列 {len(queued)}/{MAX_QUEUED_REQUESTS}" if queued else ""
-        if foreground and not foreground.done():
-            return f" {phase}{waiting} · Ctrl-C 停止显示，原请求继续收尾"
-        selected = f" · 状态对象 {safe_text(session.last_state)}" if session.last_state else ""
-        return f" 就绪{selected}{waiting} · Enter 发送 · Alt-Enter 换行 · / 命令"
+    def terminal_size() -> Size:
+        """Locate the current viewport for the composer and bounded display."""
+        with suppress(AttributeError, OSError, ValueError):
+            return prompt.output.get_size()
+        return Size(rows=24, columns=100)
 
-    prompt.bottom_toolbar = toolbar
-    # The right prompt remains visible on terminals which cannot answer CPR, where
-    # prompt_toolkit deliberately hides its screen-bottom toolbar.
-    prompt.rprompt = toolbar
-    prompt.refresh_interval = 0
-    prompt.app.refresh_interval = None
+    def composer_status() -> str:
+        """Keep the phase and queued count visible before fitting optional keyboard hints."""
+        width = max(1, terminal_size().columns - 1)
+        if started_at is None:
+            value = "就绪"
+            hints = ["Enter 发送", "/help", "Alt-Enter 换行"]
+            if session.last_state:
+                hints.append(f"状态对象 {safe_text(session.last_state)}")
+        elif muted:
+            value, hints = "正在收尾", []
+        else:
+            value = "正在回复" if visible_preview else phase
+            hints = ["Ctrl-C 停止显示"]
+        if queued:
+            value += f" · 待发 {len(queued)}/{MAX_QUEUED_REQUESTS}"
+        for hint in hints:
+            candidate = f"{value} · {hint}"
+            if get_cwidth(candidate) <= width:
+                value = candidate
+        return _message_preview(value, width)
 
-    def refresh_toolbar() -> None:
+    def preview_text() -> str:
+        """Show only the newest few public lines above an independently editable draft."""
+        if not visible_preview.strip() or muted or closing:
+            return ""
+        size = terminal_size()
+        if size.rows < 8:
+            return ""
+        width = max(2, min(160, size.columns - 1))
+        lines = [
+            chunk
+            for line in visible_preview.rstrip().split("\n")
+            for chunk in _wrapped_lines(safe_text(line), width)
+        ]
+        return "\n".join(lines[-min(PREVIEW_MAX_LINES, size.rows // 6) :])
+
+    _mount_composer_context(prompt, composer_status, preview_text)
+
+    def refresh_composer() -> None:
         """Request a redraw after progress arrives from the worker thread."""
         with suppress(RuntimeError, AttributeError):
             loop.call_soon_threadsafe(prompt.app.invalidate)
 
     def update_progress(message: str) -> None:
-        """Retain compact public processing steps in scrollback without timer redraws."""
+        """Update the input status without adding routine phases to scrollback."""
 
         def record() -> None:
             """Publish a changed phase on the terminal owner without exposing raw tool messages."""
             nonlocal phase
-            value = safe_text(message)
-            if value != phase:
-                phase = value
-                if not muted and not closing:
-                    notify("· " + value)
-                refresh_toolbar()
+            if message != phase and not muted and not closing:
+                phase = message
+                refresh_composer()
 
         loop.call_soon_threadsafe(record)
 
@@ -404,54 +458,33 @@ async def interactive(session: WorkbenchSession) -> int:
 
     manager = WatchManager(session, notify)
 
-    async def show_preview(text: str) -> None:
-        """Flush actual public text deltas while keeping input editing and final ACK separate."""
-        nonlocal previewed
-        async with preview_lock:
-            if muted or closing:
-                return
-
-            def write() -> None:
-                """Write public text without reasoning or incomplete tool arguments."""
-                nonlocal previewed
-                if not previewed:
-                    print("\n── RG · 生成中", file=output, flush=True)
-                print(
-                    ("RG > " if not previewed else "     ")
-                    + safe_text(text).replace("\\u000a", "\n"),
-                    file=output,
-                    flush=True,
-                )
-                previewed += text
-
-            with set_app(prompt.app):
-                await run_in_terminal(write)
-
-    def cancel_preview_timer() -> None:
-        """Clear the scheduled flush before ending the current terminal turn."""
-        nonlocal preview_timer
+    def clear_preview() -> None:
+        """Drop transient text before committing the authoritative response to scrollback."""
+        nonlocal preview_timer, stream_tail, visible_preview
         if preview_timer is not None:
             preview_timer.cancel()
             preview_timer = None
+        stream_tail = visible_preview = ""
 
-    def flush_preview() -> None:
-        """Render accumulated public text once its short display interval ends."""
-        cancel_preview_timer()
-        if stream_buffer and not muted and not closing:
-            preview_tasks.append(asyncio.create_task(show_preview("".join(stream_buffer))))
-        stream_buffer.clear()
+    def publish_preview() -> None:
+        """Refresh the live composer after a short batch of public deltas arrives."""
+        nonlocal preview_timer, visible_preview
+        preview_timer = None
+        if not muted and not closing:
+            visible_preview = stream_tail
+            refresh_composer()
 
     def update_stream(delta: str) -> None:
-        """Batch public text without making a short fragment wait for the final response."""
+        """Batch a bounded text tail without delaying a short fragment until final response."""
 
         def record() -> None:
-            """Schedule at most one flush per interval on the terminal owner."""
-            nonlocal preview_timer
-            if not delta or muted or closing:
+            """Schedule at most one preview redraw per interval on the terminal owner."""
+            nonlocal preview_timer, stream_tail
+            if not delta or muted or closing or started_at is None:
                 return
-            stream_buffer.append(delta)
+            stream_tail = (stream_tail + delta)[-PREVIEW_TAIL_CHARS:]
             if preview_timer is None:
-                preview_timer = loop.call_later(PREVIEW_INTERVAL, flush_preview)
+                preview_timer = loop.call_later(PREVIEW_INTERVAL, publish_preview)
 
         loop.call_soon_threadsafe(record)
 
@@ -467,9 +500,7 @@ async def interactive(session: WorkbenchSession) -> int:
             """Flush the captured real stream while terminal input is safely suspended."""
             if muted:
                 return False
-            width = 100
-            with suppress(AttributeError, OSError, ValueError):
-                width = max(20, min(160, prompt.output.get_size().columns))
+            width = max(20, min(160, terminal_size().columns))
             label = {"complete": "", "partial": " · 部分结果", "failed": " · 本轮回复未完成"}[
                 status
             ]
@@ -503,15 +534,11 @@ async def interactive(session: WorkbenchSession) -> int:
         """Run one serialized turn and start the next queued question after its receipt drains."""
         nonlocal muted, unavailable, foreground, started_at, phase
         nonlocal visible_references, visible_history
-        nonlocal previewed
         started_at, phase = time.monotonic(), "处理中"
-        previewed = ""
-        preview_tasks.clear()
-        refresh_toolbar()
+        refresh_composer()
         turn = DisplayTurn(session)
         session.input_references = original_references
         session.input_history = original_history
-        outcome: QueryStatus = "complete"
 
         async def slow_feedback() -> None:
             """Print occasional real waiting notices without a ticking redraw or fake progress."""
@@ -523,25 +550,14 @@ async def interactive(session: WorkbenchSession) -> int:
         waiting = asyncio.create_task(slow_feedback())
         try:
             result = await asyncio.to_thread(session.ask, text)
-            outcome = session.query_status
-            await asyncio.sleep(0)
-            flush_preview()
-            if preview_tasks:
-                await asyncio.gather(*preview_tasks)
+            clear_preview()
             turn.stage()
             if not muted:
-                remaining_text = (
-                    result[len(previewed) :].strip()
-                    if previewed and result.startswith(previewed)
-                    else result
-                )
-                displayed = await display(
-                    remaining_text or "回复完成。", turn.suggestion, status=outcome
-                )
+                displayed = await display(result, turn.suggestion, status=session.query_status)
                 if displayed and not muted:
                     turn.acknowledge()
         except (ValueError, OSError) as error:
-            outcome = "failed"
+            clear_preview()
             if not muted:
                 try:
                     await display("操作未完成：" + safe_text(str(error)), status="failed")
@@ -550,10 +566,7 @@ async def interactive(session: WorkbenchSession) -> int:
         finally:
             waiting.cancel()
             await asyncio.gather(waiting, return_exceptions=True)
-            cancel_preview_timer()
-            stream_buffer.clear()
-            if preview_tasks:
-                await asyncio.gather(*preview_tasks, return_exceptions=True)
+            clear_preview()
             session.input_references = None
             session.input_history = None
             try:
@@ -564,13 +577,8 @@ async def interactive(session: WorkbenchSession) -> int:
             muted = False
             visible_references = session.query_references()
             visible_history = bounded_history(session.store.data.get("messages"))
-            if started_at is not None and not muted and not closing:
-                detail = {"complete": "", "partial": "部分结果 · ", "failed": "回复未完成 · "}[
-                    outcome
-                ]
-                notify(f"· 本轮结束 · {detail}{time.monotonic() - started_at:.1f}s")
             started_at, phase = None, "待命"
-            refresh_toolbar()
+            refresh_composer()
             if not closing and not unavailable and queued:
                 next_text, original_references, original_history = queued.popleft()
                 notify(
@@ -594,9 +602,7 @@ async def interactive(session: WorkbenchSession) -> int:
 
         def composer() -> str:
             """Keep unsent message previews directly above the current input buffer."""
-            width = 100
-            with suppress(AttributeError, OSError, ValueError):
-                width = max(20, min(160, prompt.output.get_size().columns))
+            width = max(20, min(160, terminal_size().columns))
             lines = [
                 f"待发 {index}. {_message_preview(item[0], width - 12)}"
                 for index, item in enumerate(queued, 1)
@@ -627,6 +633,7 @@ async def interactive(session: WorkbenchSession) -> int:
                     retained_input = ""
                     if foreground and not foreground.done():
                         muted = True
+                        clear_preview()
                         clear_queue("已停止前台显示；原操作继续收尾，未发送任务取消")
                         notify("已停止前台显示；原操作继续收尾，未发送任务取消。")
                     else:
@@ -664,7 +671,7 @@ async def interactive(session: WorkbenchSession) -> int:
                                 notify("已撤回待发消息：" + item[0])
                         except ValueError:
                             notify("请用 /queue 查看序号，再 /edit-queued 1 或 /dequeue 1。")
-                    refresh_toolbar()
+                    refresh_composer()
                     continue
                 if not foreground or foreground.done():
                     if _command_name(text) in {"/watch", "/watches", "/unwatch"}:

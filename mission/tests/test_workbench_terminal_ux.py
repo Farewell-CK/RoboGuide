@@ -247,7 +247,7 @@ def test_partial_reply_has_a_visible_turn_status(
         prompt.install(monkeypatch)
         assert asyncio.run(terminal.interactive(session)) == 0
         assert "── RG · 助手 · 部分结果" in output.getvalue()
-        assert "本轮结束 · 部分结果" in output.getvalue()
+        assert "本轮结束" not in output.getvalue()
         assert session.query_status == "partial" and controller.submissions == []
 
 
@@ -257,56 +257,6 @@ def test_pending_preview_fits_chinese_terminal_cells() -> None:
     preview = terminal._message_preview(original, 18)
     assert get_cwidth(preview) <= 18 and preview.endswith("…")
     assert "\n" not in preview and "\\u000a" not in preview
-
-
-def test_short_public_delta_displays_while_completion_is_pending(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Show already received short text while keeping the display ACK tied to completion."""
-    text = "已经收到。"
-    visible = asyncio.Event()
-    release = threading.Event()
-
-    class PreviewOutput(io.StringIO):
-        """Signal when the terminal writes the actual preview, not a progress notice."""
-
-        def write(self, value: str, /) -> int:
-            """Capture the first short text even though the worker is still blocked."""
-            if value.startswith("RG > " + text):
-                visible.set()
-            return super().write(value)
-
-    output = PreviewOutput()
-    monkeypatch.setattr(sys, "stdout", output)
-    with workbench(tmp_path) as (session, _controller):
-        original = session.ask
-        session.router_factory = lambda: _router(Responses([_response(_message(text))]))
-
-        def held(question: str) -> str:
-            """Simulate a short public delta followed by a deliberately delayed completion."""
-            assert session.stream_output is not None
-            session.stream_output(text)
-            assert release.wait(4)
-            return original(question)
-
-        monkeypatch.setattr(session, "ask", held)
-
-        async def finish() -> str:
-            """Observe preview before allowing completion and its independent persistence."""
-            try:
-                await asyncio.wait_for(visible.wait(), 2)
-                assert session.store.data["messages"] == []
-            finally:
-                release.set()
-            await drain_foreground()
-            return "/quit"
-
-        prompt = ScriptedPrompt([command("你好。"), finish])
-        prompt.install(monkeypatch)
-        assert asyncio.run(terminal.interactive(session)) == 0
-        assert output.getvalue().count(text) == 1
-        latest = cast(list[JSONObject], session.store.data["messages"])[-1]
-        assert latest["text"] == text and latest["displayed"] is True
 
 
 def test_local_snapshot_commands_preserve_the_conversation(
