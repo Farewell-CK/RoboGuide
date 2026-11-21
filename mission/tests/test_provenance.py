@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import cast
 
 import pytest
-from mission.models import JSONObject
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
+from mission.capability_catalog import CanonicalCapabilityCatalog
+from mission.grounding_context import GroundingContextSnapshot
+from mission.intent import GroundedIntent
+from mission.models import JSONObject, MissionPlan
 from mission.provenance import (
     MAX_PROVIDER_CALLS,
     current_trace,
@@ -20,7 +26,7 @@ from mission.provenance import (
     trace_deliberation,
 )
 from mission.request_engine import MissionRequestEngine
-from mission.request_record import MissionRequestError
+from mission.request_record import MissionRequestError, MissionRequestLifecycle
 from mission.request_store import MissionRequestStore
 from mission.responses import _ResponsesClient
 from mission.submission_evidence import canonical_plan_digest
@@ -71,6 +77,130 @@ def test_actual_transport_model_is_retained_separately_from_requested_model() ->
         assert "Authorization" not in trace.calls[0]
         assert current_trace("another-request") is None
     assert current_trace("request") is None
+
+
+@pytest.mark.parametrize("case", ("complete", "header-timeout", "body-timeout", "http-error"))
+def test_provider_http_phases_survive_request_sql_round_trip(tmp_path: Path, case: str) -> None:
+    """Prove one wire POST per draft and preserve the received HTTP metadata on failure."""
+    posted: list[object] = []
+    release = threading.Event()
+    reply = _response({"accepted": True})
+    reply["id"] = "actual-json-response"
+
+    class Handler(BaseHTTPRequestHandler):
+        """Return a normal response or stall at an explicit response boundary."""
+
+        def log_message(self, format: str, *args: object) -> None:
+            """Keep the fixture's HTTP logs quiet."""
+
+        def do_POST(self) -> None:  # noqa: N802
+            """Count the actual POST and emit only the bytes defined for this scenario."""
+            posted.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            if case == "header-timeout":
+                release.wait(5)
+                return
+            raw = json.dumps(reply).encode("utf-8")
+            self.send_response(429 if case == "http-error" else 200)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("X-Request-Id", "observed-http-request")
+            self.send_header("Set-Cookie", "not-transport-evidence")
+            self.end_headers()
+            self.wfile.write(raw[:1] if case == "body-timeout" else raw)
+            self.wfile.flush()
+            if case == "body-timeout":
+                release.wait(5)
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        settings = _local_settings()
+        settings = replace(
+            settings,
+            provider=replace(settings.provider, base_url=f"http://127.0.0.1:{server.server_port}"),
+        )
+        client = _ResponsesClient(settings, {"OPENAI_API_KEY": "fixture-credential"})
+
+        class WirePlanner(FakePlanner):
+            """Run the actual Responses transport before assembling the deterministic draft."""
+
+            def plan(
+                self,
+                mission_id: str,
+                grounded_intent: GroundedIntent,
+                capability_catalog: CanonicalCapabilityCatalog,
+                grounding_context: GroundingContextSnapshot,
+            ) -> MissionPlan:
+                """Probe the HTTP boundary inside the real engine's Planner trace."""
+                client._request(
+                    model="fixture-standard",
+                    instructions="fixture",
+                    input_text="simulated private instruction",
+                    schema_name="mission_plan_v0",
+                    schema={"type": "object"},
+                    timeout_seconds=1,
+                )
+                return super().plan(
+                    mission_id, grounded_intent, capability_catalog, grounding_context
+                )
+
+        worker = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
+        worker.start()
+        try:
+            controller = FakeController(_inventory(*_fixture_contracts()))
+            engine = _engine(tmp_path, FakeInterpreter([_assessment()]), WirePlanner(), controller)
+            record = engine.create("software HTTP timing", submission_mode="draft_only")
+            assert record.lifecycle == (
+                MissionRequestLifecycle.AWAITING_EXECUTION
+                if case == "complete"
+                else MissionRequestLifecycle.FAILED
+            )
+            assert not controller.submissions
+        finally:
+            release.set()
+            server.shutdown()
+            worker.join(5)
+
+    assert not worker.is_alive()
+    assert len(posted) == 1 and "service_tier" not in cast(JSONObject, posted[0])
+    restored = MissionRequestStore(tmp_path / "requests.sqlite3")
+    evidence = _rows(restored.provenance(record.request_id, limit=64))
+    calls = {
+        call["call_id"]: call
+        for entry in evidence
+        for call in cast(list[JSONObject], entry["provider_calls"])
+    }
+    (call,) = calls.values()
+    assert call["stage"] == "planner"
+    timing = cast(JSONObject, call["http_timing"])
+    assert isinstance(timing["elapsed_ms"], int) and timing["elapsed_ms"] >= 0
+    assert (
+        timing["failure_phase"]
+        == {
+            "complete": None,
+            "header-timeout": "awaiting_headers",
+            "body-timeout": "reading_body",
+            "http-error": "http_status",
+        }[case]
+    )
+    if case == "header-timeout":
+        assert timing["headers_received_ms"] is None
+        assert timing["http_status_code"] is None
+        assert timing["upstream_request_id"] is None
+    else:
+        assert isinstance(timing["headers_received_ms"], int)
+        assert timing["upstream_request_id"] == "observed-http-request"
+        assert timing["http_status_code"] == (429 if case == "http-error" else 200)
+    if case in {"complete", "http-error"}:
+        assert isinstance(timing["body_read_ms"], int)
+    else:
+        assert timing["body_read_ms"] is None
+    assert call["response_id"] == ("actual-json-response" if case == "complete" else None)
+    schema = json.loads(
+        Path("contracts/mission/provenance-v0.1/snapshot.schema.json").read_text(encoding="utf-8")
+    )
+    checked = Draft202012Validator(schema)
+    checked.validate({key: value for key, value in evidence[-1].items() if key != "sequence"})
+    text = json.dumps(call)
+    for value in ("fixture-credential", "simulated private instruction", "not-transport-evidence"):
+        assert value not in text
 
 
 def test_missing_model_and_failed_call_stay_explicitly_unavailable() -> None:
