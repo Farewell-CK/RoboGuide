@@ -356,6 +356,7 @@ def interactive(session: Session) -> int:
             "/mission",
             "/compare",
             "/explain",
+            "/diagnose",
             "/watch",
             "/plan",
             "/run",

@@ -36,6 +36,7 @@ COMMANDS = [
     "/mission",
     "/compare",
     "/explain",
+    "/diagnose",
     "/watch",
     "/watches",
     "/unwatch",

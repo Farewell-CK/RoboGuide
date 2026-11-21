@@ -18,6 +18,7 @@ from mission.request_record import MissionRequestLifecycle
 from roboguide_workbench.actions import MissionActions, checked_request
 from roboguide_workbench.client import ReadOnlyController, WorkbenchError, identifier
 from roboguide_workbench.evidence import QueryStatus, ReadResult
+from roboguide_workbench.mission_diagnosis import read_mission_diagnosis
 from roboguide_workbench.mission_views import render_mission_list
 from roboguide_workbench.persistence import SessionStore
 from roboguide_workbench.plan_view import LIFECYCLE_LABELS, plan_document, plan_overview
@@ -45,6 +46,7 @@ Agent 会查能力、补问和调用 MI；原有权限、风险审批与执行�
   /missions active      仅显示当前 Running、Accepted、Cancelling 或 Unknown 任务
   /mission ID 或 #2      查询任务及各步骤
   /explain ID 或 #2      组合读取任务、绑定与恢复依据
+  /diagnose [ID] [TaskID]  追查取消中或 Unknown 的原执行和停止记录
   /watch [ID]            后台跟踪；/watches 查看，/unwatch ID 停止跟踪
   /plan 目标             只生成计划；/run 目标 按既有审批策略进入执行流程
   /request [ID]         刷新当前或指定的 Mission Request
@@ -534,6 +536,15 @@ class WorkbenchSession(Session):
         self.query_status = "complete" if complete else "partial"
         return ReadResult(result, complete, (component,))
 
+    def diagnose_mission(self, target: str, task_id: str = "") -> ReadResult:
+        """Stage compact diagnostic evidence and the original scoped replies for /raw."""
+        result, raw = read_mission_diagnosis(self.controller, target, task_id)
+        self.last_mission, self.last_node = target, None
+        self.last_raw = raw
+        self.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
+        self.query_status = "complete" if result.complete else "partial"
+        return result
+
     def read_explanation(self, target: str) -> ReadResult:
         """Retain each validated diagnostic read and its explicit availability independently."""
         result = self.read_mission(target)
@@ -619,6 +630,16 @@ class WorkbenchSession(Session):
         """Dispatch explicit commands; model output never enters this method as a write."""
         command, _, argument = text.partition(" ")
         argument = argument.strip()
+        if command == "/diagnose":
+            try:
+                values = shlex.split(argument)
+            except ValueError as error:
+                raise WorkbenchError("用法为 /diagnose [MissionID] [TaskID]。") from error
+            if len(values) > 2:
+                raise WorkbenchError("用法为 /diagnose [MissionID] [TaskID]。")
+            mission_target = self._mission_target(values[0] if values else "")
+            task_id = values[1] if len(values) == 2 else ""
+            return self.diagnose_mission(mission_target, task_id).text
         if command == "/plan-detail":
             if argument or self.shown_draft is None:
                 raise WorkbenchError("请先读取当前请求，取得完整计划后再展开。")

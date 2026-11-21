@@ -303,17 +303,17 @@ def decode_object(raw: str | bytes | bytearray) -> JSONObject:
     return cast(JSONObject, decoded)
 
 
-def identifier(value: str) -> str:
+def identifier(value: str, *, limit: int = 256) -> str:
     """Accept a bounded literal identity, refusing path traversal and control characters."""
     if (
         not isinstance(value, str)
         or not value.strip()
-        or len(value) > 256
+        or len(value) > limit
         or value in {".", ".."}
         or any(ord(char) < 32 or 0x7F <= ord(char) <= 0x9F for char in value)
         or any(0xD800 <= ord(char) <= 0xDFFF for char in value)
     ):
-        raise WorkbenchError("对象 ID 必须为 1–256 字符的有效文本。")
+        raise WorkbenchError(f"对象 ID 必须为 1–{limit} 字符的有效文本。")
     return value
 
 
@@ -473,3 +473,15 @@ class ReadOnlyController:
     def mission_recovery(self, mission_id: str) -> JSONObject:
         """Read the original recovery assessment without triggering recovery or retry."""
         return self._get("/v1/missions/" + quote(identifier(mission_id), safe="") + "/recovery")
+
+    def mission_attempts(self, mission_id: str) -> JSONObject:
+        """Read original execution references under one exact Mission's existing scope."""
+        return self._get(
+            "/v1/missions/" + quote(identifier(mission_id), safe="") + "/execution-attempts"
+        )
+
+    def execution_safety_stop(self, execution_id: str) -> JSONObject:
+        """Read one sourced attempt's stop evidence without changing its phase or ownership."""
+        # Runtime attempt IDs use literal colons as separators in this Controller route.
+        segment = quote(identifier(execution_id, limit=1024), safe=":")
+        return self._get("/v1/executions/" + segment + "/safety-stop")

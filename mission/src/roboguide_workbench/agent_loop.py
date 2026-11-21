@@ -22,6 +22,8 @@ INSTRUCTIONS = """你是 RoboGuide，和用户自然对话，也帮助他们了�
 用户打招呼、感谢、闲聊或问一般知识时，直接简洁自然地回答，不列功能菜单，不调用工具。
 根据完整对话理解用户需要什么；不要求用户选择“聊天”或“查询”模式。
 需要当前节点、能力、Mission 或任务状态时，调用相应只读工具，再依据本轮结果回答。
+排查任务为什么卡住、一直取消中或原执行 Unknown 时，用只读 read_mission_diagnosis。
+没有原始 Mission ID 时先查 read_active_missions。诊断不触发任务变更。
 设备位置、电量、姿态使用 read_state；不知道哪些对象或字段可查时，先 list_state_fields。
 target 必须是用户原始 ID、已显示的对象或本轮目录中的 ID；历史 state_targets/last_state
 仅帮助解析“它”的指代。不要把任务状态、节点健康或设备能力当成电量和位置。
@@ -67,6 +69,7 @@ _READ_LABELS = {
     "read_mission": "正在查看任务详情",
     "search_capabilities": "正在查看节点能力",
     "read_explanation": "正在核对任务运行依据",
+    "read_mission_diagnosis": "正在核对原执行与停止记录",
     "compare_nodes": "正在比较节点能力",
     "list_state_fields": "正在查看设备状态目录",
     "read_state": "正在读取设备状态",
@@ -517,7 +520,8 @@ class AgentConversation:
                 timeout = min(self.router.settings.llm.timeout_seconds, remaining)
                 # State and task lifecycle values are rendered by the host after final checks.
                 protected = any(
-                    item.get("source") in {"read_state", *_ACTION_LABELS} for item in evidence
+                    item.get("source") in {"read_state", "read_mission_diagnosis", *_ACTION_LABELS}
+                    for item in evidence
                 )
                 response: JSONObject
                 if on_delta is not None and callable(stream):

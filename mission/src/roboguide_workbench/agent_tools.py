@@ -107,6 +107,18 @@ _DEFINITIONS = [
         },
     ),
     _function(
+        "read_mission_diagnosis",
+        "只读排查 Mission 为什么取消中，或原执行为什么是 Unknown。最多三次 GET。",
+        {
+            "mission_id": _text_parameter("来自用户、已展示引用或本轮列表的原始 Mission ID。"),
+            "task_id": {
+                "type": "string",
+                "maxLength": 256,
+                "description": "可指定确切的 Task ID。未指定时传空字符串。",
+            },
+        },
+    ),
+    _function(
         "compare_nodes",
         "读取并比较一至四个已经提供的原始节点 ID。",
         {
@@ -330,7 +342,7 @@ class ReadToolAdapter:
         targets: tuple[str, ...] = ()
         if name == "read_node":
             target = self._target(arguments, "node_id", "nodes")
-        elif name in {"read_mission", "read_explanation"}:
+        elif name in {"read_mission", "read_explanation", "read_mission_diagnosis"}:
             target = self._target(arguments, "mission_id", "missions")
         elif name in {"list_state_fields", "read_state"}:
             if name == "list_state_fields" and arguments.get("target") == "":
@@ -395,6 +407,11 @@ class ReadToolAdapter:
                 result = ReadResult(self._shadow.read_mission(target or ""))
             elif name == "read_explanation":
                 result = self._shadow.read_explanation(target or "")
+            elif name == "read_mission_diagnosis":
+                task_id = arguments["task_id"]
+                if not isinstance(task_id, str):
+                    raise WorkbenchError("读取任务诊断需要原始 Task ID 或空字符串。")
+                result = self._shadow.diagnose_mission(target or "", task_id)
             elif name == "compare_nodes":
                 result = ReadResult(self._shadow.read_comparison(targets))
             else:
@@ -419,7 +436,7 @@ class ReadToolAdapter:
             if self._shadow.last_mission not in self._shadow.displayed_missions:
                 self._shadow.last_mission = None
             self._single_mission = None
-        elif name in {"read_mission", "read_explanation"}:
+        elif name in {"read_mission", "read_explanation", "read_mission_diagnosis"}:
             self._single_mission = target
         self._known_nodes.update(self._shadow.displayed_nodes)
         self._known_missions.update(self._shadow.displayed_missions)
@@ -534,12 +551,14 @@ class ReadToolAdapter:
     def read_answer(
         self, evidence: list[JSONObject], *, include_nonstate: bool = False
     ) -> ReadResult | None:
-        """Recheck State and retain independent host reads beside native task receipts."""
+        """Keep State, task diagnosis and independent sibling reads grounded in host evidence."""
         results: list[ReadResult] = []
-        has_state = False
+        requires_host_answer = False
         for item in evidence:
             components = item.get("components")
             source, text = item.get("source"), item.get("text")
+            if source == "read_mission_diagnosis":
+                requires_host_answer = True
             if (
                 not isinstance(components, list)
                 and isinstance(source, str)
@@ -560,7 +579,7 @@ class ReadToolAdapter:
                 if snapshot is None:
                     results.append(self._read_results[read_id])
                     continue
-                has_state = True
+                requires_host_answer = True
                 result = snapshot.render()
                 item["consumption_check"] = {
                     "complete": result.complete,
@@ -568,7 +587,7 @@ class ReadToolAdapter:
                     "fields": cast(JSONValue, list(result.components)),
                 }
                 results.append(result)
-        if not has_state and not include_nonstate or not results:
+        if not results or not (requires_host_answer or include_nonstate):
             return None
         return ReadResult(
             "\n\n".join(result.text for result in results),
