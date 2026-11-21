@@ -198,8 +198,8 @@ pub use physical_entity::{
     PhysicalEntityRegistration, PhysicalEntityRegistrySnapshot, PhysicalEntityRoutingProfile,
 };
 pub use physical_safety::{
-    EXECUTION_SAFETY_METADATA_KEY, ExecutionSafetyProfile, OperationSafetySupport,
-    PHYSICAL_STOP_CONTRACT_SCHEMA_V0_1, PROCESS_EXIT_OBSERVATION_SCHEMA,
+    EXECUTION_SAFETY_METADATA_KEY, ExecutionSafetyProfile, NATURAL_DEVICE_FAILURE_STOP_SOURCE,
+    OperationSafetySupport, PHYSICAL_STOP_CONTRACT_SCHEMA_V0_1, PROCESS_EXIT_OBSERVATION_SCHEMA,
     SAFE_STATE_OBSERVATION_SCHEMA, SafetyAssurance, SafetyStopError, SafetyStopIdentity,
     SafetyStopPhase, SafetyStopRecord, TASK_EFFECT_OBSERVATION_SCHEMA,
 };

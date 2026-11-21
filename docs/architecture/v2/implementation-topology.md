@@ -350,6 +350,9 @@ Memory preparation、use/revoke 和独立进程停止保留各自证据。共享
 拒绝旧 writer；跨分支版本号碰撞不成为迁移授权。软件进程退出仍不证明设备停止。
 自然失败的 hold 收尾只消费当前原始 Failed attempt；Cancelled 不变成 Failed，也不绕过
 Memory handoff 的 binding 保留。停止确认本身不释放正在交接的源 Group。
+已请求停止的设备执行若报告 `Failed`，随后同一会话和代次的独立设备观测可在原期限内确认停稳。
+Controller 检查已声明的证据来源、时效，以及原始失败的接收时间，并沿用现有停止记录格式。
+这项确认只满足停止门槛。替代 Actor 仍需要现有复审或 Control 认可的接替授权。
 Artifact 的单 writer lease 随最后一个应用 store/clone/upload 显式释放；无写入权的子进程
 继承 descriptor 不延长该应用的写入权，也不允许仍有上传时启动第二 writer。
 

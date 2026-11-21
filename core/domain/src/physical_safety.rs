@@ -22,6 +22,10 @@ pub const PROCESS_EXIT_OBSERVATION_SCHEMA: &str = "roboguide.safe-state-observat
 /// Explicit task-owned no-effects evidence; it never establishes a physical stop.
 pub const TASK_EFFECT_OBSERVATION_SCHEMA: &str = "roboguide.safe-state-observation/v0.4";
 
+/// Evidence source for a failed attempt with an independent device stop observation.
+pub const NATURAL_DEVICE_FAILURE_STOP_SOURCE: &str =
+    "natural-failure-and-independent-device-safe-state";
+
 /// Evidence assurance declared by a LocalSystem; a software process never proves device stopping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -312,13 +316,16 @@ impl SafetyStopRecord {
         if &self.identity != identity {
             return Err(SafetyStopError::IdentityConflict);
         }
-        if !self.phase.can_follow(next) {
+        let source = source.into();
+        let observed_natural_failure = self.phase == SafetyStopPhase::StopRequested
+            && next == SafetyStopPhase::SafeStateObserved
+            && source == NATURAL_DEVICE_FAILURE_STOP_SOURCE;
+        if !(self.phase.can_follow(next) || observed_natural_failure) {
             return Err(SafetyStopError::InvalidTransition {
                 current: self.phase,
                 next,
             });
         }
-        let source = source.into();
         let evidence_digest = evidence_digest.into();
         validate_evidence(&source, &evidence_digest)?;
         if received_at < self.requested_at {
