@@ -2365,6 +2365,10 @@ empty placeholders or a top-level `src/`.
 
 ## Build, Test, and Development Commands
 
+The MI urllib transport records optional `http_timing` through request provenance. The loopback
+tests cover header and body stalls, a complete response and an HTTP error, with one POST and
+SQLite readback per case. The optional metadata follows the Mission provenance contract.
+
 ADR-0256 adds opt-in `complete-sources/v0.1` private preflight evidence: Controller v0.4 and
 CLI node-plan-preflight v0.2 bind exact TOML, once-acquired descriptor bytes and the canonical
 resolution base. Legacy v0.3 retains TOML-only meaning. `core/node-service/src/source_io.rs`
