@@ -22,6 +22,9 @@ pub const PROCESS_EXIT_OBSERVATION_SCHEMA: &str = "roboguide.safe-state-observat
 /// Explicit task-owned no-effects evidence; it never establishes a physical stop.
 pub const TASK_EFFECT_OBSERVATION_SCHEMA: &str = "roboguide.safe-state-observation/v0.4";
 
+/// Evidence source for an original failed attempt observed safe without a Cancel receipt.
+pub const NATURAL_DEVICE_FAILURE_SOURCE: &str = "natural-failure-and-independent-device-safe-state";
+
 /// Evidence assurance declared by a LocalSystem; a software process never proves device stopping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -312,13 +315,16 @@ impl SafetyStopRecord {
         if &self.identity != identity {
             return Err(SafetyStopError::IdentityConflict);
         }
-        if !self.phase.can_follow(next) {
+        let source = source.into();
+        let observed_natural_failure = self.phase == SafetyStopPhase::StopRequested
+            && next == SafetyStopPhase::SafeStateObserved
+            && source == NATURAL_DEVICE_FAILURE_SOURCE;
+        if !(self.phase.can_follow(next) || observed_natural_failure) {
             return Err(SafetyStopError::InvalidTransition {
                 current: self.phase,
                 next,
             });
         }
-        let source = source.into();
         let evidence_digest = evidence_digest.into();
         validate_evidence(&source, &evidence_digest)?;
         if received_at < self.requested_at {
@@ -424,6 +430,16 @@ mod tests {
             "sha256:request",
         )
         .expect("record is valid");
+        assert!(matches!(
+            record.advance(
+                &identity,
+                SafetyStopPhase::SafeStateObserved,
+                TimestampMs::new(20),
+                "unbound-device-observer",
+                "sha256:safe-state",
+            ),
+            Err(SafetyStopError::InvalidTransition { .. })
+        ));
         assert!(!record.may_release_ownership());
         record
             .advance(
@@ -508,5 +524,38 @@ mod tests {
             Err(SafetyStopError::IdentityConflict)
         );
         assert!(!record.may_release_ownership());
+    }
+
+    /// Natural device failure may reach SafeStateObserved without synthetic Cancel acceptance.
+    #[test]
+    fn natural_safe_state_transition_is_valid() {
+        let identity = identity();
+        let mut record = SafetyStopRecord::new(
+            identity.clone(),
+            TimestampMs::new(10),
+            TimestampMs::new(100),
+            "controller",
+            "sha256:request",
+        )
+        .expect("record is valid");
+        record
+            .advance(
+                &identity,
+                SafetyStopPhase::SafeStateObserved,
+                TimestampMs::new(20),
+                NATURAL_DEVICE_FAILURE_SOURCE,
+                "sha256:safe-state",
+            )
+            .expect("natural device safe state is valid");
+        record
+            .advance(
+                &identity,
+                SafetyStopPhase::StopConfirmed,
+                TimestampMs::new(20),
+                NATURAL_DEVICE_FAILURE_SOURCE,
+                "sha256:confirmed",
+            )
+            .expect("confirmation is valid");
+        assert!(record.may_release_ownership());
     }
 }

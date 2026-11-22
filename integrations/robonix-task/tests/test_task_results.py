@@ -430,6 +430,80 @@ class TaskResults(unittest.TestCase):
                 app.close()
                 fixture.close()
 
+    def test_device_safe_state_requires_current_post_terminal_chassis_and_failed_basis(self):
+        """Reject stale, pre-terminal or unknown chassis evidence."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = TaskFixture(root, mode="failed-task")
+            app = Adapter(
+                root / "journal",
+                Liaison(fixture.endpoint, "rg/test", "local:test"),
+                allowed_operations=("lab.protocol-probe@v1",),
+                enabled=True,
+                task_results=True,
+                task_profile="test-profile",
+            )
+            try:
+                body = request()
+                body["invocation"] = body["invocation"]["intent"]
+                body["invocation"]["operation"] = "lab.protocol-probe@v1"
+                body["invocation"]["parameters"] = {"profile": "test-profile"}
+                body["invocation"]["execution_generation"] = 3
+                first = app.submit(body)
+                wait_for(lambda: app.status(first["handle"])["state"] == "FAILED")
+                wait_for(lambda: not app.jobs)
+                now_ns = time.time_ns() + 1_000_000_000
+                # Refuse absent, stale, unknown, and pre-terminal chassis readings.
+                for bad in (
+                    None,
+                    {
+                        "availability": "stale",
+                        "received_at_ns": now_ns,
+                        "value": {"stale": False, "posture": "down"},
+                    },
+                    {
+                        "availability": "current",
+                        "received_at_ns": now_ns,
+                        "value": {"stale": True, "posture": "down"},
+                    },
+                    {
+                        "availability": "current",
+                        "received_at_ns": now_ns,
+                        "value": {"stale": False, "posture": "unknown"},
+                    },
+                    {
+                        "availability": "current",
+                        "received_at_ns": 1,
+                        "value": {"stale": False, "posture": "down"},
+                    },
+                ):
+                    self.assertEqual(
+                        app.journal.device_safe_state_observations(bad), {"observations": []}
+                    )
+                good_chassis = {
+                    "availability": "current",
+                    "received_at_ns": now_ns,
+                    "value": {"stale": False, "posture": "down"},
+                }
+                self.assertEqual(
+                    app.journal.device_safe_state_observations(good_chassis),
+                    {
+                        "observations": [
+                            {
+                                "execution_id": body["attempt_id"],
+                                "execution_generation": 3,
+                                "command_id": None,
+                                "terminal_state": "FAILED",
+                                "safe_state": True,
+                                "assurance": "device-observation",
+                            }
+                        ]
+                    },
+                )
+            finally:
+                app.close()
+                fixture.close()
+
 
 if __name__ == "__main__":
     unittest.main()
