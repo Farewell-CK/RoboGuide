@@ -5,15 +5,15 @@ use domain::{NodeHealth, TimestampMs};
 use integration::grpc::v0_4::{ExecutionPhase, NodeMessage, node_message::Message as NodePayload};
 
 /// Keeps a running resource-bearing Mission and isolated persistence for recovery tests.
-pub(super) struct Fixture {
+pub(crate) struct Fixture {
     /// Keeps the isolated SQLite event database alive.
     _directory: tempfile::TempDir,
     /// Original application authority, with one independently bound role.
-    pub(super) controller: ControllerState,
+    pub(crate) controller: ControllerState,
     /// Shared durable event and checkpoint sink.
-    pub(super) events: state::SqliteEventLog,
+    pub(crate) events: state::SqliteEventLog,
     /// Original physical attempt selected by actual scheduling.
-    pub(super) attempt: runtime::ExecutionAttemptSnapshot,
+    pub(crate) attempt: runtime::ExecutionAttemptSnapshot,
     /// Stable evidence correlation.
     pub(super) correlation: domain::CorrelationId,
 }
@@ -26,17 +26,27 @@ impl Fixture {
 
     /// Builds the same real dispatch with independently varied deployment stop/continuation facts.
     fn with_support(support: Option<(&str, &str)>) -> Self {
+        Self::with_workflow(support, false)
+    }
+
+    /// Accepts a synthetic workflow with an optional predecessor using the same runtime path.
+    fn with_workflow(support: Option<(&str, &str)>, predecessor: bool) -> Self {
         let directory = tempfile::tempdir().expect("isolated directory");
         let events =
             state::SqliteEventLog::open(directory.path().join("events.sqlite3")).expect("opens");
         let correlation = domain::CorrelationId::new("confirmed-stop-test").expect("correlation");
         let mut control = control::ControlPlane::new();
         let mut state = state::InMemorySharedNodeState::new();
+        let operations: &[&str] = if predecessor {
+            &["work", "prepare"]
+        } else {
+            &["work"]
+        };
         for (node, resource) in [("node-a", "cpu-a"), ("node-b", "cpu-b")] {
             control
                 .register_node(
                     &mut state,
-                    recovery_driver_node_with_support(node, resource, support),
+                    recovery_driver_node_with_operations(node, resource, support, operations),
                     domain::NodeStatus::new(NodeHealth::Online, TimestampMs::new(1)),
                     TimestampMs::new(1),
                     &correlation,
@@ -46,7 +56,7 @@ impl Fixture {
         }
         let mut orchestrator = MissionOrchestrator::new();
         let contract = serde_json::json!({"namespace": "compute", "name": "work", "version": "v1"});
-        let plan = decode_mission_plan(&serde_json::json!({
+        let mut plan = serde_json::json!({
             "schema_version": "roboguide.mission-plan/v0.3",
             "mission": {"id": "mission-recovery-driver", "objective": "recover safely"},
             "contexts": [{"id": "recovery-context", "roles": [{"id": "worker", "actor": "worker"}], "relations": []}],
@@ -54,7 +64,24 @@ impl Fixture {
                 "roles": [{"id": "worker", "actor": "worker", "capability": "compute", "contract": contract,
                     "context_role": "worker", "resource_scope": "task", "resource_kind": "compute",
                     "execution": {"capability_contract": contract, "parameters": {}}}]}]
-        }).to_string()).expect("canonical plan with serializable continuity");
+        });
+        if predecessor {
+            let tasks = plan["tasks"].as_array_mut().expect("fixture tasks");
+            let mut prepare = tasks[0].clone();
+            prepare["id"] = "prepare".into();
+            prepare["roles"][0]["actor"] = "preparer".into();
+            prepare["roles"][0]["context_role"] = "preparer".into();
+            prepare["roles"][0]["contract"]["name"] = "prepare".into();
+            prepare["roles"][0]["execution"]["capability_contract"]["name"] = "prepare".into();
+            tasks[0]["depends_on"] = serde_json::json!(["prepare"]);
+            tasks.insert(0, prepare);
+            plan["contexts"][0]["roles"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({"id":"preparer","actor":"preparer"}));
+        }
+        let plan = decode_mission_plan(&plan.to_string())
+            .expect("canonical plan with serializable continuity");
         orchestrator
             .submit(
                 plan,
@@ -113,8 +140,54 @@ impl Fixture {
         fixture
     }
 
+    /// Finishes the first real Task and starts only its successor on the original assigned node.
+    pub(crate) fn with_completed_predecessor() -> Self {
+        let mut fixture = Self::with_workflow(Some(("execution", "repeat-after-stop")), true);
+        assert_eq!(
+            fixture.attempt.command().task_ref().task_id().as_str(),
+            "prepare"
+        );
+        fixture.fact(2, ExecutionPhase::Completed, 5);
+        fixture.events.begin_batch().unwrap();
+        apply_runtime_outcomes(
+            &mut fixture.controller,
+            TimestampMs::new(5),
+            &fixture.correlation,
+            &mut fixture.events.clone(),
+        )
+        .expect("complete the original predecessor");
+        drive_ready_tasks(
+            &mut fixture.controller,
+            TimestampMs::new(5),
+            &fixture.correlation,
+            &mut fixture.events.clone(),
+        )
+        .expect("stage only the successor");
+        fixture.events.commit_batch().unwrap();
+        fixture.attempt = fixture
+            .controller
+            .bridge
+            .attempt_history()
+            .into_iter()
+            .find(|attempt| attempt.command().task_ref().task_id().as_str() == "work")
+            .expect("successor has an attempt");
+        fixture.fact(1, ExecutionPhase::Started, 6);
+        fixture
+    }
+
     /// Uses the real Node fact reducer and application activation path, without any robot call.
     pub(super) fn fact(&mut self, sequence: u64, phase: ExecutionPhase, received: u64) {
+        self.fact_with_reason(sequence, phase, "actual local result", received);
+    }
+
+    /// Supplies an original node fault label through the normal Runtime message path.
+    pub(crate) fn fact_with_reason(
+        &mut self,
+        sequence: u64,
+        phase: ExecutionPhase,
+        reason: &str,
+        received: u64,
+    ) {
         self.controller
             .bridge
             .consume(
@@ -128,7 +201,7 @@ impl Fixture {
                                 execution_id: self.attempt.execution_id().into(),
                                 last_sequence: sequence,
                                 phase: phase as i32,
-                                reason: "actual local result".into(),
+                                reason: reason.into(),
                             },
                         )),
                     },
