@@ -9,12 +9,33 @@ from typing import cast
 
 from mission.models import JSONObject
 
+from roboguide_workbench.actions import checked_request
 from roboguide_workbench.client import ToolRefusal, WorkbenchError
 from roboguide_workbench.device_context import context_nodes, mentioned, task_context
 from roboguide_workbench.evidence import ReadResult
-from roboguide_workbench.task_context import TaskDialogue, new_task_scope
+from roboguide_workbench.task_context import (
+    TaskDialogue,
+    choice_number,
+    choice_prompt,
+    new_task_scope,
+    task_options,
+)
 from roboguide_workbench.views import safe_text
 from roboguide_workbench.workspace import WorkbenchSession, draft_reference
+
+
+def _standalone_plan_check(text: str) -> bool:
+    """Qualify the common inspection questions without scanning across action clauses."""
+    normalized = "".join(text.split()).rstrip("？?。！!")
+    return bool(
+        re.fullmatch(
+            r"(?:请|帮我)?(?:先|只|仅)?(?:检查|核对|评估)(?:一下)?"
+            r"(?:(?:当前|这个|这份|该)的?)?计划(?:的)?(?:执行条件)?"
+            r"|(?:(?:当前|这个|这份|该)的?)?计划(?:现在)?"
+            r"(?:能否|是否能|为什么不能|为何不能|为什么没法|能|可以)(?:执行|运行)(?:吗|呢)?",
+            normalized,
+        )
+    )
 
 
 def definitions() -> list[JSONObject]:
@@ -23,8 +44,22 @@ def definitions() -> list[JSONObject]:
     shapes: tuple[tuple[str, str, JSONObject], ...] = (
         (
             "clarify_task",
-            "任务缺少区域、目标或条件时自然追问；保存完整任务上下文，不创建或执行任务。",
-            {"question": {"type": "string", "minLength": 1, "maxLength": 2000}},
+            "任务缺少区域、目标或条件时自然追问。给出已经从用户或资料确认的候选参数，"
+            "没有可靠候选时 options 传空数组。选项不能用于执行、审批或取消任务。",
+            {
+                "question": {
+                    "type": "string",
+                    "description": "只写需要回答的问题。选项和编号由 Chat 展示。",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                },
+                "options": {
+                    "type": "array",
+                    "minItems": 0,
+                    "maxItems": 4,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 160},
+                },
+            },
         ),
         (
             "start_task",
@@ -46,6 +81,12 @@ def definitions() -> list[JSONObject]:
             "read_request",
             "查询当前或明确指定的 Request；空 ID 使用本会话当前任务。",
             {"request_id": {"type": "string", "maxLength": 256}},
+        ),
+        (
+            "check_plan",
+            "检查已完整显示的原计划版本是否有合同或初始部署阻塞。"
+            "当用户问为什么不能执行、能否执行或要检查计划时使用。该工具不提交或审批。",
+            {},
         ),
         (
             "execute_plan",
@@ -98,6 +139,11 @@ class TaskTools:
         self.dialogue.append(question, session.input_turn_id or "current")
         self.input_request_id = references.get("request_id")
         self.input_draft = copy.deepcopy(references.get("draft"))
+        index = choice_number(question)
+        choices = task_options(references.get("clarification_options"))
+        self.choice_text = (
+            choices[index - 1] if index is not None and 1 <= index <= len(choices) else None
+        )
         self.started_request_id = session.request_id
         self.current_request_id = (
             self.input_request_id if isinstance(self.input_request_id, str) else None
@@ -178,6 +224,18 @@ class TaskTools:
             session.actions.connection.timeout,
         )
         prefix = ""
+        capability_details: str | None = None
+        if name in {"execute_plan", "approve_plan", "cancel_task", "start_task", "answer_request"}:
+            if _standalone_plan_check(self.question):
+                raise ToolRefusal("本轮问的是计划检查，先给出检查结果。")
+            index = choice_number(self.question)
+            if index is not None and (
+                name in {"execute_plan", "approve_plan", "cancel_task"}
+                or self.choice_text is None
+                or name == "start_task"
+                and arguments.get("mode") == "run"
+            ):
+                raise ToolRefusal("序号只能补充已显示的问题。执行、审批或取消需要明确说明。")
         if name in {"execute_plan", "approve_plan"}:
             if re.search(
                 r"不要|不执行|不批准|不审批|不同意|先不|别执行|别批准|别审批|勿执行|勿批准",
@@ -195,9 +253,14 @@ class TaskTools:
             if limit == "discussion" or limit == "plan" and arguments["mode"] == "run":
                 raise ToolRefusal("用户要求讨论或仅规划，不能开启执行流程；可继续补充或仅规划。")
             original = self.dialogue.instruction()
+            if self.choice_text is not None:
+                original += "\n\n对已展示问题的参数选择（用户原始回复见上）： " + self.choice_text
+                if len(original.encode()) > 32_000:
+                    raise ToolRefusal("任务原文超出完整交接上限。")
         if name not in {
             "read_request",
             "observe_operation",
+            "check_plan",
             "clarify_task",
             "show_plan",
         } and re.fullmatch(
@@ -207,9 +270,19 @@ class TaskTools:
         ):
             raise ToolRefusal("普通问候、感谢或应答不是创建、执行或审批任务的要求。")
         if name == "clarify_task":
+            question = cast(str, arguments["question"]).strip()
+            raw_options = arguments.get("options", [])
+            options = task_options(raw_options)
+            if not question or (raw_options and not options):
+                raise ToolRefusal("追问必须明确，候选项须为不重复的单行文本。")
             session.task_dialogue.pinned = True
             session.checkpoint()
-            result = ReadResult("需要补充：" + safe_text(cast(str, arguments["question"])))
+            session.offered_choices = options
+            result = ReadResult(
+                "需要补充："
+                + (choice_prompt(question, options) if options else safe_text(question)),
+                wait_for_user=bool(options),
+            )
             self.results.append(result)
             return result
         if name == "show_plan":
@@ -220,6 +293,34 @@ class TaskTools:
             self.results.append(result)
             self.owns_selection = True
             return result
+        if name == "check_plan":
+            self._require_input_request()
+            original_draft = self.original_draft
+            if (
+                original_draft is None
+                or self.input_draft != draft_reference(original_draft)
+                or session.shown_draft != original_draft
+                or session.acknowledged_draft != original_draft
+            ):
+                raise ToolRefusal("请先查看当前完整计划，才能核对这个版本的执行条件。")
+            try:
+                session.actions.connection.timeout = min(mission_timeout, remaining / 3)
+                session.controller.timeout = min(controller_timeout, remaining * 2 / 3)
+                checked = session.check_current_plan(original_draft, show_update=False)
+            finally:
+                session.actions.connection.timeout = mission_timeout
+                session.controller.timeout = controller_timeout
+            result = ReadResult(
+                checked.summary or checked.text,
+                checked.complete,
+                tuple(
+                    {key: value for key, value in component.items() if key != "response"}
+                    for component in checked.components
+                ),
+                detail=checked.text,
+            )
+            self.results.append(result)
+            return result
         try:
             if name == "start_task":
                 progress = getattr(session, "progress", None)
@@ -228,7 +329,8 @@ class TaskTools:
                 session.controller.timeout = min(controller_timeout, remaining)
                 try:
                     raw = session.controller.inventory()
-                    prefix = task_context(raw, original) + "\n\n"
+                    capability_details = task_context(raw, original)
+                    prefix = capability_details + "\n\n"
                     self.known_nodes.update(node.node_id for node in context_nodes(raw, original))
                 except (ValueError, OSError) as error:
                     prefix = "当前设备能力未能核对：" + str(error) + "；执行条件保持未知。\n\n"
@@ -237,7 +339,8 @@ class TaskTools:
                 self._require_input_request(allow_named_edit=True)
                 if session.request_id is None:
                     raise ToolRefusal("当前没有可补充的任务 Request；请先明确要开始的任务。")
-                command = "/answer " + self.question
+                selected = "\n所选参数：" + self.choice_text if self.choice_text is not None else ""
+                command = "/answer " + self.question + selected
             elif name == "read_request":
                 target = cast(str, arguments["request_id"]) or self.current_request_id
                 if target is None:
@@ -307,16 +410,24 @@ class TaskTools:
                 "请求已被 Controller 接纳；实际执行进度用 /mission 或 /watch。",
                 "请求已被 Controller 接纳；可以继续询问实际执行进度。",
             )
-            result = ReadResult(prefix + text)
+            summary = text if capability_details else None
+            if name == "start_task" and session.last_raw is not None:
+                receipt = checked_request(session.last_raw)
+                if receipt.submission_intent and receipt.submission_intent.mode == "draft_only":
+                    warning = "\n\n" + prefix.strip() if prefix and not capability_details else ""
+                    summary = "仅规划请求已收到。\n" + text + warning
+            result = ReadResult(prefix + text, summary=summary, detail=capability_details)
             self.results.append(result)
             return result
         finally:
             session.controller.timeout = controller_timeout
             session.actions.connection.timeout = mission_timeout
 
-    def answer(self, evidence: list[JSONObject]) -> str | None:
-        """Keep full actual receipts and unresolved task parts independently of model wording."""
-        parts = [result.text for result in self.results]
+    def answer(self, evidence: list[JSONObject], *, compact: bool = False) -> str | None:
+        """Keep receipts and unresolved task parts independently of model wording."""
+        parts = [
+            (result.summary or result.text) if compact else result.text for result in self.results
+        ]
         names = {cast(str, tool["name"]) for tool in definitions()}
         for item in evidence:
             source, text = item.get("source"), item.get("text")

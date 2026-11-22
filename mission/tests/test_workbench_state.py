@@ -290,7 +290,30 @@ def test_conflicting_registered_objects_do_not_select_the_first_value(
     declarations.append(other)
     result = read.render()
     assert not result.complete and all(row["status"] == "conflict" for row in result.components)
-    assert "来源有歧义" in result.text
+    assert result.text.count("来源有歧义") == 1
+    for target in ("entity-dog2", "entity-other"):
+        assert result.text.count(f"/state object:{target} battery position posture") == 1
+    assert all(len(cast(list[JSONObject], row["candidates"])) == 2 for row in result.components)
+
+
+def test_discovery_groups_supported_and_unsupported_exports_for_one_object() -> None:
+    """Keep one selectable object heading and its real fields despite extra registrations."""
+    catalog, _, _ = fixture()
+    declarations = cast(
+        list[JSONObject], cast(list[JSONObject], catalog["nodes"])[0]["state_exports"]
+    )
+    for index in range(2):
+        unknown = copy.deepcopy(declarations[0])
+        unknown["export_id"] = f"vendor-{index}"
+        unknown["payload_schema"] = "vendor.new-state/v9"
+        declarations.append(unknown)
+    result, targets = discover(catalog)
+    assert result.complete and targets == ["object:entity-dog2"]
+    assert result.text.count("1. object:entity-dog2") == 1
+    assert "2 个格式尚未接入解释器" in result.text
+    assert "/state object:entity-dog2 battery position posture" in result.text
+    assert "node:dog2/physical-observer" in result.text
+    assert len(declarations) == 3
 
 
 def test_discovery_preserves_unknown_schemas_without_fabricating_fields() -> None:

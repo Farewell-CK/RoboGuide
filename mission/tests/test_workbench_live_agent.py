@@ -367,6 +367,7 @@ def test_lost_native_task_response_observes_the_original_command_without_reposti
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Actual committed MI work survives response loss and a model's repeated start request."""
+    from roboguide_workbench.activity import TurnActivity, displayed_activity
     from roboguide_workbench.cli import display_question
 
     monkeypatch.setattr(sys, "stdout", io.StringIO())
@@ -392,7 +393,22 @@ def test_lost_native_task_response_observes_the_original_command_without_reposti
             return actual_post(path, body, key)
 
         monkeypatch.setattr(session.actions, "_post", lose_response)
+        # display_question owns the exact ID, so bind the recorder only once the
+        # foreground display is active, just as the interactive terminal does.
+        original_ask = session.ask
+
+        def traced(question: str) -> str:
+            """Attach the test audit to the display acknowledgement for this exact turn."""
+            assert session.display_turn_id is not None
+            session.activity = TurnActivity(session.display_turn_id, str)
+            return original_ask(question)
+
+        monkeypatch.setattr(session, "ask", traced)
         display_question(session, "先只规划巡检")
+        recorded = displayed_activity(session.store.data)
+        assert len(recorded) == 1
+        tools = cast(list[JSONObject], recorded[0]["tools"])
+        assert [tool["status"] for tool in tools] == ["unknown", "complete", "reused"]
         assert posts == ["/v1/mission-requests"]
         commands = cast(list[JSONObject], session.store.data["commands"])
         assert len(commands) == 1 and commands[0]["state"] == "complete"

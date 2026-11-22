@@ -169,9 +169,19 @@ def test_context_budget_preserves_recent_message_order() -> None:
 
 
 def test_watch_runs_beside_queries_without_changing_selection(tmp_path: Path) -> None:
-    """A background watch reports changes while another query proceeds and preserves ordinals."""
+    """Background metadata changes leave the output quiet while foreground reads still work."""
+
+    class TickingReader(ObservedController):
+        """Advance an observation clock without changing the visible Mission."""
+
+        def mission(self, mission_id: str) -> JSONObject:
+            """Return a fresh envelope around the same Mission and Task states."""
+            observed = super().mission(mission_id)
+            observed["observed_at_ms"] = len(self.reads)
+            return observed
+
     store = SessionStore(tmp_path / "sessions", "watch", {}, False)
-    reader = ObservedController()
+    reader = TickingReader()
     session = WorkbenchSession(reader, no_model, store, MissionActions(reader, store))
     session.displayed_nodes = ["original"]
     rendered: list[str] = []
@@ -181,12 +191,12 @@ def test_watch_runs_beside_queries_without_changing_selection(tmp_path: Path) ->
         manager = WatchManager(session, rendered.append, interval=0.01, samples=5)
         manager.start("m1")
         await asyncio.to_thread(session.ask, "/missions")
-        await asyncio.sleep(0.03)
-        await manager.stop()
+        await asyncio.gather(*list(manager.tasks.values()))
         assert not manager.tasks
 
     try:
         asyncio.run(run())
+        assert reader.reads.count("mission:m1") == 5
         assert len(rendered) == 1 and "m1" in rendered[0]
         assert session.displayed_nodes == ["original"]
         assert store.data["commands"] == []

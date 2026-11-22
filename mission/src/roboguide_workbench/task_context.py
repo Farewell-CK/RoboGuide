@@ -12,6 +12,7 @@ from typing import Literal, cast
 from mission.models import JSONObject, JSONValue
 
 from roboguide_workbench.client import ToolRefusal, WorkbenchError
+from roboguide_workbench.views import safe_text
 
 SCHEMA = "roboguide.chat-task-context/v0.1"
 MAX_CONTEXT_BYTES = 64_000
@@ -67,6 +68,61 @@ def new_task_scope(text: str) -> bool:
         and bool(re.search(r"新任务|另一个任务|重新开始|换个任务|\bnew task\b", clause))
         for clause in _clauses(text)
     )
+
+
+def choice_number(text: str) -> int | None:
+    """Recognize a standalone selection, separate from prose, commands or a distance."""
+    match = re.fullmatch(
+        r"(?:选\s*)?(?:第\s*|#\s*)?([0-9]{1,3}|[一二两三四五六七八九])"
+        r"(?:\s*[个条项])?\s*[。.!！]?",
+        text.strip(),
+    )
+    if match is None:
+        return None
+    value = match[1]
+    return (
+        int(value) if value.isascii() else "一二三四五六七八九".index(value.replace("两", "二")) + 1
+    )
+
+
+def task_options(value: object) -> tuple[str, ...]:
+    """Return bounded simple labels; malformed or ambiguous candidates cannot be selected."""
+    if not isinstance(value, list) or not 1 <= len(value) <= 4:
+        return ()
+    options: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not 1 <= len(item.strip()) <= 160:
+            return ()
+        label = item.strip()
+        if safe_text(label) != label or label.startswith("/") or label in options:
+            return ()
+        options.append(label)
+    return tuple(options)
+
+
+def choice_prompt(question: str, options: tuple[str, ...]) -> str:
+    """Render candidate labels as information, with free-form replies always available."""
+    lines = [safe_text(question)]
+    lines.extend(f"{number}. {option}" for number, option in enumerate(options, 1))
+    lines.append("回复序号，也可以直接描述你的要求。")
+    return "\n".join(lines)
+
+
+def latest_task_options(messages: object, context_id: str) -> tuple[str, ...]:
+    """Use only the latest acknowledged question in the same original task dialogue."""
+    if not isinstance(messages, list):
+        return ()
+    for row in reversed(messages):
+        if (
+            isinstance(row, dict)
+            and row.get("role") == "assistant"
+            and row.get("displayed") is True
+        ):
+            choices = row.get("clarification")
+            if isinstance(choices, dict) and choices.get("context_id") == context_id:
+                return task_options(choices.get("options"))
+            return ()
+    return ()
 
 
 @dataclass

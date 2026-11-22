@@ -50,10 +50,12 @@ class DisplayTurn:
                 raise WorkbenchError("已有前台显示尚未收尾。")
             self.turn_id = uuid.uuid4().hex
             self.states, self.last_state = list(session.displayed_states), session.last_state
+            self.diagnosis_selection = session.diagnosis_selection
             session.display_turn_id = self.turn_id
             session.reference_checkpoint = {
                 "nodes": list(self.nodes),
                 "missions": list(self.missions),
+                "diagnosis_selection": self.diagnosis_selection,
                 "last_node": self.last_node,
                 "last_mission": self.last_mission,
                 "states": list(self.states),
@@ -109,6 +111,7 @@ class DisplayTurn:
         session.last_raw, session.last_read_at = self.last_raw, self.last_read_at
         if isinstance(session, WorkbenchSession):
             session.displayed_missions = list(self.missions)
+            session.diagnosis_selection = self.diagnosis_selection
             session.displayed_states, session.last_state = list(self.states), self.last_state
             session.reference_checkpoint = None
             try:
