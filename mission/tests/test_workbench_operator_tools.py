@@ -12,6 +12,7 @@ from typing import cast
 import pytest
 from mission.deployment_assessment import plan_body_digest
 from mission.models import JSONObject
+from mission.plan_assessment import TIMING_PREVIEW_SCHEMA
 from roboguide_workbench import preflight
 from roboguide_workbench.actions import checked_request
 from roboguide_workbench.cli import display_question
@@ -47,7 +48,7 @@ def test_plan_check_preserves_original_draft_and_cannot_submit(
             paths.append(url)
             if url.endswith("/validate-plan?timing=v0.1"):
                 return {
-                    "schema_version": preflight.TIMING_PREVIEW_SCHEMA,
+                    "schema_version": TIMING_PREVIEW_SCHEMA,
                     "assessment": {
                         "schema_version": "roboguide.plan-validation/v0.1",
                         "scope": "published-contracts",
