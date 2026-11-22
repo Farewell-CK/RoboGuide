@@ -302,7 +302,7 @@ def test_mission_discovery_comparison_diagnostics_and_watch(tmp_path: Path) -> N
         assert "其它合同" in session.ask("/compare")
         rendered: list[str] = []
         session.watch("m1", rendered.append, interval=0, samples=2)
-        assert len(rendered) == 2 and reader.reads[-2:] == ["mission:m1", "mission:m1"]
+        assert len(rendered) == 1 and reader.reads[-2:] == ["mission:m1", "mission:m1"]
         assert store.data["commands"] == []
     finally:
         store.close()

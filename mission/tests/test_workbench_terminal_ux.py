@@ -247,7 +247,7 @@ def test_partial_reply_has_a_visible_turn_status(
         prompt.install(monkeypatch)
         assert asyncio.run(terminal.interactive(session)) == 0
         assert "── RG · 助手 · 部分结果" in output.getvalue()
-        assert "本轮结束 · 部分结果" in output.getvalue()
+        assert "本轮结束" not in output.getvalue()
         assert session.query_status == "partial" and controller.submissions == []
 
 
@@ -257,3 +257,21 @@ def test_pending_preview_fits_chinese_terminal_cells() -> None:
     preview = terminal._message_preview(original, 18)
     assert get_cwidth(preview) <= 18 and preview.endswith("…")
     assert "\n" not in preview and "\\u000a" not in preview
+
+
+def test_local_snapshot_commands_preserve_the_conversation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Render the original snapshots without adding them to persisted dialogue."""
+    output = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", output)
+    with workbench(tmp_path) as (session, controller):
+        display_question(session, "/nodes")
+        before = session.store.path.read_bytes()
+        for _ in range(3):
+            display_question(session, "/history")
+            display_question(session, "/raw")
+        assert session.store.path.read_bytes() == before
+        assert session.previous_question == "/nodes" and session.query_status == "complete"
+        assert "历史查询" in output.getvalue() and '"text": "/nodes"' in output.getvalue()
+        assert controller.submissions == []

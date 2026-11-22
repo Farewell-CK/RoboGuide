@@ -15,6 +15,7 @@ from mission.models import JSONObject, JSONValue
 from roboguide_workbench.client import WorkbenchError
 from roboguide_workbench.evidence import QueryStatus, ReadResult
 from roboguide_workbench.routing import QUERY_SCHEMA, Query, ResponsesRouter, extract_response
+from roboguide_workbench.session import LOCAL_SNAPSHOT_COMMANDS
 from roboguide_workbench.views import safe_text
 
 READS = frozenset(
@@ -445,12 +446,20 @@ def facts(evidence: list[JSONObject]) -> str:
 
 
 def bounded_history(messages: object) -> list[JSONObject]:
-    """Bound original inputs and acknowledged replies; never infer legacy display."""
+    """Bound acknowledged dialogue, excluding local snapshots recorded by older clients."""
     if not isinstance(messages, list):
         return []
+    dialogue: list[object] = []
+    local_snapshot = False
+    for item in messages[-40:]:
+        if isinstance(item, dict) and item.get("role") == "user":
+            text = item.get("text")
+            local_snapshot = isinstance(text, str) and text in LOCAL_SNAPSHOT_COMMANDS
+        if not local_snapshot:
+            dialogue.append(item)
     selected: list[JSONObject] = []
     size = 0
-    for item in reversed(messages[-20:]):
+    for item in reversed(dialogue[-20:]):
         if not isinstance(item, dict):
             continue
         text = item.get("text")

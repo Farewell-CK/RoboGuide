@@ -9,6 +9,7 @@ from typing import cast
 
 import pytest
 from mission.models import JSONObject, JSONValue
+from roboguide_workbench.activity import TurnActivity
 from roboguide_workbench.agent_loop import AgentConversation
 from roboguide_workbench.evidence import ReadResult
 from roboguide_workbench.provider_config import model_settings
@@ -222,7 +223,14 @@ def test_reused_call_id_and_repeated_read_do_not_reissue_http(call_id: str) -> N
         reads.append(name)
         return ReadResult("已有两个节点")
 
-    result = _agent(transport).answer("查询", {}, [], read, tool_definitions=TOOLS)
+    activity = TurnActivity("fixture", str)
+    result = _agent(transport).answer(
+        "查询", {}, [], read, tool_definitions=TOOLS, activity=activity
+    )
+    assert [row["status"] for row in activity.rows] == (
+        ["complete"] if call_id == "call-1" else ["complete", "reused"]
+    )
+    assert activity.rows[-1]["reference"] == "E1"
     assert reads == ["read_cluster"] and result.status == (
         "partial" if call_id == "call-1" else "complete"
     )

@@ -16,15 +16,22 @@ from mission.models import JSONObject, JSONValue
 from mission.request_record import MissionRequestLifecycle
 
 from roboguide_workbench.actions import MissionActions, checked_request
+from roboguide_workbench.activity import ACTIVITY_KEY, TurnActivity, append_activity
 from roboguide_workbench.client import ReadOnlyController, WorkbenchError, identifier
-from roboguide_workbench.evidence import QueryStatus, ReadResult
+from roboguide_workbench.evidence import (
+    QueryStatus,
+    ReadResult,
+    command_count,
+    new_pending_command,
+)
+from roboguide_workbench.mission_diagnosis import read_mission_diagnosis
 from roboguide_workbench.mission_views import render_mission_list
 from roboguide_workbench.persistence import SessionStore
 from roboguide_workbench.plan_view import LIFECYCLE_LABELS, plan_document, plan_overview
 from roboguide_workbench.routing import Query, Router
-from roboguide_workbench.session import HELP, Session
+from roboguide_workbench.session import HELP, LOCAL_SNAPSHOT_COMMANDS, Session
 from roboguide_workbench.state_queries import choices, discover, fields, read_state
-from roboguide_workbench.task_context import TaskDialogue
+from roboguide_workbench.task_context import TaskDialogue, latest_task_options
 from roboguide_workbench.views import inventory_view, render_mission, render_nodes, safe_text
 
 EXTRA_HELP = """可以直接提问：有哪些设备？dog2 还有多少电？它在哪里？当前有哪些任务？
@@ -32,6 +39,7 @@ EXTRA_HELP = """可以直接提问：有哪些设备？dog2 还有多少电？�
 Agent 会查能力、补问和调用 MI；原有权限、风险审批与执行准入照常检查。
 新计划与修改版本会完整展示；查询已展示且未变化的计划时显示简洁进度。
 直接说“展开计划”可再次查看完整参数。
+排障也可以直接问“这个任务为什么还在取消中？”，有多个候选时回复序号。
 
 设备与状态（无需模型）：
   /nodes、/node ID       查看节点；/node #2 查询上次展示的第二个节点
@@ -45,6 +53,7 @@ Agent 会查能力、补问和调用 MI；原有权限、风险审批与执行�
   /missions active      仅显示当前 Running、Accepted、Cancelling 或 Unknown 任务
   /mission ID 或 #2      查询任务及各步骤
   /explain ID 或 #2      组合读取任务、绑定与恢复依据
+  /diagnose [ID] [TaskID]  追查取消中或 Unknown 的原执行和停止记录
   /watch [ID]            后台跟踪；/watches 查看，/unwatch ID 停止跟踪
   /plan 目标             只生成计划；/run 目标 按既有审批策略进入执行流程
   /request [ID]         刷新当前或指定的 Mission Request
@@ -187,12 +196,37 @@ def draft_reference(raw: JSONObject | None) -> JSONObject | None:
     )
 
 
+_DISPLAY_TOOL_COMMANDS = {
+    "/nodes": "查看节点",
+    "/node": "查看节点能力",
+    "/missions": "查看任务",
+    "/mission": "查看任务状态",
+    "/explain": "核对任务与绑定",
+    "/compare": "比较节点",
+    "/state": "查看设备上报状态",
+    "/state-fields": "查看状态字段",
+    "/request": "查看任务请求",
+    "/plan": "提交仅规划请求",
+    "/run": "发起执行流程请求",
+    "/answer": "补充任务要求",
+    "/answer-to": "补充指定问题",
+    "/execute": "提交执行请求",
+    "/approve": "审批当前计划",
+    "/cancel": "处理取消请求",
+    "/observe": "核对原命令",
+    "/check": "核对计划条件",
+    "/choose": "处理已显示的提议",
+}
+
+
 class WorkbenchSession(Session):
     """Own durable scope and commands used by direct input and closed native task tools."""
 
     query_status: QueryStatus = "complete"
     model_label = "未加载"
     config_path: Path | None = None
+    activity: TurnActivity | None = None
+    offered_choices: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -211,6 +245,10 @@ class WorkbenchSession(Session):
             raise WorkbenchError("会话上下文损坏。")
         self.displayed_nodes = self._ids(context.get("nodes", []))
         self.displayed_missions = self._ids(context.get("missions", []))
+        diagnosis_selection = context.get("diagnosis_selection", False)
+        if not isinstance(diagnosis_selection, bool):
+            raise WorkbenchError("会话的诊断选择损坏。")
+        self.diagnosis_selection = diagnosis_selection and bool(self.displayed_missions)
         self.displayed_states = self._ids(context.get("states", []))
         self.last_state = self._optional_id(context.get("last_state"))
         self.last_node = self._optional_id(context.get("last_node"))
@@ -279,6 +317,7 @@ class WorkbenchSession(Session):
         references: JSONObject = {
             "displayed_nodes": list(self.displayed_nodes),
             "displayed_missions": list(self.displayed_missions),
+            "diagnosis_selection": self.diagnosis_selection,
             "last_node": self.last_node,
             "last_mission": self.last_mission,
             "state_targets": list(self.displayed_states),
@@ -287,6 +326,9 @@ class WorkbenchSession(Session):
             "request_id": self.request_id,
             "draft": draft_reference(self.shown_draft),
             "task_dialogue": self.task_dialogue.export(),
+            "clarification_options": list(
+                latest_task_options(self.store.data.get("messages"), self.task_dialogue.context_id)
+            ),
         }
         if self.input_references is not None:
             references.update(self.input_references)
@@ -313,10 +355,16 @@ class WorkbenchSession(Session):
         return identifier(value)
 
     def checkpoint(self) -> None:
-        """Keep unacknowledged references staged while preserving actual command identities."""
+        """Persist the complete conversation context in a single store publish."""
+        self.store.data["context"] = self._checkpoint_context()
+        self.store.save()
+
+    def _checkpoint_context(self) -> JSONObject:
+        """Keep pending references staged while preserving actual command identities."""
         context: JSONObject = {
             "nodes": list(self.displayed_nodes),
             "missions": list(self.displayed_missions),
+            "diagnosis_selection": self.diagnosis_selection,
             "last_node": self.last_node,
             "last_mission": self.last_mission,
             "states": list(self.displayed_states),
@@ -327,12 +375,22 @@ class WorkbenchSession(Session):
             "task_dialogue": self.task_dialogue.export(),
         }
         if self.reference_checkpoint is not None:
-            for field in ("nodes", "missions", "last_node", "last_mission", "states", "last_state"):
+            for field in (
+                "nodes",
+                "missions",
+                "last_node",
+                "last_mission",
+                "states",
+                "last_state",
+                "diagnosis_selection",
+            ):
                 if field in self.reference_checkpoint:
                     context[field] = self.reference_checkpoint[field]
             context["raw_query"] = self.reference_checkpoint.get("raw_query")
-        self.store.data["context"] = context
-        self.store.save()
+        previous = self.store.data.get("context")
+        if isinstance(previous, dict) and ACTIVITY_KEY in previous:
+            context[ACTIVITY_KEY] = previous[ACTIVITY_KEY]
+        return context
 
     def ask(self, question: str) -> str:
         """Record successful or failed turns and route writes only from explicit host commands."""
@@ -342,6 +400,8 @@ class WorkbenchSession(Session):
         if question.startswith("/") and question.partition(" ")[0] != "/choose":
             self.suggestion = None
         self.query_status = "complete"
+        self.offered_choices = ()
+        record_history = question not in LOCAL_SNAPSHOT_COMMANDS
         if not question.startswith("/"):
             self.input_turn_id = self.display_turn_id or uuid.uuid4().hex
             self.task_dialogue.sync_visible(self.store.data.get("messages"))
@@ -349,14 +409,39 @@ class WorkbenchSession(Session):
             # Original user limits must survive a process exit or a lost Provider response,
             # including exits before the ordinary completed-turn history can be written.
             self.checkpoint()
+        trace = self.activity
+        label = _DISPLAY_TOOL_COMMANDS.get(question.partition(" ")[0])
+        run = trace.begin(label) if trace is not None and label is not None else None
+        before = command_count(self.store.data) if run is not None else 0
         try:
             result = self._turn(question)
         except (ValueError, OSError) as error:
             self.query_status = "failed"
-            self._remember(question, "查询/操作未确定：" + str(error))
+            if (
+                trace is not None
+                and run is not None
+                and new_pending_command(self.store.data, before)
+            ):
+                # This is a factual response about the original journaled command.
+                # It still takes the ordinary display acknowledgement path.
+                result = "原操作结果未知。下一步用 /observe 核对原请求回执。"
+                trace.finish(run, "unknown", result=ReadResult(result, False))
+                if record_history:
+                    self._remember(question, result)
+                return result
+            if record_history:
+                self._remember(question, "查询/操作未确定：" + str(error))
             raise
         else:
-            self._remember(question, result)
+            if trace is not None and run is not None:
+                status = cast(QueryStatus, self.query_status)
+                trace.finish(
+                    run,
+                    "unavailable" if status == "failed" else status,
+                    result=ReadResult(result, status == "complete"),
+                )
+            if record_history:
+                self._remember(question, result)
         finally:
             self.input_turn_id = None
         return result
@@ -382,10 +467,25 @@ class WorkbenchSession(Session):
                     "turn_id": turn_id,
                     "displayed": False,
                     "truncated": len(result) > 64000,
+                    **(
+                        {
+                            "clarification": {
+                                "context_id": self.task_dialogue.context_id,
+                                "options": list(self.offered_choices),
+                            }
+                        }
+                        if self.offered_choices and len(result) <= 64000
+                        else {}
+                    ),
                 },
             ]
         )
         self.store.data["messages"] = messages[-40:]
+        trace, context = self.activity, self.store.data.get("context")
+        if trace is not None and (trace.rows or trace.omitted) and isinstance(context, dict):
+            context[ACTIVITY_KEY] = cast(
+                JSONValue, append_activity(context.get(ACTIVITY_KEY), trace.snapshot())
+            )
         self.previous_question = question
         self.checkpoint()
 
@@ -531,6 +631,27 @@ class WorkbenchSession(Session):
         self.query_status = "complete" if complete else "partial"
         return ReadResult(result, complete, (component,))
 
+    def diagnose_mission(
+        self, target: str, task_id: str = "", *, record_activity: bool = False
+    ) -> ReadResult:
+        """Stage scoped diagnosis evidence and record direct host reads once."""
+        trace = self.activity if record_activity else None
+        run = trace.begin("核对原执行与停止记录", target) if trace is not None else None
+        try:
+            result, raw = read_mission_diagnosis(self.controller, target, task_id)
+        except (ValueError, OSError):
+            if trace is not None and run is not None:
+                trace.finish(run, "unavailable")
+            raise
+        if trace is not None and run is not None:
+            trace.result(run, result, reference="Mission " + target)
+            trace.reply = result.summary
+        self.last_mission, self.last_node = target, None
+        self.last_raw = raw
+        self.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
+        self.query_status = "complete" if result.complete else "partial"
+        return result
+
     def read_explanation(self, target: str) -> ReadResult:
         """Retain each validated diagnostic read and its explicit availability independently."""
         result = self.read_mission(target)
@@ -612,10 +733,41 @@ class WorkbenchSession(Session):
 
         return display
 
+    def check_current_plan(self, expected: JSONObject, *, show_update: bool) -> ReadResult:
+        """Assess the exact displayed draft, optionally refreshing a stale explicit view."""
+        from roboguide_workbench.plan_view import same_plan
+        from roboguide_workbench.preflight import check_plan
+
+        if self.request_id is None or expected.get("request_id") != self.request_id:
+            raise WorkbenchError("请先展示当前完整计划。")
+        current = self.actions.get(self.request_id)
+        if not same_plan(expected, current) or current.get("lifecycle") != expected.get(
+            "lifecycle"
+        ):
+            if show_update:
+                return ReadResult(
+                    "计划或状态已改变，请确认新版本后再检查：\n" + self._show_request(current)
+                )
+            return ReadResult("计划版本或状态已变化。请先查看新计划，再重新检查。", False)
+        checked = check_plan(self.controller, checked_request(current))
+        self.query_status = "complete" if checked.complete else "partial"
+        self.last_check = checked
+        return checked
+
     def _command(self, text: str) -> str:
         """Dispatch explicit commands; model output never enters this method as a write."""
         command, _, argument = text.partition(" ")
         argument = argument.strip()
+        if command == "/diagnose":
+            try:
+                values = shlex.split(argument)
+            except ValueError as error:
+                raise WorkbenchError("用法为 /diagnose [MissionID] [TaskID]。") from error
+            if len(values) > 2:
+                raise WorkbenchError("用法为 /diagnose [MissionID] [TaskID]。")
+            mission_target = self._mission_target(values[0] if values else "")
+            task_id = values[1] if len(values) == 2 else ""
+            return self.diagnose_mission(mission_target, task_id, record_activity=True).text
         if command == "/plan-detail":
             if argument or self.shown_draft is None:
                 raise WorkbenchError("请先读取当前请求，取得完整计划后再展开。")
@@ -699,20 +851,9 @@ class WorkbenchSession(Session):
             )
             return "反馈包已保存到本地：" + safe_text(str(path))
         if command == "/check":
-            from roboguide_workbench.preflight import check_plan
-
-            if argument or self.request_id is None or self.shown_draft is None:
+            if argument or self.shown_draft is None:
                 raise WorkbenchError("请先 /request 展示当前完整计划，再使用 /check。")
-            current = self.actions.get(self.request_id)
-            if any(
-                current.get(key) != self.shown_draft.get(key)
-                for key in ("draft_revision", "draft_digest", "lifecycle")
-            ):
-                return "计划或状态已改变，请确认新版本后再检查：\n" + self._show_request(current)
-            checked = check_plan(self.controller, checked_request(current))
-            self.query_status = "complete" if checked.complete else "partial"
-            self.last_check = checked
-            return checked.text
+            return self.check_current_plan(self.shown_draft, show_update=True).text
         if command == "/cancel":
             from roboguide_workbench.cancellation import CancellationActions, render_preview
 
@@ -844,14 +985,18 @@ class WorkbenchSession(Session):
     def watch(
         self, target: str, emit: Callable[[str], None], *, interval: float = 2, samples: int = 150
     ) -> None:
-        """Poll a fixed Mission at most five minutes; interrupt only the local observation."""
+        """Poll one Mission and display changes while retaining the newest observation."""
         mission_id = self._mission_target(target)
         self.last_mission = mission_id
         self.checkpoint()
+        prior = ""
         try:
             for index in range(samples):
                 raw = self.controller.mission(mission_id)
-                emit(render_mission(raw, mission_id))
+                rendered = render_mission(raw, mission_id)
+                if rendered != prior:
+                    emit(rendered)
+                    prior = rendered
                 self.last_raw = raw
                 self.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
                 if raw.get("status") in {"Completed", "Failed", "Cancelled"}:
