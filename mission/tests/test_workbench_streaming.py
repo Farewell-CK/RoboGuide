@@ -145,10 +145,11 @@ def test_incomplete_streamed_tool_arguments_never_reach_the_read_owner() -> None
     assert result.status == "failed" and result.evidence == [] and len(requests) == 1
 
 
-def test_stream_json_emits_deltas_but_acknowledges_only_the_completed_reply(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("output_format", ["text", "stream-json"])
+def test_streamed_drafts_only_appear_in_events_and_only_final_reply_is_acknowledged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output_format: str
 ) -> None:
-    """Preview events do not mark the Assistant row displayed before the final flush."""
+    """When provisional text differs, plain output still prints only the final answer."""
 
     class StreamTransport(Responses):
         """Use the production frontend callback with a finite local Provider response."""
@@ -158,7 +159,7 @@ def test_stream_json_emits_deltas_but_acknowledges_only_the_completed_reply(
         ) -> JSONObject:
             """Deliver public tokens and inspect persisted display state while they are pending."""
             assert callable(emit)
-            emit("你好")
+            emit("你好呀")
             assert all(
                 row.get("displayed") is not True
                 for row in cast(list[JSONObject], session.store.data["messages"])
@@ -171,13 +172,17 @@ def test_stream_json_emits_deltas_but_acknowledges_only_the_completed_reply(
     output = io.StringIO()
     monkeypatch.setattr(sys, "stdout", output)
     try:
-        display_question(session, "你好", output_format="stream-json")
-        events = [json.loads(line) for line in output.getvalue().splitlines()]
-        assert [row["type"] for row in events] == [
-            "assistant.delta",
-            "assistant.completed",
-            "turn.completed",
-        ]
+        display_question(session, "你好", output_format=output_format)
+        if output_format == "stream-json":
+            events = [json.loads(line) for line in output.getvalue().splitlines()]
+            assert [row["type"] for row in events] == [
+                "assistant.delta",
+                "assistant.completed",
+                "turn.completed",
+            ]
+            assert events[0]["delta"] == "你好呀"
+        else:
+            assert output.getvalue() == "你好\n"
         messages = cast(list[JSONObject], session.store.data["messages"])
         assert messages[-1]["displayed"] is True and messages[-1]["text"] == "你好"
     finally:

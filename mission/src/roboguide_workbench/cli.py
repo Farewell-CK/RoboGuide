@@ -426,17 +426,11 @@ def display_question(
             return
     turn = DisplayTurn(session)
     previous_stream = getattr(session, "stream_output", None)
-    preview: list[str] = []
 
     def emit_delta(delta: str) -> None:
-        """Show public draft text without acknowledging it as a completed Assistant turn."""
+        """Keep drafts in the event stream while plain output stays a single completed reply."""
         if output_format == "stream-json":
             _json_event("assistant.delta", delta=safe_text(delta).replace("\\u000a", "\n"))
-        else:
-            if not preview:
-                print("RG · 生成中：", flush=True)
-            print(safe_text(delta).replace("\\u000a", "\n"), end="", flush=True)
-        preview.append(delta)
 
     if isinstance(session, ConversationSession):
         session.stream_output = emit_delta
@@ -446,11 +440,7 @@ def display_question(
         if output_format == "stream-json":
             _json_event("assistant.completed", text=result)
         else:
-            streamed = "".join(preview)
-            if streamed and result.startswith(streamed):
-                print(result[len(streamed) :], flush=True)
-            else:
-                print(("\n" if streamed else "") + prefix + result, flush=True)
+            print(prefix + result, flush=True)
         turn.acknowledge()
         if output_format == "stream-json":
             _json_event("turn.completed", status=getattr(session, "query_status", "complete"))
