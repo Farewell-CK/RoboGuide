@@ -855,7 +855,9 @@ def local_tool_views(chat: ChatProcess, trace: Trace, *, narrow: bool) -> None:
         os.write(chat.master, b"\x1b[D")
         chat.pump()
         chat.process.send_signal(signal.SIGWINCH)
-        chat.wait(lambda: "详情 2/" in chat.text()[first_page:], "older acknowledged activity")
+        saved = json.loads(snapshot)
+        older = saved["context"]["turn_activity"][-2]["tools"][0]["label"]
+        chat.wait(lambda: older in chat.text()[first_page:], "older acknowledged activity")
     finally:
         os.write(chat.master, b"\x1b")
     assert (
