@@ -134,11 +134,44 @@ def test_runbook_tools_are_local_and_show_verified_citations(
         assert (
             "node route or lease" in json.dumps(transport.requests[1], ensure_ascii=False).lower()
         )
+        advertised = [
+            {item["name"] for item in cast(list[JSONObject], request["tools"])}
+            for request in transport.requests
+        ]
+        assert {"search_runbooks", "read_runbook"} <= advertised[0]
+        assert "search_runbooks" not in advertised[1] and "read_runbook" in advertised[1]
+        assert not {"search_runbooks", "read_runbook"} & advertised[2]
+        assert "read_mission" in advertised[2], "independent live lookups remain possible"
         assert session.store.data["commands"] == [] and controller.submissions == []
     from roboguide_workbench.client import ToolRefusal
 
     with pytest.raises(ToolRefusal):
         read("../../.config/roboguide/config", 1)
+
+
+def test_runbook_timeout_keeps_best_evidence_without_dumping_pages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep one cited hit when a real page has been read but synthesis times out."""
+    output = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", output)
+    doc = "runtime-reliability-fault-matrix"
+    transport = Responses(
+        [
+            _response(_call("search_runbooks", {"query": "掉线 Unknown"})),
+            _response(_call("read_runbook", {"document": doc, "start_line": 25}, "page")),
+            TimeoutError("fixture synthesis timeout"),
+        ]
+    )
+    with workbench(tmp_path) as (session, controller):
+        session.router_factory = lambda: _router(transport)
+        display_question(session, "按运维资料说明设备掉线后怎么核对恢复。")
+        text = output.getvalue()
+        assert session.query_status == "partial"
+        assert "Node route or lease is lost" in text and f"{doc}.md 第 " in text
+        assert "资料还未整理成完整答复" in text and "历史参考" in text
+        assert "25 ·" not in text and "运维资料搜索" not in text and len(text) < 600
+        assert session.store.data["commands"] == [] and controller.submissions == []
 
 
 @pytest.mark.parametrize("visible", [True, False])

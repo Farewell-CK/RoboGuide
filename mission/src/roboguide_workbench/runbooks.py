@@ -17,6 +17,7 @@ _MAX_DOCUMENT_BYTES = 64 * 1024
 _MAX_QUERY_CHARS = 160
 _MAX_MATCHES = 5
 _PAGE_LINES = 14
+TOOLS = frozenset({"search_runbooks", "read_runbook"})
 
 
 @dataclass(frozen=True)
@@ -100,8 +101,8 @@ def definitions() -> list[JSONObject]:
         {
             "type": "function",
             "name": "read_runbook",
-            "description": "按搜索得到的资料 ID 和行号读取相邻上下文。"
-            "内容是文档或历史验收，不是本次集群的现场观测。",
+            "description": "按搜索得到的资料 ID 和首选命中行号读一页。"
+            "本轮只读一页，读完就根据已取得的资料回答。",
             "strict": True,
             "parameters": {
                 "type": "object",
@@ -190,8 +191,14 @@ def search(query: str) -> ReadResult:
         "运维资料搜索 · 文档参考\n" + "\n\n".join(detail),
         not missing,
         tuple(
-            {"source": "runbook", "complete": True, "document": name, "start_line": line}
-            for _, name, line, _ in chosen
+            {
+                "source": "runbook",
+                "complete": True,
+                "document": name,
+                "start_line": line,
+                "excerpt": _excerpt(text, 160),
+            }
+            for _, name, line, text in chosen
         ),
     )
 
@@ -237,6 +244,28 @@ def invoke(name: str, arguments: JSONObject) -> ReadResult:
     ):
         return read(document, line)
     raise ToolRefusal("运维资料工具参数不符合合同。")
+
+
+def partial_summary(evidence: list[JSONObject]) -> str:
+    """Retain the best acquired search hit without repeating pages on a model failure."""
+    for result in evidence:
+        entries = result.get("components")
+        if result.get("source") != "search_runbooks" or not isinstance(entries, list):
+            continue
+        for item in entries:
+            if not isinstance(item, dict) or item.get("source") != "runbook":
+                continue
+            name, line, excerpt = item.get("document"), item.get("start_line"), item.get("excerpt")
+            if (
+                isinstance(name, str)
+                and name in REFERENCES
+                and type(line) is int
+                and isinstance(excerpt, str)
+            ):
+                return f"已找到运维资料。{REFERENCES[name].source} 第 {line} 行\n{excerpt}"
+    if citations(evidence):
+        return "已找到运维资料，出处见下方。"
+    return "本轮未找到可引用的运维资料。"
 
 
 def citations(evidence: list[JSONObject]) -> str:

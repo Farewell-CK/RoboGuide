@@ -47,7 +47,12 @@ def definitions() -> list[JSONObject]:
             "任务缺少区域、目标或条件时自然追问。给出已经从用户或资料确认的候选参数，"
             "没有可靠候选时 options 传空数组。选项不能用于执行、审批或取消任务。",
             {
-                "question": {"type": "string", "minLength": 1, "maxLength": 2000},
+                "question": {
+                    "type": "string",
+                    "description": "只写需要回答的问题。选项和编号由 Chat 展示。",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                },
                 "options": {
                     "type": "array",
                     "minItems": 0,
