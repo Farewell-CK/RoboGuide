@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import shlex
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -157,33 +158,40 @@ def discover(
     all_exports = exports(raw, profiles)
     selected = _selected(all_exports, target) if target else all_exports
     lines = [f"{safe_text(target)} 的状态字段" if target else "可查询状态的对象"]
-    targets: list[str] = []
+    groups: dict[str, list[Export]] = {}
     for item in selected[:64]:
-        object_id = cast(str, item.object["object_id"])
-        selector = selection(item, all_exports)
-        index = targets.index(selector) + 1 if selector in targets else len(targets) + 1
-        names = (
-            "、".join(LABELS.get(name, name) + f" [{name}]" for name in item.profile.fields)
-            if item.profile
-            else "格式尚未接入解释器"
-        )
-        entry = [
-            f"{index}. {safe_text(object_id)} · 上报节点 {safe_text(item.node)}",
-            f"   {names}；来源 {safe_text(item.source)}；格式 {safe_text(item.schema)}",
-            f"   选择：/state {safe_text(selector)} "
-            + " ".join(item.profile.fields if item.profile else ()),
-        ]
+        groups.setdefault(selection(item, all_exports), []).append(item)
+    targets: list[str] = []
+    for selector, items in groups.items():
+        nodes = "、".join(dict.fromkeys(safe_text(item.node) for item in items))
+        entry = [f"{len(targets) + 1}. {safe_text(selector)} · 上报节点 {nodes}"]
+        query_fields: dict[str, None] = {}
+        undecoded = 0
+        for item in items:
+            if item.profile is None:
+                undecoded += 1
+                continue
+            names = "、".join(
+                f"{safe_text(LABELS.get(name, name))} [{safe_text(name)}]"
+                for name in item.profile.fields
+            )
+            entry.append(f"   {names} · {safe_text(item.source)}")
+            query_fields.update(dict.fromkeys(item.profile.fields))
+        if undecoded:
+            entry[0] += f"（{undecoded} 个格式尚未接入解释器）"
+        if query_fields:
+            command = shlex.join(["/state", selector, *list(query_fields)[:8]])
+            entry.append(f"   {safe_text(command)}")
         if len("\n".join([*lines, *entry]).encode()) > 18_000:
-            lines.append("展示已截断；请指定明确对象 ID 缩小范围。")
+            lines.append("展示已截断，请指定明确对象 ID 缩小范围。")
             break
         lines.extend(entry)
-        if selector not in targets:
-            targets.append(selector)
+        targets.append(selector)
     if not selected:
         lines.append("当前身份可见的目录中没有匹配的状态声明；请核对对象 ID 或设备的状态上报配置。")
     if len(selected) > 64:
         lines.append("只展示前 64 个声明；请指定明确的对象 ID 缩小范围。")
-    lines.append("字段来自登记声明；实际数值仍需读取并检查有效期。")
+    lines.append("字段来自登记声明。状态查询会检查实际数值的有效期，/raw 可查看原始目录。")
     return ReadResult("\n".join(lines), bool(selected)), targets
 
 
@@ -222,7 +230,8 @@ class StateSnapshot:
         if elapsed < 0:
             raise WorkbenchError("本地读取时钟无效，当前状态未知。")
         results: list[JSONObject] = []
-        displayed_choices: list[str] = []
+        ambiguous_fields: list[str] = []
+        source_choices: dict[tuple[str, str], dict[str, None]] = {}
         sources: dict[str, list[str]] = {}
         lines = [
             f"{safe_text(self.target)} · 设备状态",
@@ -265,20 +274,24 @@ class StateSnapshot:
                 "complete": sample.status == "reported",
             }
             results.append(row)
-            lines.append(_render_field(name, sample))
-            if sample.status == "conflict" and candidates:
+            if len(candidates) > 1:
+                ambiguous_fields.append(LABELS.get(name, name))
                 for candidate in candidates[:8]:
                     selector = "object:" + str(candidate.object["object_id"])
-                    if selector not in displayed_choices:
-                        displayed_choices.append(selector)
-                    index = displayed_choices.index(selector) + 1
-                    lines.append(
-                        f"  {index}. {safe_text(selector)} · {safe_text(candidate.source)}；"
-                        f"/state {safe_text(selector)} {name}"
-                    )
+                    source_choices.setdefault((selector, candidate.source), {})[name] = None
+            else:
+                lines.append(_render_field(name, sample))
             if evidence.get("source"):
                 source = cast(str, evidence["source"])
                 sources.setdefault(source, []).append(LABELS.get(name, name))
+        if source_choices:
+            labels = "、".join(safe_text(name) for name in ambiguous_fields)
+            lines.append(f"{labels}：来源有歧义，请选择下面的状态对象。")
+            displayed_choices: dict[str, int] = {}
+            for (selector, source), choice_fields in source_choices.items():
+                index = displayed_choices.setdefault(selector, len(displayed_choices) + 1)
+                command = shlex.join(["/state", selector, *choice_fields])
+                lines.append(f"  {index}. {safe_text(source)} · {safe_text(command)}")
         for source, names in sources.items():
             labels = "、".join(safe_text(name) for name in names)
             lines.append(f"来源：{safe_text(source)}（{labels}）")

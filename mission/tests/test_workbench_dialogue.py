@@ -351,3 +351,19 @@ def test_actual_terminal_and_queued_history_exclude_hidden_assistant_turns(
     finally:
         release.set()
         session.store.close()
+
+
+def test_old_local_snapshot_output_stays_out_of_model_context() -> None:
+    """Keep old records intact while excluding both local dumps and their commands."""
+    rows: list[JSONObject] = [
+        {"role": "user", "text": "巡检计划怎么写？"},
+        {"role": "assistant", "text": "先列目标。", "displayed": True},
+        {"role": "user", "text": "/raw"},
+        {"role": "assistant", "text": "原始查询内容", "displayed": True},
+        {"role": "user", "text": "/history"},
+        {"role": "assistant", "text": "过去的会话副本", "displayed": True},
+        {"role": "user", "text": "再举个例子。"},
+    ]
+    history = bounded_history(rows)
+    assert [row["text"] for row in history] == ["巡检计划怎么写？", "先列目标。", "再举个例子。"]
+    assert len(rows) == 7 and rows[3]["text"] == "原始查询内容"

@@ -89,6 +89,8 @@ MI 新增显式宿主目标草案格式：见 [ADR-0255](docs/decisions/0255-hos
 进入原有 MI 审批与执行边界。需要旧版结构化查询兼容行为时可显式使用
 `roboguide chat --answer-mode legacy`；`--output-format stream-json --ask "问题"` 提供单次
 调用的机器可读事件。
+直接问「这个任务为什么还在取消中？」就能追查原执行。有多个候选时，回复任务序号即可。
+诊断会核对停止记录，并标出缺失的证据。已读取的原记录可用 `/raw` 查看。
 多轮任务会在确认前展示原任务和澄清原文；仅完整显示的助手回复进入后续模型历史，
 静音或输出失败的内容保留在本地审计记录中。
 通用[设备状态查询](docs/development/conversation-workbench-state-v0.1.md)已接入电量、位置和姿态：

@@ -1172,6 +1172,12 @@ reuse. show_plan expands locally without refreshing status. Terminal help/status
 local controls; waiting notices never renew deadlines or reissue operations. Regressions live in
 test_workbench_terminal_ux.py and the installed PTY gate.
 
+mission_diagnosis.py joins the exact current Mission Group and Task to its original execution
+attempt and stop evidence, using at most three existing GETs for one diagnosis. Ambiguous
+attempts, mismatched identities and unavailable evidence remain unresolved. The host renders the
+diagnosis and keeps its original responses in scoped /raw. The new read grants no task mutation
+authority. The focused gate is test_workbench_mission_diagnosis.py.
+
 ADR-0254 adds installed chat v0.4 global and explicitly selected project model profiles, first-run setup, local status and
 scope-bound session navigation. Existing displayed-reference confirmation and original pending
 command fences remain. Exact-plan `/check` reuses only assessment ports. Explicit two-stage cancel

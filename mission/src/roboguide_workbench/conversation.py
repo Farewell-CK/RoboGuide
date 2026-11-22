@@ -10,6 +10,7 @@ from typing import cast
 
 from mission.models import JSONObject, JSONValue
 
+from roboguide_workbench import runbooks
 from roboguide_workbench.agent_loop import AgentConversation
 from roboguide_workbench.agent_tools import ReadToolAdapter
 from roboguide_workbench.answers import (
@@ -21,13 +22,25 @@ from roboguide_workbench.answers import (
     local_response,
 )
 from roboguide_workbench.client import WorkbenchError
-from roboguide_workbench.evidence import ReadResult
+from roboguide_workbench.evidence import (
+    READ_COSTS,
+    OriginalOperationPending,
+    ReadResult,
+    command_count,
+    new_pending_command,
+)
+from roboguide_workbench.mission_diagnosis import cancellation_diagnosis_intent, diagnosis_ordinal
+from roboguide_workbench.mission_views import cancelling_missions
 from roboguide_workbench.plan_view import same_plan
 from roboguide_workbench.routing import Query, ResponsesRouter
+from roboguide_workbench.session import LOCAL_SNAPSHOT_COMMANDS
+from roboguide_workbench.task_context import choice_number, choice_prompt, task_options
 from roboguide_workbench.task_tools import TaskTools
 from roboguide_workbench.task_tools import definitions as task_definitions
 from roboguide_workbench.views import safe_text
 from roboguide_workbench.workspace import WorkbenchSession, render_request
+
+_DIAGNOSIS_CHOICES = 6
 
 
 class ConversationSession(WorkbenchSession):
@@ -46,8 +59,21 @@ class ConversationSession(WorkbenchSession):
         """Keep commands verbatim and route natural text through native read and task tools."""
         if not question.startswith("/cancel"):
             self.pending_cancel = None
-        if question == "/help":
+        if question in LOCAL_SNAPSHOT_COMMANDS or question == "/help":
             return super()._turn(question)
+        if self.answer_mode in {"agent", "grounded"} and not question.startswith("/"):
+            ordinal = choice_number(question)
+            choices = task_options(self.query_references().get("clarification_options"))
+            if ordinal is not None and choices:
+                self.diagnosis_selection = False
+                if not 1 <= ordinal <= len(choices):
+                    self.offered_choices = choices
+                    return choice_prompt("序号超出范围，请重新选择。", choices)
+                return self._agent_turn(question)
+            diagnosis = self._natural_diagnosis(question)
+            if diagnosis is not None:
+                return diagnosis
+        self.diagnosis_selection = False
         if question.startswith("/"):
             if question == "/reset":
                 self.evidence = []
@@ -56,6 +82,88 @@ class ConversationSession(WorkbenchSession):
         if self.answer_mode in {"agent", "grounded"}:
             return self._agent_turn(question)
         return self._legacy_turn(question)
+
+    def _natural_diagnosis(self, question: str) -> str | None:
+        """Resolve a plain read-only question or its displayed ordinal before using a model."""
+        intent = cancellation_diagnosis_intent(question)
+        ordinal = diagnosis_ordinal(question)
+        if intent is None and ordinal is None:
+            return None
+        references = self.query_references()
+        selecting = references.get("diagnosis_selection") is True
+        if intent is None and not selecting:
+            return None
+
+        target: str | None = None
+        if ordinal is not None and selecting:
+            displayed = self._ids(references.get("displayed_missions", []))
+            if not 1 <= ordinal <= len(displayed):
+                return "请回复刚才列表里显示的序号。"
+            target = displayed[ordinal - 1]
+        elif intent == "focused":
+            target = self._optional_id(references.get("last_mission"))
+        self.suggestion = None
+        self.diagnosis_selection = False
+        self.evidence = []
+
+        cost = READ_COSTS["read_mission_diagnosis"] + (1 if target is None else 0)
+        original_timeout = self.controller.timeout
+        self.controller.timeout = min(original_timeout, self.turn_seconds / cost)
+        try:
+            if target is None:
+                self.progress("正在查看哪些任务还在取消中")
+                trace = self.activity
+                run = trace.begin("查找取消中的任务") if trace is not None else None
+                try:
+                    matches, complete = cancelling_missions(self.controller.missions())
+                except (ValueError, OSError):
+                    if trace is not None and run is not None:
+                        trace.finish(run, "unavailable")
+                    raise
+                if trace is not None and run is not None:
+                    trace.finish(
+                        run,
+                        "complete" if complete else "partial",
+                        result=ReadResult(f"查到 {len(matches)} 个处于取消中的任务。"),
+                        reference="Controller · Mission 列表",
+                    )
+                if not self.task_dialogue.pinned:
+                    self.task_dialogue.clear()
+                if not matches:
+                    if not complete:
+                        self.query_status = "partial"
+                        return "当前任务列表有缺口，暂时无法确认哪些任务在取消中。"
+                    return "当前没有查到处于取消中的任务。"
+                if len(matches) != 1 or not complete:
+                    shown = matches[:_DIAGNOSIS_CHOICES]
+                    self.displayed_missions = [item.mission_id for item in shown]
+                    self.last_mission = None
+                    self.diagnosis_selection = True
+                    self.query_status = "complete" if complete else "partial"
+                    head = f"查到 {len(matches)} 个处于取消中的任务。"
+                    if not complete:
+                        head += "当前列表有缺口。"
+                    if len(matches) > len(shown):
+                        head += f"先列出前 {len(shown)} 个。"
+                    rows = [
+                        f"{i}. {item.display_objective} · {safe_text(item.mission_id)}"
+                        for i, item in enumerate(shown, 1)
+                    ]
+                    return "\n".join([head, *rows, "想查哪个？回复序号就行。"])
+                target = matches[0].mission_id
+            if self.tool_limit < cost:
+                self.query_status = "failed"
+                return "本轮读取预算不足，暂时无法完成任务诊断。"
+            self.progress("正在核对原执行与停止记录")
+            result = self.diagnose_mission(target, record_activity=True)
+            if not self.task_dialogue.pinned:
+                self.task_dialogue.clear()
+            return result.text
+        except (ValueError, OSError) as error:
+            self.query_status = "failed"
+            return "暂时无法完成任务诊断。" + safe_text(str(error))
+        finally:
+            self.controller.timeout = original_timeout
 
     def _agent_turn(self, question: str) -> str:
         """Use original user text with host-checked tools rather than generated task commands."""
@@ -68,6 +176,13 @@ class ConversationSession(WorkbenchSession):
             return super()._turn(question)
         references = self.query_references()
         references["controller"] = self.controller.endpoint
+        choices = task_options(references.pop("clarification_options", None))
+        ordinal = choice_number(question)
+        if ordinal is not None and 1 <= ordinal <= len(choices):
+            references["clarification_selection"] = {
+                "number": ordinal,
+                "label": choices[ordinal - 1],
+            }
         history = (
             self.input_history
             if self.input_history is not None
@@ -78,6 +193,8 @@ class ConversationSession(WorkbenchSession):
 
         def invoke_read(name: str, arguments: JSONObject, remaining: float) -> ReadResult:
             """Share validated identities with task tools while keeping visible selection staged."""
+            if name in {"search_runbooks", "read_runbook"}:
+                return runbooks.invoke(name, arguments)
             returned = adapter.read(name, arguments, remaining)
             tasks.learn_missions(adapter.task_missions(returned))
             return returned
@@ -90,7 +207,13 @@ class ConversationSession(WorkbenchSession):
             remaining: float,
         ) -> ReadResult:
             """Publish actual new receipt IDs to subsequent reads without guessing targets."""
-            returned = tasks.invoke(name, arguments, original, remaining, user_turns=user_turns)
+            before = command_count(self.store.data)
+            try:
+                returned = tasks.invoke(name, arguments, original, remaining, user_turns=user_turns)
+            except (ValueError, OSError) as error:
+                if new_pending_command(self.store.data, before):
+                    raise OriginalOperationPending(str(error)) from error
+                raise
             adapter.learn_task(tasks.known_nodes)
             return returned
 
@@ -102,12 +225,13 @@ class ConversationSession(WorkbenchSession):
             adapter.references,
             history,
             invoke_read,
-            tool_definitions=adapter.definitions() + task_definitions(),
+            tool_definitions=adapter.definitions() + task_definitions() + runbooks.definitions(),
             progress=self.progress,
             act=invoke_task,
             task_read_context=tasks.cache_context,
             task_work_key=tasks.work_key,
             on_delta=self.stream_output if self.stream_enabled else None,
+            activity=self.activity,
         )
         self.query_status, self.evidence = result.status, result.evidence
         if not tasks.owns_selection:
@@ -148,14 +272,37 @@ class ConversationSession(WorkbenchSession):
                 )
             if result.status != "complete":
                 text += "\n本轮其它操作、读取或回复未完成；未确认部分保持未知。"
+        presentation: str | None = None
+        if self.activity is not None and (task_answer is not None or read_answer is not None):
+            # Keep every plan and clarification in the visible result; only advisory
+            # capability descriptions and detailed diagnostic evidence can be folded.
+            presentation = "\n\n".join(
+                part
+                for part in (
+                    tasks.answer(result.evidence, compact=True),
+                    (read_answer.summary or read_answer.text) if read_answer else None,
+                )
+                if part
+            )
+            if result.status != "complete":
+                presentation += "\n本轮其它操作、读取或回复未完成；未确认部分保持未知。"
         if result.evidence:
             summary = adapter.reference_summary(result.evidence)
             if summary:
                 text += "\n\n" + summary
+                if presentation is not None:
+                    presentation += "\n\n" + summary
             mission = self.last_mission
             adapter.publish(result.evidence, publish_raw=not tasks.owns_selection)
             if tasks.owns_selection:
                 self.last_mission = mission
+        citations = runbooks.citations(result.evidence)
+        if citations:
+            text += "\n\n" + citations
+            if presentation is not None:
+                presentation += "\n\n" + citations
+        if self.activity is not None:
+            self.activity.reply = presentation
         return text
 
     def _retain_agent_turn(self, question: str, items: list[JSONObject]) -> None:
@@ -313,21 +460,18 @@ class ConversationSession(WorkbenchSession):
             evidence_log["last_evidence"] = cast(JSONValue, result.evidence)
         return result.text
 
-    def checkpoint(self) -> None:
-        """Persist structured evidence with references through the sole foreground writer."""
-        old_context = self.store.data.get("context")
-        old_request = old_context.get("request_context") if isinstance(old_context, dict) else None
-        agent_turns = old_context.get("agent_turns") if isinstance(old_context, dict) else None
-        super().checkpoint()
-        context = self.store.data["context"]
-        if isinstance(context, dict):
-            if agent_turns is not None:
-                context["agent_turns"] = agent_turns
-            if hasattr(self, "evidence"):
-                context["last_evidence"] = cast(JSONValue, self.evidence)
-            if self.request_id:
-                context["request_context"] = getattr(self, "request_context", old_request)
-            self.store.save()
+    def _checkpoint_context(self) -> JSONObject:
+        """Attach the tool evidence before publishing the acknowledgement and references."""
+        previous = self.store.data.get("context")
+        context = super()._checkpoint_context()
+        if isinstance(previous, dict) and "agent_turns" in previous:
+            context["agent_turns"] = previous["agent_turns"]
+        if hasattr(self, "evidence"):
+            context["last_evidence"] = cast(JSONValue, self.evidence)
+        if self.request_id:
+            old_request = previous.get("request_context") if isinstance(previous, dict) else None
+            context["request_context"] = getattr(self, "request_context", old_request)
+        return context
 
     def _show_request(self, raw: JSONObject) -> str:
         """Expand new plans completely and keep acknowledged unchanged progress reads compact."""
