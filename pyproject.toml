@@ -52,6 +52,7 @@ pythonpath = [
     "tools/deployment",
 ]
 testpaths = [
+    "tools/onsite_arrival",
     "tools/quality",
     "tools/observability/tests",
     "tools/deployment/tests",
