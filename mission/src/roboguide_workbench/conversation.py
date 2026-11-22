@@ -460,21 +460,18 @@ class ConversationSession(WorkbenchSession):
             evidence_log["last_evidence"] = cast(JSONValue, result.evidence)
         return result.text
 
-    def checkpoint(self) -> None:
-        """Persist structured evidence with references through the sole foreground writer."""
-        old_context = self.store.data.get("context")
-        old_request = old_context.get("request_context") if isinstance(old_context, dict) else None
-        agent_turns = old_context.get("agent_turns") if isinstance(old_context, dict) else None
-        super().checkpoint()
-        context = self.store.data["context"]
-        if isinstance(context, dict):
-            if agent_turns is not None:
-                context["agent_turns"] = agent_turns
-            if hasattr(self, "evidence"):
-                context["last_evidence"] = cast(JSONValue, self.evidence)
-            if self.request_id:
-                context["request_context"] = getattr(self, "request_context", old_request)
-            self.store.save()
+    def _checkpoint_context(self) -> JSONObject:
+        """Attach the tool evidence before publishing the acknowledgement and references."""
+        previous = self.store.data.get("context")
+        context = super()._checkpoint_context()
+        if isinstance(previous, dict) and "agent_turns" in previous:
+            context["agent_turns"] = previous["agent_turns"]
+        if hasattr(self, "evidence"):
+            context["last_evidence"] = cast(JSONValue, self.evidence)
+        if self.request_id:
+            old_request = previous.get("request_context") if isinstance(previous, dict) else None
+            context["request_context"] = getattr(self, "request_context", old_request)
+        return context
 
     def _show_request(self, raw: JSONObject) -> str:
         """Expand new plans completely and keep acknowledged unchanged progress reads compact."""

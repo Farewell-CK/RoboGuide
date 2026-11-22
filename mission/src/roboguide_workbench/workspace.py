@@ -355,7 +355,12 @@ class WorkbenchSession(Session):
         return identifier(value)
 
     def checkpoint(self) -> None:
-        """Keep unacknowledged references staged while preserving actual command identities."""
+        """Persist the complete conversation context in a single store publish."""
+        self.store.data["context"] = self._checkpoint_context()
+        self.store.save()
+
+    def _checkpoint_context(self) -> JSONObject:
+        """Keep pending references staged while preserving actual command identities."""
         context: JSONObject = {
             "nodes": list(self.displayed_nodes),
             "missions": list(self.displayed_missions),
@@ -385,8 +390,7 @@ class WorkbenchSession(Session):
         previous = self.store.data.get("context")
         if isinstance(previous, dict) and ACTIVITY_KEY in previous:
             context[ACTIVITY_KEY] = previous[ACTIVITY_KEY]
-        self.store.data["context"] = context
-        self.store.save()
+        return context
 
     def ask(self, question: str) -> str:
         """Record successful or failed turns and route writes only from explicit host commands."""

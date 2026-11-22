@@ -127,7 +127,24 @@ def test_runbook_tools_are_local_and_show_verified_citations(
     )
     with workbench(tmp_path) as (session, controller):
         session.router_factory = lambda: _router(transport)
-        display_question(session, "按运维资料说明设备掉线后怎么核对恢复。")
+        question = "按运维资料说明设备掉线后怎么核对恢复。"
+        acknowledgements: list[JSONObject] = []
+        original_save = session.store.save
+
+        def record_saved_ack() -> None:
+            """Capture every persisted view that already marks the answer displayed."""
+            original_save()
+            saved = json.loads(session.store.path.read_bytes())
+            last = saved["messages"][-1] if saved["messages"] else {}
+            if last.get("role") == "assistant" and last.get("displayed") is True:
+                acknowledgements.append(saved["context"])
+
+        monkeypatch.setattr(session.store, "save", record_saved_ack)
+        display_question(session, question)
+        assert acknowledgements
+        for view in acknowledgements:
+            assert cast(list[JSONObject], view["agent_turns"])[-1]["question"] == question
+            assert view.get("last_evidence")
         text = output.getvalue()
         assert "资料出处（历史参考）" in text and f"{doc}.md 第 {start}" in text
         assert "依据：随版本提供的运维资料" in text and "本轮 Controller 读取" not in text
