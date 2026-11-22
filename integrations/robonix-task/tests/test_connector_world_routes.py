@@ -268,6 +268,77 @@ class WorldRoutesTests(unittest.TestCase):
             self.assertEqual(refused.state_evidence, ())
             self.assertTrue(any(gap.code == "state_record_rejected" for gap in refused.gaps))
 
+    def test_device_safe_state_route_requires_chassis_observer_and_adapter(self) -> None:
+        """Require both the chassis observer and the adapter for device safe-state."""
+        import tempfile
+
+        from robonix_task.adapter import Adapter, Server
+        from robonix_task.protocol import Liaison
+        from test_protocol import request, wait_for
+        from test_task_results import TaskFixture
+
+        connector = load_connector()
+        with serve(connector.combined_handler(None, None)) as origin:
+            with self.assertRaises(urllib.error.HTTPError) as refused:
+                read_json(origin, "/v1/pilot/executions/device-safe-state")
+            self.assertEqual(refused.exception.code, 404)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = TaskFixture(Path(tmp), mode="failed-task")
+            app = Adapter(
+                Path(tmp) / "journal",
+                Liaison(fixture.endpoint, "rg/test", "local:test"),
+                allowed_operations=("lab.protocol-probe@v1",),
+                enabled=True,
+                task_results=True,
+                task_profile="test-profile",
+            )
+            chassis = types.SimpleNamespace(
+                read=lambda: {
+                    "availability": "current",
+                    "received_at_ns": 9_999_999_999_999_999_999,
+                    "value": {"stale": False, "posture": "down"},
+                }
+            )
+            server = Server(0, app)
+            server.RequestHandlerClass = connector.combined_handler(None, None, chassis=chassis)
+            thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
+            thread.start()
+            try:
+                body = request()
+                body["invocation"] = body["invocation"]["intent"]
+                body["invocation"]["operation"] = "lab.protocol-probe@v1"
+                body["invocation"]["parameters"] = {"profile": "test-profile"}
+                body["invocation"]["execution_generation"] = 5
+                first = app.submit(body)
+                wait_for(lambda: app.status(first["handle"])["state"] == "FAILED")
+                wait_for(lambda: not app.jobs)
+                observed = read_json(
+                    f"http://127.0.0.1:{server.server_port}",
+                    "/v1/pilot/executions/device-safe-state",
+                )
+                self.assertEqual(
+                    observed,
+                    {
+                        "observations": [
+                            {
+                                "execution_id": body["attempt_id"],
+                                "execution_generation": 5,
+                                "command_id": None,
+                                "terminal_state": "FAILED",
+                                "safe_state": True,
+                                "assurance": "device-observation",
+                            }
+                        ]
+                    },
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                app.close()
+                fixture.close()
+
 
 if __name__ == "__main__":
     unittest.main()

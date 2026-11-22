@@ -147,6 +147,47 @@
             "type": "integer",
             "minimum": 0
           },
+          "requested_service_tier": { "$ref": "#/$defs/metadata" },
+          "observed_service_tier": { "$ref": "#/$defs/metadata" },
+          "requested_reasoning_effort": { "$ref": "#/$defs/metadata" },
+          "response_schema_name": { "$ref": "#/$defs/metadata" },
+          "stage": {
+            "enum": ["interpreter", "planner", "reviewer", "repairer", "deployment_recovery"]
+          },
+          "cache_prefix_digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "token_usage": {
+            "type": "object",
+            "additionalProperties": { "type": "integer", "minimum": 0 }
+          },
+          "plan_assembly": { "type": "object" },
+          "http_timing": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "elapsed_ms",
+              "headers_received_ms",
+              "body_read_ms",
+              "http_status_code",
+              "upstream_request_id",
+              "failure_phase"
+            ],
+            "properties": {
+              "elapsed_ms": { "type": "integer", "minimum": 0 },
+              "headers_received_ms": { "type": ["integer", "null"], "minimum": 0 },
+              "body_read_ms": { "type": ["integer", "null"], "minimum": 0 },
+              "http_status_code": { "type": ["integer", "null"], "minimum": 100, "maximum": 599 },
+              "upstream_request_id": {
+                "type": ["string", "null"],
+                "pattern": "^[A-Za-z0-9_.:-]{1,256}$"
+              },
+              "failure_phase": {
+                "enum": [null, "awaiting_headers", "reading_body", "http_status", "decoding_response"]
+              }
+            }
+          },
           "error_type": {
             "oneOf": [
               {
@@ -165,5 +206,8 @@
     "deliberation_active": {
       "type": "boolean"
     }
+  },
+  "$defs": {
+    "metadata": { "type": "string", "minLength": 1, "maxLength": 256 }
   }
 }
