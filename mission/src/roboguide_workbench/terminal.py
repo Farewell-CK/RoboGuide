@@ -30,6 +30,7 @@ from roboguide_workbench.activity import TurnActivity, activity_summary, display
 from roboguide_workbench.answers import bounded_history
 from roboguide_workbench.display import DisplayPersistenceError, DisplayTurn, discard_confirmation
 from roboguide_workbench.evidence import QueryStatus
+from roboguide_workbench.task_context import choice_number
 from roboguide_workbench.terminal_tools import (
     COMMAND_HINTS,
     DetailPager,
@@ -143,6 +144,8 @@ def _command_name(text: str) -> str:
 
 def _is_queueable(text: str) -> bool:
     """Queue independent reads only; a preceding turn may replace displayed references."""
+    if choice_number(text) is not None:
+        return False
     if re.search(
         r"#\d+|第.{0,4}[个项台只]|刚才|上面|上述|前面|[这那][个台只些]|"
         r"\b(?:that|those|it|second|first|previous|above)\b",

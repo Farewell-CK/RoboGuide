@@ -10,6 +10,7 @@ from typing import cast
 
 from mission.models import JSONObject, JSONValue
 
+from roboguide_workbench import runbooks
 from roboguide_workbench.agent_loop import AgentConversation
 from roboguide_workbench.agent_tools import ReadToolAdapter
 from roboguide_workbench.answers import (
@@ -33,6 +34,7 @@ from roboguide_workbench.mission_views import cancelling_missions
 from roboguide_workbench.plan_view import same_plan
 from roboguide_workbench.routing import Query, ResponsesRouter
 from roboguide_workbench.session import LOCAL_SNAPSHOT_COMMANDS
+from roboguide_workbench.task_context import choice_number, choice_prompt, task_options
 from roboguide_workbench.task_tools import TaskTools
 from roboguide_workbench.task_tools import definitions as task_definitions
 from roboguide_workbench.views import safe_text
@@ -60,6 +62,14 @@ class ConversationSession(WorkbenchSession):
         if question in LOCAL_SNAPSHOT_COMMANDS or question == "/help":
             return super()._turn(question)
         if self.answer_mode in {"agent", "grounded"} and not question.startswith("/"):
+            ordinal = choice_number(question)
+            choices = task_options(self.query_references().get("clarification_options"))
+            if ordinal is not None and choices:
+                self.diagnosis_selection = False
+                if not 1 <= ordinal <= len(choices):
+                    self.offered_choices = choices
+                    return choice_prompt("序号超出范围，请重新选择。", choices)
+                return self._agent_turn(question)
             diagnosis = self._natural_diagnosis(question)
             if diagnosis is not None:
                 return diagnosis
@@ -166,6 +176,13 @@ class ConversationSession(WorkbenchSession):
             return super()._turn(question)
         references = self.query_references()
         references["controller"] = self.controller.endpoint
+        choices = task_options(references.pop("clarification_options", None))
+        ordinal = choice_number(question)
+        if ordinal is not None and 1 <= ordinal <= len(choices):
+            references["clarification_selection"] = {
+                "number": ordinal,
+                "label": choices[ordinal - 1],
+            }
         history = (
             self.input_history
             if self.input_history is not None
@@ -176,6 +193,8 @@ class ConversationSession(WorkbenchSession):
 
         def invoke_read(name: str, arguments: JSONObject, remaining: float) -> ReadResult:
             """Share validated identities with task tools while keeping visible selection staged."""
+            if name in {"search_runbooks", "read_runbook"}:
+                return runbooks.invoke(name, arguments)
             returned = adapter.read(name, arguments, remaining)
             tasks.learn_missions(adapter.task_missions(returned))
             return returned
@@ -206,7 +225,7 @@ class ConversationSession(WorkbenchSession):
             adapter.references,
             history,
             invoke_read,
-            tool_definitions=adapter.definitions() + task_definitions(),
+            tool_definitions=adapter.definitions() + task_definitions() + runbooks.definitions(),
             progress=self.progress,
             act=invoke_task,
             task_read_context=tasks.cache_context,
@@ -277,6 +296,11 @@ class ConversationSession(WorkbenchSession):
             adapter.publish(result.evidence, publish_raw=not tasks.owns_selection)
             if tasks.owns_selection:
                 self.last_mission = mission
+        citations = runbooks.citations(result.evidence)
+        if citations:
+            text += "\n\n" + citations
+            if presentation is not None:
+                presentation += "\n\n" + citations
         if self.activity is not None:
             self.activity.reply = presentation
         return text

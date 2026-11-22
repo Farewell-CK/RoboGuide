@@ -31,7 +31,7 @@ from roboguide_workbench.plan_view import LIFECYCLE_LABELS, plan_document, plan_
 from roboguide_workbench.routing import Query, Router
 from roboguide_workbench.session import HELP, LOCAL_SNAPSHOT_COMMANDS, Session
 from roboguide_workbench.state_queries import choices, discover, fields, read_state
-from roboguide_workbench.task_context import TaskDialogue
+from roboguide_workbench.task_context import TaskDialogue, latest_task_options
 from roboguide_workbench.views import inventory_view, render_mission, render_nodes, safe_text
 
 EXTRA_HELP = """可以直接提问：有哪些设备？dog2 还有多少电？它在哪里？当前有哪些任务？
@@ -226,6 +226,7 @@ class WorkbenchSession(Session):
     model_label = "未加载"
     config_path: Path | None = None
     activity: TurnActivity | None = None
+    offered_choices: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -325,6 +326,9 @@ class WorkbenchSession(Session):
             "request_id": self.request_id,
             "draft": draft_reference(self.shown_draft),
             "task_dialogue": self.task_dialogue.export(),
+            "clarification_options": list(
+                latest_task_options(self.store.data.get("messages"), self.task_dialogue.context_id)
+            ),
         }
         if self.input_references is not None:
             references.update(self.input_references)
@@ -392,6 +396,7 @@ class WorkbenchSession(Session):
         if question.startswith("/") and question.partition(" ")[0] != "/choose":
             self.suggestion = None
         self.query_status = "complete"
+        self.offered_choices = ()
         record_history = question not in LOCAL_SNAPSHOT_COMMANDS
         if not question.startswith("/"):
             self.input_turn_id = self.display_turn_id or uuid.uuid4().hex
@@ -458,6 +463,16 @@ class WorkbenchSession(Session):
                     "turn_id": turn_id,
                     "displayed": False,
                     "truncated": len(result) > 64000,
+                    **(
+                        {
+                            "clarification": {
+                                "context_id": self.task_dialogue.context_id,
+                                "options": list(self.offered_choices),
+                            }
+                        }
+                        if self.offered_choices and len(result) <= 64000
+                        else {}
+                    ),
                 },
             ]
         )
@@ -714,6 +729,27 @@ class WorkbenchSession(Session):
 
         return display
 
+    def check_current_plan(self, expected: JSONObject, *, show_update: bool) -> ReadResult:
+        """Assess the exact displayed draft, optionally refreshing a stale explicit view."""
+        from roboguide_workbench.plan_view import same_plan
+        from roboguide_workbench.preflight import check_plan
+
+        if self.request_id is None or expected.get("request_id") != self.request_id:
+            raise WorkbenchError("请先展示当前完整计划。")
+        current = self.actions.get(self.request_id)
+        if not same_plan(expected, current) or current.get("lifecycle") != expected.get(
+            "lifecycle"
+        ):
+            if show_update:
+                return ReadResult(
+                    "计划或状态已改变，请确认新版本后再检查：\n" + self._show_request(current)
+                )
+            return ReadResult("计划版本或状态已变化。请先查看新计划，再重新检查。", False)
+        checked = check_plan(self.controller, checked_request(current))
+        self.query_status = "complete" if checked.complete else "partial"
+        self.last_check = checked
+        return checked
+
     def _command(self, text: str) -> str:
         """Dispatch explicit commands; model output never enters this method as a write."""
         command, _, argument = text.partition(" ")
@@ -811,20 +847,9 @@ class WorkbenchSession(Session):
             )
             return "反馈包已保存到本地：" + safe_text(str(path))
         if command == "/check":
-            from roboguide_workbench.preflight import check_plan
-
-            if argument or self.request_id is None or self.shown_draft is None:
+            if argument or self.shown_draft is None:
                 raise WorkbenchError("请先 /request 展示当前完整计划，再使用 /check。")
-            current = self.actions.get(self.request_id)
-            if any(
-                current.get(key) != self.shown_draft.get(key)
-                for key in ("draft_revision", "draft_digest", "lifecycle")
-            ):
-                return "计划或状态已改变，请确认新版本后再检查：\n" + self._show_request(current)
-            checked = check_plan(self.controller, checked_request(current))
-            self.query_status = "complete" if checked.complete else "partial"
-            self.last_check = checked
-            return checked.text
+            return self.check_current_plan(self.shown_draft, show_update=True).text
         if command == "/cancel":
             from roboguide_workbench.cancellation import CancellationActions, render_preview
 

@@ -22,6 +22,7 @@ class ReadResult:
     components: tuple[JSONObject, ...] = ()
     summary: str | None = None
     detail: str | None = None
+    wait_for_user: bool = False
 
 
 class OriginalOperationPending(WorkbenchError):
