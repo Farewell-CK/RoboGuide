@@ -1194,7 +1194,6 @@ fn live_natural_device_stop_rejects_mismatched_evidence() {
         "wrong-session",
         "unsafe-device",
         "ambiguous-batch",
-        "already-accepted-cancel",
     ] {
         let mut fixture =
             fixture_with_schema(domain::SAFE_STATE_OBSERVATION_SCHEMA, "device-observation");
@@ -1202,9 +1201,6 @@ fn live_natural_device_stop_rejects_mismatched_evidence() {
             fixture.fact(2, wire::ExecutionPhase::Failed, 5);
         }
         admit(&mut fixture);
-        if case == "already-accepted-cancel" {
-            receipt(&mut fixture);
-        }
         let original = fixture.allocations();
         let mut data = natural_device_payload(&fixture);
         let mut session = "s1";
@@ -1433,4 +1429,189 @@ fn retained_natural_device_failure_confirmation_rejects_mismatched_or_tampered_r
             "expected validate_restored failure for fault={fault}"
         );
     }
+}
+
+/// Natural device execution failure plus independent device safe-state closes without a fake Cancelled.
+#[test]
+fn natural_device_failure_closes_without_cancel_receipt() {
+    let mut fixture =
+        fixture_with_schema(domain::SAFE_STATE_OBSERVATION_SCHEMA, "device-observation");
+    fixture.fact(2, wire::ExecutionPhase::Failed, 5);
+    admit(&mut fixture);
+    let command = fixture.attempt.command();
+    let generation = fixture
+        .controller
+        .bridge
+        .current_attempt_generation(command.group_id(), command.task_ref(), command.role_id())
+        .unwrap();
+    let value = serde_json::json!({
+        "execution_id": fixture.attempt.execution_id(),
+        "execution_generation": generation,
+        "command_id": null,
+        "safe_state": true,
+        "assurance": "device-observation",
+        "terminal_state": "FAILED"
+    });
+    observe(
+        &mut fixture,
+        "s1",
+        9,
+        serde_json::json!({"observations": [value]}),
+        Some(900_000),
+    );
+    safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(10)).unwrap();
+    assert_eq!(phase(&fixture), "stop_confirmed");
+    let checkpoint = serde_json::to_value(&fixture.controller.safety_stops).unwrap();
+    let stopped = &checkpoint[fixture.attempt.execution_id()];
+    assert_eq!(
+        stopped["record"]["last_evidence_source"],
+        domain::NATURAL_DEVICE_FAILURE_SOURCE
+    );
+    assert!(stopped["receipt_digest"].is_null());
+    assert!(safety_stop::attempt_confirmed(
+        &fixture.controller,
+        fixture.attempt.execution_id()
+    ));
+    assert!(!safety_stop::blocks_release(
+        &fixture.controller,
+        fixture.attempt.command().mission_id()
+    ));
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .execution_status(fixture.attempt.execution_id()),
+        Some(orchestration::RemoteExecutionStatus::Failed)
+    );
+    assert!(!safety_stop::validate_restored(&fixture.controller).unwrap());
+}
+
+/// Device safe-state after an earlier cancel receipt preserves natural Failed and confirms stop.
+#[test]
+fn device_failure_after_cancel_receipt_preserves_original_failed_result() {
+    let mut fixture =
+        fixture_with_schema(domain::SAFE_STATE_OBSERVATION_SCHEMA, "device-observation");
+    admit(&mut fixture);
+    receipt(&mut fixture);
+    fixture.fact(2, wire::ExecutionPhase::Failed, 8);
+    let command = fixture.attempt.command();
+    let generation = fixture
+        .controller
+        .bridge
+        .current_attempt_generation(command.group_id(), command.task_ref(), command.role_id())
+        .unwrap();
+    let value = serde_json::json!({
+        "execution_id": fixture.attempt.execution_id(),
+        "execution_generation": generation,
+        "command_id": null,
+        "safe_state": true,
+        "assurance": "device-observation",
+        "terminal_state": "FAILED"
+    });
+    observe(
+        &mut fixture,
+        "s1",
+        9,
+        serde_json::json!({"observations": [value]}),
+        Some(900_000),
+    );
+    safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(10)).unwrap();
+    assert_eq!(phase(&fixture), "stop_confirmed");
+    assert!(safety_stop::attempt_confirmed(
+        &fixture.controller,
+        fixture.attempt.execution_id()
+    ));
+    assert!(!safety_stop::validate_restored(&fixture.controller).unwrap());
+    let mut checkpoint = serde_json::to_value(&fixture.controller.safety_stops).unwrap();
+    let stopped = &mut checkpoint[fixture.attempt.execution_id()];
+    assert_eq!(stopped["accepted_at"], 7);
+    assert!(stopped["receipt_digest"].is_string());
+    assert_eq!(
+        fixture
+            .controller
+            .bridge
+            .execution_status(fixture.attempt.execution_id()),
+        Some(orchestration::RemoteExecutionStatus::Failed)
+    );
+    stopped["record"]["last_evidence_source"] =
+        serde_json::json!(domain::NATURAL_DEVICE_FAILURE_SOURCE);
+    fixture.controller.safety_stops = serde_json::from_value(checkpoint).unwrap();
+    assert!(safety_stop::validate_restored(&fixture.controller).is_err());
+}
+
+/// Device failure path refuses Running/Cancelled states, wrong assurance, and checkpoint tampering.
+#[test]
+fn natural_device_failure_fails_closed_for_nonfailed_or_tampered_evidence() {
+    for case in [
+        "running",
+        "cancelled",
+        "wrong-assurance",
+        "unsafe",
+        "before-failure",
+    ] {
+        let mut fixture =
+            fixture_with_schema(domain::SAFE_STATE_OBSERVATION_SCHEMA, "device-observation");
+        if case == "cancelled" {
+            fixture.fact(2, wire::ExecutionPhase::Cancelled, 5);
+        } else if !matches!(case, "running" | "before-failure") {
+            fixture.fact(2, wire::ExecutionPhase::Failed, 5);
+        }
+        admit(&mut fixture);
+        let command = fixture.attempt.command();
+        let generation = fixture
+            .controller
+            .bridge
+            .current_attempt_generation(command.group_id(), command.task_ref(), command.role_id())
+            .unwrap();
+        let value = serde_json::json!({
+            "execution_id": fixture.attempt.execution_id(),
+            "execution_generation": generation,
+            "command_id": null,
+            "safe_state": case != "unsafe",
+            "assurance": if case == "wrong-assurance" { "software-process" } else { "device-observation" },
+            "terminal_state": "FAILED"
+        });
+        observe(
+            &mut fixture,
+            "s1",
+            9,
+            serde_json::json!({"observations": [value]}),
+            Some(900_000),
+        );
+        if case == "before-failure" {
+            fixture.fact(2, wire::ExecutionPhase::Failed, 10);
+        }
+        safety_stop::tick(&mut fixture.controller, domain::TimestampMs::new(10)).unwrap();
+        assert_ne!(phase(&fixture), "stop_confirmed", "{case}");
+    }
+
+    let mut restored =
+        fixture_with_schema(domain::SAFE_STATE_OBSERVATION_SCHEMA, "device-observation");
+    restored.fact(2, wire::ExecutionPhase::Failed, 5);
+    admit(&mut restored);
+    let execution_id = restored.attempt.execution_id().to_owned();
+    let command = restored.attempt.command();
+    let generation = restored
+        .controller
+        .bridge
+        .current_attempt_generation(command.group_id(), command.task_ref(), command.role_id())
+        .unwrap();
+    let payload = serde_json::json!({"observations": [{
+        "execution_id": execution_id,
+        "execution_generation": generation,
+        "command_id": null,
+        "safe_state": true,
+        "assurance": "device-observation",
+        "terminal_state": "FAILED"
+    }]});
+    observe(&mut restored, "s1", 9, payload, Some(900_000));
+    safety_stop::tick(&mut restored.controller, domain::TimestampMs::new(10)).unwrap();
+    let original = serde_json::to_value(&restored.controller.safety_stops).unwrap();
+    let mut corrupt = original.clone();
+    corrupt[restored.attempt.execution_id()]["safe_proof"]["observation"]["terminal_state"] =
+        serde_json::json!("COMPLETED");
+    restored.controller.safety_stops = serde_json::from_value(corrupt).unwrap();
+    assert!(safety_stop::validate_restored(&restored.controller).is_err());
+    restored.controller.safety_stops = serde_json::from_value(original).unwrap();
+    assert!(!safety_stop::validate_restored(&restored.controller).unwrap());
 }
