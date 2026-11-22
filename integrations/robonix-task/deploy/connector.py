@@ -87,6 +87,21 @@ def combined_handler(
                     self.reply(200, {"state": "READY", "detail": "immutable origin store open"})
                 else:
                     self.reply(404, {"error": "route not found"})
+            elif self.path == "/v1/pilot/executions/device-safe-state":
+                adapter = getattr(self.server, "adapter", None)
+                if chassis is None or adapter is None:
+                    self.reply(
+                        404,
+                        {
+                            "error": "device safe-state profile requires "
+                            "--chassis-state and Pilot adapter"
+                        },
+                    )
+                else:
+                    self.reply(
+                        200,
+                        adapter.journal.device_safe_state_observations(chassis.read()),
+                    )
             elif self.path.startswith("/v1/pilot/"):
                 self.path = "/v1/" + self.path.removeprefix("/v1/pilot/")
                 PilotHandler.do_GET(self)

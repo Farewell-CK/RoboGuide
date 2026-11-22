@@ -603,6 +603,28 @@ class Journal:
                 )
             ]
 
+    @staticmethod
+    def _execution_generation(row: dict[str, Any]) -> int | None:
+        """Return only positive integer invocation generations, never booleans."""
+        invocation = row["request"].get("invocation", {})
+        generation = invocation.get("execution_generation")
+        if type(generation) is not int or generation <= 0:
+            return None
+        return generation
+
+    @staticmethod
+    def _events_match_session(row: dict[str, Any], events: list[dict[str, Any]]) -> bool:
+        """Verify every retained Pilot event matches this run's session and pinned provider."""
+        provider = row["progress"].get("provider")
+        for event_row in events:
+            event = json.loads(event_row["decoded"])
+            if (
+                event.get("session_id") != row["session_id"]
+                or json.loads(event_row["provider"]) != provider
+            ):
+                return False
+        return True
+
     def no_effects_observations(self) -> dict[str, Any]:
         """Export original canceled attempts with positive no-dispatch evidence."""
         observations = []
@@ -613,13 +635,8 @@ class Journal:
             ).fetchall()
             for record in records:
                 row = self.decode(record)
-                invocation = row["request"].get("invocation", {})
-                generation = invocation.get("execution_generation")
-                if (
-                    isinstance(generation, bool)
-                    or not isinstance(generation, int)
-                    or generation <= 0
-                ):
+                generation = self._execution_generation(row)
+                if generation is None:
                     continue
                 cached = self.effect_cache.get(row["handle"])
                 if cached and cached[0] == row["sequence"]:
@@ -694,6 +711,88 @@ class Journal:
                     },
                 }
                 self.effect_cache[row["handle"]] = (row["sequence"], observation)
+                addition = len(canonical(observation).encode()) + 1
+                if encoded_bytes + addition > 32768:
+                    break
+                encoded_bytes += addition
+                observations.append(observation)
+        return {"observations": observations}
+
+    def device_safe_state_observations(self, chassis: dict[str, Any] | None) -> dict[str, Any]:
+        """Export device safe-state evidence with fresh chassis observations."""
+        if not isinstance(chassis, dict) or chassis.get("availability") != "current":
+            return {"observations": []}
+        chassis_received_ns = chassis.get("received_at_ns")
+        chassis_value = chassis.get("value")
+        if (
+            type(chassis_received_ns) is not int
+            or chassis_received_ns <= 0
+            or not isinstance(chassis_value, dict)
+            or chassis_value.get("stale") is not False
+            or chassis_value.get("posture") not in {"down", "standing"}
+        ):
+            return {"observations": []}
+        observations: list[dict[str, Any]] = []
+        encoded_bytes = 32
+        with self.lock:
+            records = self.db.execute(
+                "SELECT * FROM runs WHERE state IN ('FAILED','CANCELED') "
+                "ORDER BY created_ns DESC LIMIT 256"
+            ).fetchall()
+            for record in records:
+                row = self.decode(record)
+                generation = self._execution_generation(row)
+                if generation is None:
+                    continue
+                events = self.events(row["handle"])
+                if not self._events_match_session(row, events):
+                    continue
+                terminal_ref_ns = max(
+                    [row["created_ns"], *(event["received_ns"] for event in events)]
+                )
+                if chassis_received_ns < terminal_ref_ns:
+                    continue
+                if row["state"] == "FAILED":
+                    if row["cancel_requested"]:
+                        continue
+                    try:
+                        detail = json.loads(row["detail"])
+                    except (ValueError, TypeError):
+                        continue
+                    if not isinstance(detail, dict):
+                        continue
+                    basis = detail.get("basis")
+                    if basis == "robonix-pilot-task-result/v1":
+                        if (
+                            detail.get("native_status") != "failed"
+                            or row["progress"].get("last_kind") != "final_text"
+                        ):
+                            continue
+                    elif basis == "robonix-preplan-failure-and-idle/v1":
+                        if detail.get("native_idle_confirmed") is not True:
+                            continue
+                    else:
+                        continue
+                    observation: dict[str, Any] = {
+                        "execution_id": row["attempt"],
+                        "execution_generation": generation,
+                        "command_id": None,
+                        "terminal_state": "FAILED",
+                        "safe_state": True,
+                        "assurance": "device-observation",
+                    }
+                else:
+                    if not row["cancel_requested"] or row["progress"].get(
+                        "manual_cancel_settlement"
+                    ):
+                        continue
+                    observation = {
+                        "execution_id": row["attempt"],
+                        "execution_generation": generation,
+                        "command_id": "cancel-" + row["attempt"],
+                        "safe_state": True,
+                        "assurance": "device-observation",
+                    }
                 addition = len(canonical(observation).encode()) + 1
                 if encoded_bytes + addition > 32768:
                     break
