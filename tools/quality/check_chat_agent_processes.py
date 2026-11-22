@@ -841,18 +841,20 @@ def local_tool_views(chat: ChatProcess, trace: Trace, *, narrow: bool) -> None:
             lambda: label in chat.text()[offset:] and "采集 " in chat.text()[offset:],
             "saved detail page after display acknowledgement",
         )
-        # At 42 columns, the diagnostic receipt starts below the first detail page.
-        for _ in range(4):
-            if "Controller 记录的原因" in chat.text()[offset:]:
+        # The TUI writes only changed cells during an ordinary update. Repaint
+        # before matching a whole evidence phrase or a changing turn number.
+        for _ in range(5):
+            if "安全声明" in chat.text()[offset:]:
                 break
             os.write(chat.master, b"\x1b[6~")
             chat.pump()
-        chat.wait(
-            lambda: "Controller 记录的原因" in chat.text()[offset:],
-            "original diagnosis in local detail",
-        )
+            chat.process.send_signal(signal.SIGWINCH)
+            chat.pump()
+        chat.wait(lambda: "安全声明" in chat.text()[offset:], "original diagnosis in local detail")
         first_page = len(chat.text())
         os.write(chat.master, b"\x1b[D")
+        chat.pump()
+        chat.process.send_signal(signal.SIGWINCH)
         chat.wait(lambda: "详情 2/" in chat.text()[first_page:], "older acknowledged activity")
     finally:
         os.write(chat.master, b"\x1b")
@@ -877,14 +879,16 @@ def local_tool_views(chat: ChatProcess, trace: Trace, *, narrow: bool) -> None:
         )
         offset = len(chat.text())
         reads = len(trace.reads)
-        os.write(chat.master, b"/diagnose ")
+        os.write(chat.master, b"/diagnose mission-dia")
         try:
             chat.wait(
                 lambda: "会话已显示" in chat.text()[offset:], "acknowledged object suggestions"
             )
             os.write(chat.master, b"\x1b[B\r")
+            chat.pump()
+            chat.process.send_signal(signal.SIGWINCH)
             chat.wait(
-                lambda: "/diagnose mission-diagnosis" in chat.text()[offset:],
+                lambda: "你 > /diagnose mission-diagnosis" in chat.text()[offset:],
                 "chosen Mission placed in the draft",
             )
             assert len(trace.reads) == reads

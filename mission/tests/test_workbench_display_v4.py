@@ -16,6 +16,7 @@ import pytest
 from mission.models import JSONObject
 from roboguide_workbench import cli, terminal
 from roboguide_workbench.actions import MissionActions
+from roboguide_workbench.activity import displayed_activity
 from roboguide_workbench.conversation import ConversationSession
 from roboguide_workbench.persistence import SessionStore
 from test_workbench import inventory, no_model, node
@@ -216,6 +217,9 @@ def test_hidden_refresh_preserves_visible_references_durably(
         assert asyncio.run(terminal.interactive(session)) == 0
         assert_saved()
         assert session.store.data["commands"] == []
+        visible = displayed_activity(session.store.data)
+        all_messages = cast(list[JSONObject], session.store.data["messages"])
+        assert [record["turn_id"] for record in visible] == [all_messages[1]["turn_id"]]
         if hidden in {"write", "flush"}:
             assert output.failed
     finally:
