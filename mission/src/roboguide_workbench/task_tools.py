@@ -24,6 +24,20 @@ from roboguide_workbench.views import safe_text
 from roboguide_workbench.workspace import WorkbenchSession, draft_reference
 
 
+def _standalone_plan_check(text: str) -> bool:
+    """Qualify the common inspection questions without scanning across action clauses."""
+    normalized = "".join(text.split()).rstrip("？?。！!")
+    return bool(
+        re.fullmatch(
+            r"(?:请|帮我)?(?:先|只|仅)?(?:检查|核对|评估)(?:一下)?"
+            r"(?:(?:当前|这个|这份|该)的?)?计划(?:的)?(?:执行条件)?"
+            r"|(?:(?:当前|这个|这份|该)的?)?计划(?:现在)?"
+            r"(?:能否|是否能|为什么不能|为何不能|为什么没法|能|可以)(?:执行|运行)(?:吗|呢)?",
+            normalized,
+        )
+    )
+
+
 def definitions() -> list[JSONObject]:
     """Expose bounded original-text actions rather than model-authored MissionPlan bytes."""
     source: JSONObject = {"type": "string", "minLength": 1, "maxLength": 16}
@@ -207,11 +221,7 @@ class TaskTools:
         prefix = ""
         capability_details: str | None = None
         if name in {"execute_plan", "approve_plan", "cancel_task", "start_task", "answer_request"}:
-            if re.search(
-                r"(?:检查|检查一下|核对).{0,12}计划|计划.{0,12}(?:能否|是否|为什么|为何|不能|能执行吗|可执行吗|"
-                r"执行条件|执行前检查)",
-                self.question,
-            ) and not re.search(r"并执行|再执行|然后执行|并审批|并取消", self.question):
+            if _standalone_plan_check(self.question):
                 raise ToolRefusal("本轮问的是计划检查，先给出检查结果。")
             index = choice_number(self.question)
             if index is not None and (

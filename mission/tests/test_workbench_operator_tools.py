@@ -81,8 +81,9 @@ def test_plan_check_preserves_original_draft_and_cannot_submit(
         monkeypatch.setattr(session.actions, "get", refresh)
         transport = Responses(
             [
+                _response(_call("execute_plan", {}, "before-inspection")),
                 _response(_call("check_plan", {})),
-                _response(_call("execute_plan", {}, "attempt")),
+                _response(_call("execute_plan", {}, "after-inspection")),
                 _response(_message("不能根据不完整的检查执行。")),
                 _response(_call("check_plan", {})),
                 _response(_message("先查看更新版。")),
@@ -94,7 +95,10 @@ def test_plan_check_preserves_original_draft_and_cannot_submit(
         assert "缺少已发布的巡检合同" in output.getvalue()
         assert "证据不可用" in output.getvalue() and "下一步" in output.getvalue()
         assert session.store.data["commands"] == commands and controller.submissions == []
-        continuation = cast(list[JSONObject], transport.requests[1]["input"])
+        first = cast(list[JSONObject], transport.requests[1]["input"])
+        refused = json.loads(str(first[-1]["output"]))
+        assert refused["status"] == "needs_context" and refused["network_requests"] == 0
+        continuation = cast(list[JSONObject], transport.requests[2]["input"])
         actual = json.loads(str(continuation[-1]["output"]))
         assert actual["scope"] == "configured-controller/current-identity"
         stale = True
