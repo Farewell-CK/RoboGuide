@@ -220,6 +220,10 @@ Mission provenance 记录模型调用阶段和显式缓存前缀摘要，并在 
 `cached_tokens`、`cache_write_tokens` 和 `reasoning_tokens`。
 摘要只覆盖断点及其之前的上下文，不包含断点之后的请求数据。历史记录可省略这些字段。
 
+MI 的 urllib Transport 还会记录响应头到达和响应体读取完成的单调时钟耗时。
+超时可以定位到等待响应头或读取响应体，已收到的 HTTP 状态和上游请求 ID 随调用落库。
+字段见 [Mission provenance 合同](../contracts/mission/provenance-v0.1/README.md)。
+
 ```bash
 uv sync --dev
 uv run mission-service
