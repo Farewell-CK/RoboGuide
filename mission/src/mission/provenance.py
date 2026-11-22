@@ -13,7 +13,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from mission.models import JSONObject, JSONValue
 from mission.provider_mission_plan import HOST_OBJECTIVE_PROFILE
@@ -33,6 +33,70 @@ _PROVIDER_STAGES = {
     "deployment_recovery_v0": "deployment_recovery",
 }
 _CACHE_PREFIX_DIGEST = re.compile(r"sha256:[a-f0-9]{64}")
+_HTTP_REQUEST_ID = re.compile(r"[A-Za-z0-9_.:-]{1,256}")
+TransportFailurePhase = Literal[
+    "awaiting_headers", "reading_body", "http_status", "decoding_response"
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderHttpTiming:
+    """Monotonic timings and allowlisted HTTP metadata from one provider POST."""
+
+    elapsed_ms: int
+    headers_received_ms: int | None
+    body_read_ms: int | None
+    http_status_code: int | None
+    upstream_request_id: str | None
+    failure_phase: TransportFailurePhase | None
+
+    def to_json(self) -> JSONObject:
+        """Keep response metadata distinct from the provider's JSON response identity."""
+        return {
+            "elapsed_ms": self.elapsed_ms,
+            "headers_received_ms": self.headers_received_ms,
+            "body_read_ms": self.body_read_ms,
+            "http_status_code": self.http_status_code,
+            "upstream_request_id": self.upstream_request_id,
+            "failure_phase": self.failure_phase,
+        }
+
+
+@dataclass(slots=True)
+class ProviderHttpCapture:
+    """Hold the transport observation for the current client call only."""
+
+    timing: ProviderHttpTiming | None = None
+
+
+_HTTP_CAPTURE: ContextVar[ProviderHttpCapture | None] = ContextVar(
+    "mission_provider_http_capture", default=None
+)
+
+
+@contextmanager
+def capture_provider_http() -> Iterator[ProviderHttpCapture]:
+    """Scope optional HTTP evidence without changing injected transport interfaces."""
+    capture = ProviderHttpCapture()
+    token = _HTTP_CAPTURE.set(capture)
+    try:
+        yield capture
+    finally:
+        _HTTP_CAPTURE.reset(token)
+
+
+def record_provider_http(timing: ProviderHttpTiming) -> None:
+    """Record one actual transport observation, including incomplete responses."""
+    capture = _HTTP_CAPTURE.get()
+    if capture is not None:
+        capture.timing = timing
+
+
+def upstream_request_id(values: list[str]) -> str | None:
+    """Accept one bounded opaque request ID from HTTP response headers."""
+    if len(values) == 1 and _HTTP_REQUEST_ID.fullmatch(values[0]) is not None:
+        return values[0]
+    return None
 
 
 def implementation_identity() -> JSONObject:
@@ -162,6 +226,8 @@ def provider_call(
     error: BaseException | None,
     started_at_ms: int,
     finished_at_ms: int,
+    *,
+    http_timing: ProviderHttpTiming | None = None,
 ) -> None:
     """Retain actual requested/returned identity and content digests without auth headers."""
     trace = _TRACE.get()
@@ -203,6 +269,8 @@ def provider_call(
             evidence["stage"] = _PROVIDER_STAGES[schema_name]
     if (prefix_digest := _cache_prefix_digest(payload)) is not None:
         evidence["cache_prefix_digest"] = prefix_digest
+    if http_timing is not None:
+        evidence["http_timing"] = http_timing.to_json()
     usage = response.get("usage") if response is not None else None
     if isinstance(usage, dict):
         token_usage: dict[str, int] = {}
@@ -329,8 +397,53 @@ def validate_snapshot(value: JSONObject) -> None:
                 for k, v in token_usage.items()
             ):
                 raise ValueError("provenance token_usage must contain non-negative integer counts")
+        if "http_timing" in call:
+            _validate_http_timing(call["http_timing"])
         if "plan_assembly" in call:
             _validate_plan_assembly(call["plan_assembly"])
+
+
+def _validate_http_timing(value: JSONValue) -> None:
+    """Reject invalid HTTP observations while allowing older uninstrumented calls."""
+    if not isinstance(value, dict) or set(value) != {
+        "elapsed_ms",
+        "headers_received_ms",
+        "body_read_ms",
+        "http_status_code",
+        "upstream_request_id",
+        "failure_phase",
+    }:
+        raise ValueError("provenance provider HTTP timing has invalid fields")
+    elapsed = value["elapsed_ms"]
+    headers = value["headers_received_ms"]
+    body = value["body_read_ms"]
+    status = value["http_status_code"]
+    request_id = value["upstream_request_id"]
+    phase = value["failure_phase"]
+    if (
+        type(elapsed) is not int
+        or elapsed < 0
+        or (headers is not None and (type(headers) is not int or not 0 <= headers <= elapsed))
+        or (
+            body is not None
+            and (
+                type(body) is not int
+                or type(headers) is not int
+                or not 0 <= body <= elapsed - headers
+            )
+        )
+        or (status is not None and (type(status) is not int or not 100 <= status <= 599))
+        or (
+            request_id is not None
+            and (not isinstance(request_id, str) or upstream_request_id([request_id]) is None)
+        )
+        or (headers is None and (status is not None or request_id is not None))
+        or phase
+        not in (None, "awaiting_headers", "reading_body", "http_status", "decoding_response")
+        or ((phase == "awaiting_headers") != (headers is None))
+        or (phase in (None, "http_status", "decoding_response") and body is None)
+    ):
+        raise ValueError("provenance provider HTTP timing is inconsistent")
 
 
 def _validate_plan_assembly(value: JSONValue) -> None:

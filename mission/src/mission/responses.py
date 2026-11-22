@@ -39,7 +39,16 @@ from mission.operation_effect_review import operation_effect_composition_review
 from mission.plan_validation import PlanValidationError, reference_issues
 from mission.planning_profile import DeploymentPlanningProfile
 from mission.planning_world_evidence import planning_world_review_payload
-from mission.provenance import ensure_provider_budget, provider_call, record_plan_assembly
+from mission.provenance import (
+    ProviderHttpTiming,
+    TransportFailurePhase,
+    capture_provider_http,
+    ensure_provider_budget,
+    provider_call,
+    record_plan_assembly,
+    record_provider_http,
+    upstream_request_id,
+)
 from mission.provider_errors import (
     MissionIdentityError,
 )
@@ -97,25 +106,67 @@ class UrllibJsonTransport:
             headers=dict(headers),
             method="POST",
         )
+        start = time.monotonic_ns()
+        headers_at: int | None = None
+        body_at: int | None = None
+        status_code: int | None = None
+        request_id: str | None = None
+        phase: TransportFailurePhase | None = "awaiting_headers"
+        http_error: urllib.error.HTTPError | None = None
         try:
-            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
-                raw = response.read(2 * 1024 * 1024 + 1)
-                if len(raw) > 2 * 1024 * 1024:
-                    raise MissionProviderError("provider response exceeds its byte limit")
-                body = raw.decode("utf-8")
-        except urllib.error.HTTPError as error:
-            detail = error.read(4096).decode("utf-8", errors="replace")[:1000]
-            raise MissionProviderError(
-                f"provider returned HTTP {error.code}: {detail}", status_code=error.code
-            ) from error
+            try:
+                response = urllib.request.urlopen(request, timeout=timeout_seconds)  # noqa: S310
+            except urllib.error.HTTPError as error:
+                http_error = error
+                response = error
+            headers_at = time.monotonic_ns()
+            phase = "reading_body"
+            with response:
+                status = response.status
+                if type(status) is int and 100 <= status <= 599:
+                    status_code = status
+                if response.headers is not None:
+                    request_id = upstream_request_id(response.headers.get_all("x-request-id", []))
+                limit = 4096 if http_error is not None else 2 * 1024 * 1024
+                raw = response.read(limit if http_error is not None else limit + 1)
+                body_at = time.monotonic_ns()
+            if http_error is not None:
+                phase = "http_status"
+                detail = raw.decode("utf-8", errors="replace")[:1000]
+                raise MissionProviderError(
+                    f"provider returned HTTP {http_error.code}: {detail}",
+                    status_code=http_error.code,
+                ) from http_error
+            if len(raw) > limit:
+                raise MissionProviderError("provider response exceeds its byte limit")
+            phase = "decoding_response"
+            decoded: object = json.loads(raw.decode("utf-8"))
+            if not isinstance(decoded, dict) or not all(isinstance(key, str) for key in decoded):
+                raise MissionProviderError("provider response must be a JSON object")
+            phase = None
+            return cast(JSONObject, decoded)
         except (urllib.error.URLError, TimeoutError, OSError, HTTPException) as error:
             raise MissionProviderError(
-                f"provider request failed: {error}", transport_failure=True
+                f"provider request failed: {error}",
+                transport_failure=True,
             ) from error
-        decoded: object = json.loads(body)
-        if not isinstance(decoded, dict) or not all(isinstance(key, str) for key in decoded):
-            raise MissionProviderError("provider response must be a JSON object")
-        return cast(JSONObject, decoded)
+        finally:
+            record_provider_http(
+                ProviderHttpTiming(
+                    elapsed_ms=(time.monotonic_ns() - start) // 1_000_000,
+                    headers_received_ms=(
+                        (headers_at - start) // 1_000_000 if headers_at is not None else None
+                    ),
+                    body_read_ms=(
+                        (body_at - headers_at) // 1_000_000
+                        if body_at is not None and headers_at is not None
+                        else None
+                    ),
+                    http_status_code=status_code,
+                    upstream_request_id=request_id,
+                    failure_phase=phase,
+                )
+            )
 
 
 def _validate_planning_world(
@@ -798,19 +849,34 @@ class _ResponsesClient:
             ]
         ensure_provider_budget()
         started_at_ms = int(time.time() * 1000)
-        try:
-            response = self._transport.post_json(
-                self._endpoint,
-                headers,
-                payload,
-                self._settings.llm.timeout_seconds
-                if timeout_seconds is None
-                else min(self._settings.llm.timeout_seconds, timeout_seconds),
-            )
-        except Exception as error:
-            provider_call(payload, None, error, started_at_ms, int(time.time() * 1000))
-            raise
-        provider_call(payload, response, None, started_at_ms, int(time.time() * 1000))
+        with capture_provider_http() as capture:
+            try:
+                response = self._transport.post_json(
+                    self._endpoint,
+                    headers,
+                    payload,
+                    self._settings.llm.timeout_seconds
+                    if timeout_seconds is None
+                    else min(self._settings.llm.timeout_seconds, timeout_seconds),
+                )
+            except Exception as error:
+                provider_call(
+                    payload,
+                    None,
+                    error,
+                    started_at_ms,
+                    int(time.time() * 1000),
+                    http_timing=capture.timing,
+                )
+                raise
+        provider_call(
+            payload,
+            response,
+            None,
+            started_at_ms,
+            int(time.time() * 1000),
+            http_timing=capture.timing,
+        )
         if response.get("error") is not None:
             raise MissionProviderError(f"provider returned an error: {response['error']}")
         if response.get("status") != "completed":
