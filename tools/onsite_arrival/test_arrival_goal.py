@@ -62,6 +62,7 @@ def fixture(monkeypatch: pytest.MonkeyPatch) -> Any:
                 "source": {
                     "source_id": "observer",
                     "revision": 1,
+                    "max_age_ms": arrival.AGE_MS,
                     "require_artifact": False,
                     "producer_principals": ["observer"],
                 },
@@ -83,14 +84,29 @@ def fixture(monkeypatch: pytest.MonkeyPatch) -> Any:
         ]
         posted: list[dict[str, Any]] = []
 
-        def exchange(peer: Any, path: str, body: Any = None) -> Any:
+        def exchange(
+            peer: Any, path: str, body: Any = None, *, deadline_ns: int | None = None
+        ) -> Any:
             """Return the matching projection; record only actual goal submissions."""
             if path == "/v1/mission-goal-evidence":
                 posted.append(body)
-                return {"receipt": {"evidence": body, "authority_subject": "observer"}}
+                return {
+                    "receipt": {
+                        "evidence": body,
+                        "authority_subject": "observer",
+                        "input_digest": canonical_plan_digest(body),
+                    }
+                }
             return {
                 "/v1/missions/trial/plan-revisions": view,
-                "/v1/missions/trial": {"status": "Running", "group_id": view["current_group_id"]},
+                "/v1/missions/trial": {
+                    "status": "Running",
+                    "group_id": view["current_group_id"],
+                    "mission_id": "trial",
+                    "goal_gate": view["goal_contract"]["digest"],
+                    "isolation": None,
+                    "plan_revision": view["current_plan_revision"],
+                },
                 "/v1/missions/trial/execution-attempts": {"attempts": rows},
             }[path]
 
@@ -136,7 +152,7 @@ def test_delegate_preserves_map_and_original_text() -> None:
         objective="到电梯口 (13.99, 0.26)，地图 A，到达后保持停止。",
     )
     untouched = copy.deepcopy(original)
-    fields = arrival.policy_fields(original)
+    fields = arrival.policy_fields(original, task_id="visit")
     assert fields["goal_context"]["target"]["objective"] == intent["objective"]
     assert original == untouched
 
@@ -199,3 +215,139 @@ def test_unknown_does_not_publish(fixture: Any) -> None:
         "submitted": False,
     }
     assert not posted
+
+
+def test_handoff_with_another_destination_in_the_same_role(fixture: Any) -> None:
+    """Find the original goal even when the reviewed itinerary includes another stop."""
+    peer, view, rows, _ = fixture(True)
+    switch(view, rows)
+    current = view["current_plan"]
+    current["tasks"].extend(plan("会议室", "dog1", "other-stop")["tasks"])
+    display, _ = arrival.observation(peer, "trial")
+    assert "电梯口" in display
+
+
+def test_mutating_exported_policy_cannot_change_future_contracts() -> None:
+    """An experiment adjusting its copy cannot alter source enrollment or later goals."""
+    first = arrival.policy_fields(plan("电梯口"))
+    first["goal_verifier"]["verifier"] = {"name": "foreign"}
+    first["goal_context"]["target"]["operation"]["name"] = "foreign"
+    second = arrival.policy_fields(plan("会议室"))
+    assert second["goal_verifier"]["verifier"]["name"] == "onsite"
+    assert second["goal_context"]["target"]["operation"]["name"] == "navigate"
+
+
+def test_generic_task_needs_explicit_selection() -> None:
+    """Do not automatically select a photo or posture delegation as the arrival Task."""
+    original = plan("电梯口")
+    role = original["tasks"][0]["roles"][0]
+    role["execution_intent"] = {
+        "operation": arrival.DELEGATE,
+        "parameters": {"profile": "local-task-v1"},
+        "objective": "拍照并汇报电量",
+    }
+    with pytest.raises(ValueError, match="--task"):
+        arrival.policy_fields(original)
+
+
+def test_second_read_cannot_ignore_isolation(fixture: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hold any new report if the Mission entered isolation before the answer."""
+    peer, _, _, posted = fixture(False)
+    exchange = arrival.exchange
+    isolated = False
+
+    def read(*args: Any, **kwargs: Any) -> Any:
+        """Return actual-shaped Running with an active isolation after the first read."""
+        result = exchange(*args, **kwargs)
+        if args[1] == "/v1/missions/trial" and isolated:
+            result["isolation"] = {"kind": "safety"}
+        return result
+
+    def answer(_: str) -> str:
+        """Move the Mission into isolation while the prompt is displayed."""
+        nonlocal isolated
+        isolated = True
+        return "yes"
+
+    monkeypatch.setattr(arrival, "exchange", read)
+    with pytest.raises(ValueError, match="isolation"):
+        arrival.confirm(peer, "trial", answer)
+    assert not posted
+
+
+def test_duplicate_destinations_still_require_unique_attempt(fixture: Any) -> None:
+    """A matching label and responsibility must not choose between identical stops."""
+    peer, view, rows, posted = fixture(True)
+    switch(view, rows)
+    view["current_plan"]["tasks"].extend(plan("电梯口", "dog1", "another-stop")["tasks"])
+    with pytest.raises(ValueError, match="found 2"):
+        arrival.observation(peer, "trial")
+    assert not posted
+
+
+@pytest.mark.parametrize("read_ms", [800, 1001])
+def test_confirmation_shares_the_shorter_source_budget(
+    fixture: Any, monkeypatch: pytest.MonkeyPatch, read_ms: int
+) -> None:
+    """Charge the recheck, the outbound call and the receive TTL against the source limit."""
+    peer, view, _, posted = fixture(False)
+    view["goal_contract"]["source"]["max_age_ms"] = 1000
+    clock = Mock()
+    clock.monotonic_ns.return_value = 0
+    clock.time_ns.return_value = 1234567890123456789
+    monkeypatch.setattr(arrival, "time", clock)
+    ordinary = arrival.exchange
+
+    def exchange(peer: Any, path: str, body: Any = None, *, deadline_ns: int | None = None) -> Any:
+        """Delay the reread and capture the actual latest send deadline."""
+        if path.endswith("/execution-attempts") and deadline_ns is not None:
+            clock.monotonic_ns.return_value = read_ms * 1_000_000
+            clock.time_ns.return_value += read_ms * 1_000_000
+        if body is not None:
+            assert deadline_ns is not None and clock.monotonic_ns() < deadline_ns
+            assert deadline_ns + body["valid_for_ms"] * 1_000_000 <= 1_000_000_000
+            assert body["sequence"] == 1234567890123456789
+        return ordinary(peer, path, body, deadline_ns=deadline_ns)
+
+    monkeypatch.setattr(arrival, "exchange", exchange)
+    if read_ms < 1000:
+        arrival.confirm(peer, "trial", lambda _: "yes")
+        assert len(posted) == 1
+    else:
+        with pytest.raises(ValueError, match="expired"):
+            arrival.confirm(peer, "trial", lambda _: "yes")
+        assert not posted
+
+
+@pytest.mark.parametrize("recorded", [True, False])
+def test_lost_reply_checks_only_the_original_input(
+    fixture: Any, monkeypatch: pytest.MonkeyPatch, recorded: bool
+) -> None:
+    """Recover a recorded observation by digest and leave unconfirmed delivery unresolved."""
+    from roboguide_workbench.client import WorkbenchError
+
+    peer, view, _, posted = fixture(False)
+    ordinary = arrival.exchange
+
+    def exchange(peer: Any, path: str, body: Any = None, **kwargs: Any) -> Any:
+        """Drop the only POST response and expose only the selected retained input."""
+        result = ordinary(peer, path, body, **kwargs)
+        if body is not None:
+            view["goal_evidence"] = [
+                {
+                    "input_digest": canonical_plan_digest(body) if recorded else "different",
+                    "completed": False,
+                    "incident": None,
+                }
+            ]
+            raise WorkbenchError("response lost")
+        return result
+
+    monkeypatch.setattr(arrival, "exchange", exchange)
+    if recorded:
+        result = arrival.confirm(peer, "trial", lambda _: "yes")
+        assert result == {"submission": "recorded", "goal_evidence": view["goal_evidence"][0]}
+    else:
+        with pytest.raises(ValueError, match="/v1/missions/trial/plan-revisions"):
+            arrival.confirm(peer, "trial", lambda _: "yes")
+    assert len(posted) == 1

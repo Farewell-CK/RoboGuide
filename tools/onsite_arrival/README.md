@@ -31,7 +31,7 @@ policy.update(policy_fields(revision_view["current_plan"]))
 
 默认验收原任务指定的物理实体。原始 Mission 允许经审核的接替时，安装时传 `--allow-handoff`，或在 Python 里传 `allow_handoff=True`。验收会沿原 Context 和 ContextRole 找到当前任务，显示当前 Actor 和执行 Node。多个可能的导航任务需要用 `--task` 指定要验收的那个，地点仍从任务读取。若一次执行历史中同一组、同一角色出现多个尝试且无法明确选定，工具会报告歧义。
 
-对于 `mobility.navigate@v1`，冻结任务的 destination 及同一组地图、坐标等参数。对于 `task.delegate@v1` 的 `local-task-v1`，现有接口把地点写在本地目标文字中，工具冻结并展示整段原文。接替后若重写了这段话，即使地名看起来相同，也会要求核对并拒绝提交。
+对于 `mobility.navigate@v1`，冻结任务的 destination 及同一组地图、坐标等参数。对于 `task.delegate@v1` 的 `local-task-v1`，同一操作也可用于拍照或读取电量。安装时用 `--task`（Python 用 `task_id`）指定到达任务，工具从该任务冻结并展示整段原文。接替后若重写了这段话，即使地名看起来相同，也会要求核对并拒绝提交。
 
 现场观察者使用自己的 peer 文件。该主体需要本租户现有的 Mission goal 发布授权，并且独立于安装者和提案者。命令显示机器人和目标，输入 `yes` 会重新核对当前任务并提交一次，其他输入结束本次观察。
 
@@ -39,4 +39,6 @@ policy.update(policy_fields(revision_view["current_plan"]))
 python tools/onsite_arrival/arrival_goal.py --peer observer.json confirm "$MISSION_ID"
 ```
 
-成功返回 Controller 的原始 evidence receipt。Mission 的最终状态仍由 Controller 结合其他任务的完成情况决定。
+输入 `yes` 后，工具开始计时，从五秒预算中扣除复核任务的耗时，再把剩余时间分给发送请求和 Controller 收到后的有效期。来源要求更短时采用其上限。Mission 进入隔离或观察过期时须重新观察。
+
+成功时返回 Controller 的原始回执。如果回复丢失，工具会用本次观察的摘要查一次 Controller 历史；查到会显示 `recorded` 及处理状态，查不到会打印查询路径和摘要。Mission 最终是否完成可从 Controller 的 Mission 状态查看。

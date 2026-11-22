@@ -8,13 +8,14 @@ import ssl
 import time
 import uuid
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
 from mission.submission_evidence import canonical_plan_digest
-from roboguide_workbench.client import identifier, request_json
+from roboguide_workbench.client import WorkbenchError, identifier, request_json
 from roboguide_workbench.views import safe_text
 
 Doc = dict[str, Any]
@@ -58,17 +59,23 @@ class Peer:
         return cls(config["endpoint"].rstrip("/"), tenant, identifier(config["principal"]), tls)
 
 
-def exchange(peer: Peer, path: str, body: Doc | None = None) -> Doc:
+def exchange(
+    peer: Peer, path: str, body: Doc | None = None, *, deadline_ns: int | None = None
+) -> Doc:
     """Read or submit once. Only source registry administration needs a global selector."""
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     if path != "/v1/verifier-sources":
         headers["X-RoboGuide-Tenant"] = peer.tenant
+    payload = None if body is None else json.dumps(body, allow_nan=False).encode()
+    timeout = 5.0 if deadline_ns is None else (deadline_ns - time.monotonic_ns()) / 1e9
+    if timeout <= 0:
+        raise ValueError("Arrival observation expired before contacting the Controller")
     return request_json(
         peer.endpoint + path,
         "GET" if body is None else "POST",
         headers,
-        None if body is None else json.dumps(body, allow_nan=False).encode(),
-        5,
+        payload,
+        timeout,
         peer.tls,
     )
 
@@ -134,7 +141,12 @@ def one(rows: list[Doc], label: str) -> Doc:
     return rows[0]
 
 
-def select_goal(plan: Doc, task_id: str | None, scope: tuple[str, str] | None = None) -> Doc:
+def select_goal(
+    plan: Doc,
+    task_id: str | None,
+    scope: tuple[str, str] | None = None,
+    expected_target: Doc | None = None,
+) -> Doc:
     """Read target and Actor from the same Role in the actual accepted plan."""
     choices = []
     for task in plan["tasks"]:
@@ -168,6 +180,8 @@ def select_goal(plan: Doc, task_id: str | None, scope: tuple[str, str] | None = 
                 target = {"operation": DELEGATE, "objective": intent["objective"]}
             else:
                 continue
+            if expected_target is not None and target != expected_target:
+                continue
             context = one([c for c in plan["contexts"] if c["id"] == lane[0]], "Context")
             link = one([r for r in context["roles"] if r["id"] == lane[1]], "ContextRole")
             actor = one([a for a in plan["mission"]["actors"] if a["id"] == link["actor"]], "Actor")
@@ -181,7 +195,14 @@ def select_goal(plan: Doc, task_id: str | None, scope: tuple[str, str] | None = 
                     "target": target,
                 }
             )
-    return one(choices, "arrival Role (select the navigation Task with --task if needed)")
+    if not choices and expected_target is not None:
+        raise ValueError("Current Task destination differs from the frozen arrival goal")
+    selected = one(choices, "arrival Role (select the navigation Task with --task if needed)")
+    if task_id is None and expected_target is None and selected["target"]["operation"] == DELEGATE:
+        raise ValueError(
+            "Select the delegated arrival Task with --task; its objective is free text"
+        )
+    return selected
 
 
 def policy_fields(plan: Doc, task_id: str | None = None, *, allow_handoff: bool = False) -> Doc:
@@ -190,7 +211,7 @@ def policy_fields(plan: Doc, task_id: str | None = None, *, allow_handoff: bool 
     if not allow_handoff and not goal["entity"]:
         raise ValueError("Fixed arrival requires a physical_entity in the accepted Actor")
     return {
-        "goal_verifier": SPEC,
+        "goal_verifier": deepcopy(SPEC),
         "goal_context": {
             "schema_version": "onsite-arrival-context/v1",
             "original_task": goal["task_id"],
@@ -199,7 +220,7 @@ def policy_fields(plan: Doc, task_id: str | None = None, *, allow_handoff: bool 
             "subject": {"kind": "context-role"}
             if allow_handoff
             else {"kind": "entity", "id": goal["entity"]},
-            "target": goal["target"],
+            "target": deepcopy(goal["target"]),
         },
     }
 
@@ -230,10 +251,10 @@ def install(peer: Peer, mission: str, policy: Doc, task: str | None, handoff: bo
     )
 
 
-def observation(peer: Peer, mission: str) -> tuple[str, Doc]:
+def observation(peer: Peer, mission: str, *, deadline_ns: int | None = None) -> tuple[str, Doc]:
     """Resolve the frozen destination and today's accepted Actor, Group and completed attempts."""
     base = mission_path(mission)
-    view = exchange(peer, base + "/plan-revisions")
+    view = exchange(peer, base + "/plan-revisions", deadline_ns=deadline_ns)
     contract = view["goal_contract"]
     ctx = view["goal_context"]
     if not contract or not ctx or not view["goal_source_current"]:
@@ -255,17 +276,23 @@ def observation(peer: Peer, mission: str) -> tuple[str, Doc]:
     # A reviewed replacement Task may have a new ID. Keep the original logical responsibility.
     original = ctx["original_task"]
     task_id = original if any(t["id"] == original for t in plan["tasks"]) else None
-    goal = select_goal(plan, task_id, scope)
-    if goal["target"] != ctx["target"]:
-        raise ValueError("Current Task destination differs from the frozen arrival goal")
+    goal = select_goal(plan, task_id, scope, ctx["target"])
     group = view["current_group_id"]
     rows = [
         r
-        for r in exchange(peer, base + "/execution-attempts")["attempts"]
+        for r in exchange(peer, base + "/execution-attempts", deadline_ns=deadline_ns)["attempts"]
         if r["group_id"] == group
     ]
-    state = exchange(peer, base)
-    if state.get("status") != "Running" or state.get("group_id") != group:
+    state = exchange(peer, base, deadline_ns=deadline_ns)
+    if state["isolation"] is not None:
+        raise ValueError("Mission entered isolation before the arrival observation")
+    if (
+        state["status"] != "Running"
+        or state["mission_id"] != mission
+        or state["group_id"] != group
+        or state["plan_revision"] != view["current_plan_revision"]
+        or state["goal_gate"] != contract["digest"]
+    ):
         raise ValueError("Mission is no longer running in the displayed Group")
     selected = one(
         [r for r in rows if (r["task_id"], r["role_id"]) == (goal["task_id"], goal["role_id"])],
@@ -288,6 +315,7 @@ def observation(peer: Peer, mission: str) -> tuple[str, Doc]:
         "contract_digest": contract["digest"],
         "source_id": source["source_id"],
         "source_revision": source["revision"],
+        "valid_for_ms": min(source["max_age_ms"], AGE_MS),
         "plan_revision": view["current_plan_revision"],
         "group_id": group,
         "plan_digest": view["current_plan_digest"],
@@ -318,11 +346,13 @@ def confirm(peer: Peer, mission: str, ask: Callable[[str], str] = input) -> Doc:
     if answer.strip() != "yes":
         return {"observation": "unknown", "submitted": False}
     started = time.monotonic_ns()
-    observed_ms = time.time_ns() // 1_000_000
-    if observation(peer, mission) != (display, binding):
+    observed_ns = time.time_ns()
+    deadline = started + binding["valid_for_ms"] * 1_000_000
+    if observation(peer, mission, deadline_ns=deadline) != (display, binding):
         raise ValueError("Mission changed during confirmation; inspect the current robot again")
-    remaining = AGE_MS - (time.monotonic_ns() - started + 999999) // 1_000_000
-    if remaining <= 0:
+    # Reserve time for delivery. The Controller starts its own validity window at receive.
+    valid_for_ms = (deadline - time.monotonic_ns()) // 2_000_000
+    if valid_for_ms <= 0:
         raise ValueError("Observation expired during recheck")
     evidence = {
         **binding,
@@ -330,17 +360,40 @@ def confirm(peer: Peer, mission: str, ask: Callable[[str], str] = input) -> Doc:
         "evidence_id": uuid.uuid4().hex,
         "verdict": "satisfied",
         "finality": "final",
-        "source_observed_at_ms": observed_ms,
-        "sequence": time.time_ns(),
-        "valid_for_ms": remaining,
+        "source_observed_at_ms": observed_ns // 1_000_000,
+        "sequence": observed_ns,
+        "valid_for_ms": valid_for_ms,
         "artifact_digest": None,
         "artifact_size_bytes": None,
     }
-    response = exchange(peer, "/v1/mission-goal-evidence", evidence)
-    receipt = response["receipt"]
-    if receipt["evidence"] != evidence or receipt["authority_subject"] != peer.principal:
-        raise ValueError("Returned receipt differs from the submitted observation")
-    return response
+    digest = canonical_plan_digest(evidence)
+    try:
+        response = exchange(
+            peer,
+            "/v1/mission-goal-evidence",
+            evidence,
+            deadline_ns=deadline - valid_for_ms * 1_000_000,
+        )
+        receipt = response["receipt"]
+        if (
+            receipt["evidence"] != evidence
+            or receipt["authority_subject"] != peer.principal
+            or receipt["input_digest"] != digest
+        ):
+            raise WorkbenchError("Returned receipt differs from the submitted observation")
+        return response
+    except (WorkbenchError, KeyError, TypeError) as error:
+        # The Controller may have committed before its reply was lost. Only look up this input.
+        path = mission_path(mission) + "/plan-revisions"
+        try:
+            history = exchange(peer, path)
+            if history["mission_id"] == mission:
+                for row in history["goal_evidence"]:
+                    if row["input_digest"] == digest:
+                        return {"submission": "recorded", "goal_evidence": row}
+        except (WorkbenchError, KeyError, TypeError):
+            pass
+        raise ValueError(f"未取得此观察的回执，可在 {path} 按 {digest} 查询。{error}") from error
 
 
 def main() -> None:
@@ -354,7 +407,9 @@ def main() -> None:
     attach = commands.add_parser("install")
     attach.add_argument("mission")
     attach.add_argument("--policy", type=Path, required=True)
-    attach.add_argument("--task", help="arrival Task ID when the plan has multiple possible goals")
+    attach.add_argument(
+        "--task", help="arrival Task ID for free-text delegation or multiple possible goals"
+    )
     attach.add_argument("--allow-handoff", action="store_true")
     commands.add_parser("confirm").add_argument("mission")
     args = parser.parse_args()
