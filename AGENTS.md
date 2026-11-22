@@ -2405,6 +2405,11 @@ Source drift and HTTP failure are system failures, while exact-plan negative fin
 original output and use the existing bounded regeneration budget. Ordinary endpoint reuse and
 timely per-Task verifiers must not inherit a global terminal-world barrier. See ADR-0109.
 
+ADR-0259 defines the dependency-window projection in Orchestration and its opt-in Controller view.
+Submission and read-only validation share the declaration-only lower bound. Caller-supplied history
+stays advisory. The Mission view and Workbench expose the scheduler's existing retry disposition.
+See the Controller timing preview and rendezvous replay tests before changing either boundary.
+
 For documentation changes, run:
 
 ```bash

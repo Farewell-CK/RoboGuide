@@ -12,6 +12,7 @@ from typing import cast
 import pytest
 from mission.deployment_assessment import plan_body_digest
 from mission.models import JSONObject
+from mission.plan_assessment import TIMING_PREVIEW_SCHEMA
 from roboguide_workbench import preflight
 from roboguide_workbench.actions import checked_request
 from roboguide_workbench.cli import display_question
@@ -45,25 +46,33 @@ def test_plan_check_preserves_original_draft_and_cannot_submit(
             """Check exact assessed plan bytes and keep the two assessment sources independent."""
             assert method == "POST" and json.loads(body) == original
             paths.append(url)
-            if url.endswith("/validate-plan"):
+            if url.endswith("/validate-plan?timing=v0.1"):
                 return {
-                    "schema_version": "roboguide.plan-validation/v0.1",
-                    "scope": "published-contracts",
-                    "mission_id": draft.mission_id,
-                    "plan_body_sha256": digest,
-                    "decision": "blocked",
-                    "verifier_source_digest": None,
-                    "deployment_digest": None,
-                    "execution_lifetime": None,
-                    "world_identity": None,
-                    "issues": [
-                        {
-                            "code": "deployment.operation_unsupported",
-                            "path": "/tasks/0",
-                            "message": "缺少已发布的巡检合同",
-                        }
-                    ],
-                    "issues_truncated": False,
+                    "schema_version": TIMING_PREVIEW_SCHEMA,
+                    "assessment": {
+                        "schema_version": "roboguide.plan-validation/v0.1",
+                        "scope": "published-contracts",
+                        "mission_id": draft.mission_id,
+                        "plan_body_sha256": digest,
+                        "decision": "blocked",
+                        "verifier_source_digest": None,
+                        "deployment_digest": None,
+                        "execution_lifetime": None,
+                        "world_identity": None,
+                        "issues": [
+                            {
+                                "code": "deployment.operation_unsupported",
+                                "path": "/tasks/0",
+                                "message": "缺少已发布的巡检合同",
+                            }
+                        ],
+                        "issues_truncated": False,
+                    },
+                    "timing": {
+                        "anchor": "mission_acceptance",
+                        "estimate_scope": "caller_supplied_advisory",
+                        "tasks": [],
+                    },
                 }
             assert url.endswith("/assess-initial-support")
             raise OSError("fixture source unavailable")

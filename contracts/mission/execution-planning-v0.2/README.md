@@ -56,6 +56,11 @@ MI 的声明检查还区分 `deployment.dependencies_unsupported`、
 
 ## 兼容性
 
+调用者可以请求时间窗诊断。`?timing=v0.1` 接受原有计划请求体，
+`?timing=history-v0.1` 同时接受历史估时。两个选项都在版本化回复的 `assessment`
+中保留原有检查格式，把历史风险放在 `timing`。见
+[ADR-0259](../../../docs/decisions/0259-dependency-window-preflight.md)。
+
 - 历史 execution evidence v0.1 保持原字段与摘要，不推断其未发布的拓扑能力。
 - 历史 plan-validation v0.1 仍可读取；其缺失的 topology 不能满足显式配置的 v0.2 evidence。
 - v0.2 声明与 Controller 返回的 topology、lifetime、world/source 必须精确一致。

@@ -320,6 +320,15 @@ fn v0_6_rejects_missing_nullable_timing_key() {
 #[test]
 fn mission_acceptance_rejects_unrepresentable_absolute_timing() {
     let mut document = mission_plan_json(&scheduled_phase1_plan());
+    // Leave unrelated Tasks unbounded so only the absolute timestamp is in question.
+    for task in document["tasks"].as_array_mut().unwrap() {
+        task["timing"] = serde_json::json!({
+            "earliest_start_offset_ms": 0,
+            "latest_start_offset_ms": null,
+            "completion_deadline_offset_ms": null,
+            "estimated_duration_ms": null,
+        });
+    }
     document["tasks"][0]["timing"] = serde_json::json!({
         "earliest_start_offset_ms": u64::MAX - 100,
         "latest_start_offset_ms": u64::MAX - 100,
@@ -762,4 +771,207 @@ fn future_scheduling_reservation_runs_through_control_lifecycle() {
         domain::EventPayload::SchedulingReservationReleased { task_ref, .. }
             if task_ref == &first
     )));
+}
+
+/// Replays the field DAG clock on the real orchestration path with in-memory nodes.
+#[test]
+fn rendezvous_deadline_replays_field_window_miss_and_single_deadline_change() {
+    // Projected from Controller events 9205131 through 9206448. The final photo's
+    // synthetic timing uses its 2,700 ms readiness-to-satisfaction interval in case 04.
+    let steps = [
+        ("dog2-go", 300_000, 431, 19_160),
+        ("dog2-shoot", 120_000, 19_497, 23_352),
+        ("dog1-verify", 180_000, 23_931, 31_412),
+        ("dog1-go", 300_000, 32_264, 156_549),
+        ("dog1-shoot", 120_000, 157_093, 159_249),
+    ];
+    let anchor = 1_000_000_u64;
+    let at = |offset: u64| TimestampMs::new(anchor + offset);
+    for (photo_deadline, should_miss) in [(120_000, true), (180_000, false)] {
+        let mut doc: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../scenarios/e1-shared-world-episode-51/mission-plan.json"
+        ))
+        .expect("fixture is JSON");
+        let templates = doc["tasks"].as_array().expect("two Task templates").clone();
+        doc["schema_version"] = serde_json::json!(domain::MISSION_PLAN_SCHEMA_V0_10);
+        for context in doc["contexts"].as_array_mut().expect("contexts exist") {
+            context["executor_constraints"] = serde_json::json!([]);
+        }
+        let mut tasks = Vec::new();
+        for (i, &(name, deadline, _, _)) in steps.iter().enumerate() {
+            // Keep the field dependency and actor boundaries with inert Task fixtures.
+            let mut task = templates[usize::from(i >= 2)].clone();
+            task["id"] = serde_json::json!(name);
+            task["depends_on"] = if i == 0 {
+                serde_json::json!([])
+            } else {
+                serde_json::json!([steps[i - 1].0])
+            };
+            task["timing"]["completion_deadline_offset_ms"] =
+                serde_json::json!(if i == 4 { photo_deadline } else { deadline });
+            task["roles"][0]["requirements"]["resources"] = serde_json::json!([]);
+            tasks.push(task);
+        }
+        doc["tasks"] = serde_json::json!(tasks);
+
+        let plan = decode_mission_plan(&doc.to_string()).expect("timing projection decodes");
+        let mission = plan.goal().mission_id().clone();
+        let group = ExecutionGroupId::new("rendezvous-deadline-replay").unwrap();
+        let correlation = CorrelationId::new("rendezvous-deadline-replay").unwrap();
+        let mut control = ControlPlane::new();
+        let mut state = InMemorySharedNodeState::new();
+        let mut events = InMemoryEventLog::new();
+        for node in ["fake-dog-1", "fake-dog-2"] {
+            control
+                .register_node(
+                    &mut state,
+                    registration(
+                        node,
+                        vec![Capability::new(CapabilityKind::Mobility, true)],
+                        vec![(
+                            CapabilityContractRef::new("mobility", "navigate", "v1").unwrap(),
+                            CapabilityKind::Mobility,
+                        )],
+                        vec![],
+                    ),
+                    NodeStatus::new(NodeHealth::Online, at(0)),
+                    at(0),
+                    &correlation,
+                    &mut events,
+                )
+                .expect("fake endpoint registers");
+        }
+        let nodes = ["fake-dog-1", "fake-dog-2"].map(|node| NodeId::new(node).unwrap());
+        let mut next_heartbeat = 1_000;
+        let mut advance_nodes = |to: u64,
+                                 control: &mut ControlPlane,
+                                 state: &mut InMemorySharedNodeState,
+                                 events: &mut InMemoryEventLog| {
+            while next_heartbeat <= to {
+                let timestamp = at(next_heartbeat);
+                for node in &nodes {
+                    let lease_id = control.node_lease(node).unwrap().lease_id().clone();
+                    control
+                        .accept_heartbeat(
+                            state,
+                            domain::NodeHeartbeat::new(
+                                node.clone(),
+                                lease_id,
+                                NodeStatus::new(NodeHealth::Online, timestamp),
+                            ),
+                            timestamp,
+                            control::DEFAULT_NODE_LEASE_TTL_MS,
+                            &correlation,
+                            events,
+                        )
+                        .expect("fake endpoint remains online along the replay clock");
+                }
+                next_heartbeat += 1_000;
+            }
+        };
+        let mut orchestrator = MissionOrchestrator::new();
+        orchestrator
+            .submit(
+                plan,
+                group.clone(),
+                &mut control,
+                at(0),
+                &correlation,
+                &mut events,
+            )
+            .expect("individually valid windows pass admission");
+        for (i, &(name, _, active, satisfied)) in steps.iter().enumerate() {
+            let ready = orchestrator.ready_tasks(&mission, &control);
+            assert_eq!(ready.len(), 1, "only the next dependency can become Ready");
+            let task = &ready[0];
+            assert_eq!(task.task_id().as_str(), name);
+            let due_at = if i == 4 && should_miss {
+                steps[i - 1].3
+            } else {
+                active
+            };
+            advance_nodes(due_at, &mut control, &mut state, &mut events);
+            let prepared = orchestrator.prepare_task(
+                &mission,
+                task,
+                &state,
+                &mut control,
+                at(due_at),
+                &correlation,
+                &mut events,
+            );
+
+            if i == 4 && should_miss {
+                let error = prepared.expect_err("expired photo never binds");
+                assert_eq!(
+                    error.scheduling_disposition().deferral(),
+                    Some(SchedulingDeferral::WindowMissed)
+                );
+                assert!(control.scheduled_task(task).is_none());
+                assert!(events.contains_payload(|payload| matches!(
+                    payload,
+                    domain::EventPayload::TaskSchedulingDeferred { task_ref, reason }
+                        if task_ref == task && reason.as_str() == "window-missed"
+                )));
+                assert!(!events.contains_payload(|payload| matches!(
+                    payload,
+                    domain::EventPayload::TaskExecutionActivated { task_ref, .. }
+                        if task_ref == task
+                )));
+                continue;
+            }
+
+            assert_eq!(
+                prepared.expect("eligible step binds").assignments().len(),
+                1
+            );
+            control
+                .activate_task_execution(&group, task, at(active), &correlation, &mut events)
+                .expect("bound fake task activates");
+            advance_nodes(satisfied, &mut control, &mut state, &mut events);
+            orchestrator
+                .validate_runtime_task_completion(
+                    &mission,
+                    task,
+                    Some(at(satisfied)),
+                    Some(at(satisfied)),
+                )
+                .expect("clock still permits the recorded completion");
+            orchestrator
+                .record_task_execution_completed(
+                    &mission,
+                    task,
+                    &mut control,
+                    at(satisfied),
+                    &correlation,
+                    &mut events,
+                )
+                .expect("test execution completes");
+            orchestrator
+                .satisfy_task_from_execution_report(
+                    &mission,
+                    task,
+                    &mut control,
+                    at(satisfied),
+                    &correlation,
+                    &mut events,
+                )
+                .expect("execution report satisfies the Task");
+        }
+        assert!(orchestrator.ready_tasks(&mission, &control).is_empty());
+        let photo = TaskRef::new(mission.clone(), TaskId::new("dog1-shoot").unwrap());
+        let photo_execution = control
+            .group(&group)
+            .unwrap()
+            .task_execution(&photo)
+            .unwrap();
+        let actual = photo_execution.lifecycle();
+        let expected = if should_miss {
+            TaskExecutionLifecycle::Ready
+        } else {
+            TaskExecutionLifecycle::Completed
+        };
+        assert_eq!(actual, expected);
+        println!("photo deadline {photo_deadline} ms -> {actual:?}");
+    }
 }

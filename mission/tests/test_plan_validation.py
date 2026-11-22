@@ -18,6 +18,7 @@ from mission.plan_assessment import (
     LEGACY_SCHEMA,
     NODE_PREFLIGHT_SCHEMA,
     SCHEMA,
+    TIMING_PREVIEW_SCHEMA,
     validate_assessment,
 )
 from mission.plan_validation import MAX_PLAN_ISSUES, PlanValidationError, reference_issues
@@ -70,6 +71,37 @@ def _report(plan: MissionPlan, issues: list[JSONObject] | None = None) -> JSONOb
         "issues": cast(JSONValue, issues or []),
         "issues_truncated": False,
     }
+
+
+def test_timing_preview_advisory_stays_out_of_blocking_validation() -> None:
+    """Keep estimates advisory while still validating the nested plan identity and hard issues."""
+    plan = MissionPlan.from_json(_raw())
+    report = _report(plan)
+    reply: JSONObject = {
+        "schema_version": TIMING_PREVIEW_SCHEMA,
+        "assessment": report,
+        "timing": {
+            "anchor": "mission_acceptance",
+            "estimate_scope": "caller_supplied_advisory",
+            "tasks": [{"status": "estimated_risk", "estimated_ready_ms": 156_549}],
+        },
+    }
+    validate_assessment(reply, plan)
+    report["plan_body_sha256"] = "sha256:" + "f" * 64
+    with pytest.raises(ValueError, match="invalid or detached"):
+        validate_assessment(reply, plan)
+    reply["assessment"] = _report(
+        plan,
+        [
+            {
+                "code": "deployment.contract_incompatible",
+                "path": "/tasks/0/timing/latest_start_offset_ms",
+                "message": "declared dependency window conflicts",
+            }
+        ],
+    )
+    with pytest.raises(PlanValidationError, match="declared dependency window conflicts"):
+        validate_assessment(reply, plan)
 
 
 def _issues() -> list[JSONObject]:

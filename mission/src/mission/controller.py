@@ -359,7 +359,9 @@ class HttpMissionController:
         self, plan: MissionPlan, evidence: ExecutionPlanningEvidence | None = None
     ) -> None:
         """Query published contracts once; unavailable evidence never triggers draft repair."""
-        status, decoded, _ = self._request("POST", "/v1/missions/validate-plan", plan.to_json())
+        status, decoded, _ = self._request(
+            "POST", "/v1/missions/validate-plan?timing=v0.1", plan.to_json()
+        )
         if status != 200:
             raise MissionControllerError(f"Controller plan validation returned HTTP {status}")
         try:

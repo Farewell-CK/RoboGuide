@@ -31,11 +31,16 @@ mod mission {
     pub(super) mod scheduling;
     pub(super) mod serialization;
     pub(super) mod timing;
+    pub(super) mod timing_preview;
 }
 mod mission_contract;
 mod scheduling_status;
 pub use mission::dispatch_policy::{
     DISPATCH_TURN_LIMIT, MissionAdmissionLimits, MissionDispatchState,
+};
+pub use mission::timing_preview::{
+    PlanTimingConflict, PlanTimingOffset, plan_timing_conflicts, project_plan_timing,
+    validate_plan_dependency_windows,
 };
 
 pub use integration_bridge::{
