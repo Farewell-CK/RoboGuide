@@ -9,6 +9,7 @@ from typing import cast
 
 from mission.models import JSONObject
 
+from roboguide_workbench.actions import checked_request
 from roboguide_workbench.client import ToolRefusal, WorkbenchError
 from roboguide_workbench.device_context import context_nodes, mentioned, task_context
 from roboguide_workbench.evidence import ReadResult
@@ -178,6 +179,7 @@ class TaskTools:
             session.actions.connection.timeout,
         )
         prefix = ""
+        capability_details: str | None = None
         if name in {"execute_plan", "approve_plan"}:
             if re.search(
                 r"不要|不执行|不批准|不审批|不同意|先不|别执行|别批准|别审批|勿执行|勿批准",
@@ -228,7 +230,8 @@ class TaskTools:
                 session.controller.timeout = min(controller_timeout, remaining)
                 try:
                     raw = session.controller.inventory()
-                    prefix = task_context(raw, original) + "\n\n"
+                    capability_details = task_context(raw, original)
+                    prefix = capability_details + "\n\n"
                     self.known_nodes.update(node.node_id for node in context_nodes(raw, original))
                 except (ValueError, OSError) as error:
                     prefix = "当前设备能力未能核对：" + str(error) + "；执行条件保持未知。\n\n"
@@ -307,16 +310,24 @@ class TaskTools:
                 "请求已被 Controller 接纳；实际执行进度用 /mission 或 /watch。",
                 "请求已被 Controller 接纳；可以继续询问实际执行进度。",
             )
-            result = ReadResult(prefix + text)
+            summary = text if capability_details else None
+            if name == "start_task" and session.last_raw is not None:
+                receipt = checked_request(session.last_raw)
+                if receipt.submission_intent and receipt.submission_intent.mode == "draft_only":
+                    warning = "\n\n" + prefix.strip() if prefix and not capability_details else ""
+                    summary = "仅规划请求已收到。\n" + text + warning
+            result = ReadResult(prefix + text, summary=summary, detail=capability_details)
             self.results.append(result)
             return result
         finally:
             session.controller.timeout = controller_timeout
             session.actions.connection.timeout = mission_timeout
 
-    def answer(self, evidence: list[JSONObject]) -> str | None:
-        """Keep full actual receipts and unresolved task parts independently of model wording."""
-        parts = [result.text for result in self.results]
+    def answer(self, evidence: list[JSONObject], *, compact: bool = False) -> str | None:
+        """Keep receipts and unresolved task parts independently of model wording."""
+        parts = [
+            (result.summary or result.text) if compact else result.text for result in self.results
+        ]
         names = {cast(str, tool["name"]) for tool in definitions()}
         for item in evidence:
             source, text = item.get("source"), item.get("text")

@@ -16,8 +16,14 @@ from mission.models import JSONObject, JSONValue
 from mission.request_record import MissionRequestLifecycle
 
 from roboguide_workbench.actions import MissionActions, checked_request
+from roboguide_workbench.activity import ACTIVITY_KEY, TurnActivity, append_activity
 from roboguide_workbench.client import ReadOnlyController, WorkbenchError, identifier
-from roboguide_workbench.evidence import QueryStatus, ReadResult
+from roboguide_workbench.evidence import (
+    QueryStatus,
+    ReadResult,
+    command_count,
+    new_pending_command,
+)
 from roboguide_workbench.mission_diagnosis import read_mission_diagnosis
 from roboguide_workbench.mission_views import render_mission_list
 from roboguide_workbench.persistence import SessionStore
@@ -190,12 +196,36 @@ def draft_reference(raw: JSONObject | None) -> JSONObject | None:
     )
 
 
+_DISPLAY_TOOL_COMMANDS = {
+    "/nodes": "查看节点",
+    "/node": "查看节点能力",
+    "/missions": "查看任务",
+    "/mission": "查看任务状态",
+    "/explain": "核对任务与绑定",
+    "/compare": "比较节点",
+    "/state": "查看设备上报状态",
+    "/state-fields": "查看状态字段",
+    "/request": "查看任务请求",
+    "/plan": "提交仅规划请求",
+    "/run": "发起执行流程请求",
+    "/answer": "补充任务要求",
+    "/answer-to": "补充指定问题",
+    "/execute": "提交执行请求",
+    "/approve": "审批当前计划",
+    "/cancel": "处理取消请求",
+    "/observe": "核对原命令",
+    "/check": "核对计划条件",
+    "/choose": "处理已显示的提议",
+}
+
+
 class WorkbenchSession(Session):
     """Own durable scope and commands used by direct input and closed native task tools."""
 
     query_status: QueryStatus = "complete"
     model_label = "未加载"
     config_path: Path | None = None
+    activity: TurnActivity | None = None
 
     def __init__(
         self,
@@ -348,6 +378,9 @@ class WorkbenchSession(Session):
                 if field in self.reference_checkpoint:
                     context[field] = self.reference_checkpoint[field]
             context["raw_query"] = self.reference_checkpoint.get("raw_query")
+        previous = self.store.data.get("context")
+        if isinstance(previous, dict) and ACTIVITY_KEY in previous:
+            context[ACTIVITY_KEY] = previous[ACTIVITY_KEY]
         self.store.data["context"] = context
         self.store.save()
 
@@ -367,14 +400,37 @@ class WorkbenchSession(Session):
             # Original user limits must survive a process exit or a lost Provider response,
             # including exits before the ordinary completed-turn history can be written.
             self.checkpoint()
+        trace = self.activity
+        label = _DISPLAY_TOOL_COMMANDS.get(question.partition(" ")[0])
+        run = trace.begin(label) if trace is not None and label is not None else None
+        before = command_count(self.store.data) if run is not None else 0
         try:
             result = self._turn(question)
         except (ValueError, OSError) as error:
             self.query_status = "failed"
+            if (
+                trace is not None
+                and run is not None
+                and new_pending_command(self.store.data, before)
+            ):
+                # This is a factual response about the original journaled command.
+                # It still takes the ordinary display acknowledgement path.
+                result = "原操作结果未知。下一步用 /observe 核对原请求回执。"
+                trace.finish(run, "unknown", result=ReadResult(result, False))
+                if record_history:
+                    self._remember(question, result)
+                return result
             if record_history:
                 self._remember(question, "查询/操作未确定：" + str(error))
             raise
         else:
+            if trace is not None and run is not None:
+                status = cast(QueryStatus, self.query_status)
+                trace.finish(
+                    run,
+                    "unavailable" if status == "failed" else status,
+                    result=ReadResult(result, status == "complete"),
+                )
             if record_history:
                 self._remember(question, result)
         finally:
@@ -406,6 +462,11 @@ class WorkbenchSession(Session):
             ]
         )
         self.store.data["messages"] = messages[-40:]
+        trace, context = self.activity, self.store.data.get("context")
+        if trace is not None and (trace.rows or trace.omitted) and isinstance(context, dict):
+            context[ACTIVITY_KEY] = cast(
+                JSONValue, append_activity(context.get(ACTIVITY_KEY), trace.snapshot())
+            )
         self.previous_question = question
         self.checkpoint()
 
@@ -551,9 +612,21 @@ class WorkbenchSession(Session):
         self.query_status = "complete" if complete else "partial"
         return ReadResult(result, complete, (component,))
 
-    def diagnose_mission(self, target: str, task_id: str = "") -> ReadResult:
-        """Stage compact diagnostic evidence and the original scoped replies for /raw."""
-        result, raw = read_mission_diagnosis(self.controller, target, task_id)
+    def diagnose_mission(
+        self, target: str, task_id: str = "", *, record_activity: bool = False
+    ) -> ReadResult:
+        """Stage scoped diagnosis evidence and record direct host reads once."""
+        trace = self.activity if record_activity else None
+        run = trace.begin("核对原执行与停止记录", target) if trace is not None else None
+        try:
+            result, raw = read_mission_diagnosis(self.controller, target, task_id)
+        except (ValueError, OSError):
+            if trace is not None and run is not None:
+                trace.finish(run, "unavailable")
+            raise
+        if trace is not None and run is not None:
+            trace.result(run, result, reference="Mission " + target)
+            trace.reply = result.summary
         self.last_mission, self.last_node = target, None
         self.last_raw = raw
         self.last_read_at = datetime.now(UTC).isoformat(timespec="seconds")
@@ -654,7 +727,7 @@ class WorkbenchSession(Session):
                 raise WorkbenchError("用法为 /diagnose [MissionID] [TaskID]。")
             mission_target = self._mission_target(values[0] if values else "")
             task_id = values[1] if len(values) == 2 else ""
-            return self.diagnose_mission(mission_target, task_id).text
+            return self.diagnose_mission(mission_target, task_id, record_activity=True).text
         if command == "/plan-detail":
             if argument or self.shown_draft is None:
                 raise WorkbenchError("请先读取当前请求，取得完整计划后再展开。")

@@ -12,8 +12,14 @@ from typing import cast
 
 from mission.models import JSONObject, JSONValue
 
+from roboguide_workbench.activity import TurnActivity
 from roboguide_workbench.client import ToolRefusal, WorkbenchError, decode_object
-from roboguide_workbench.evidence import READ_COSTS, QueryStatus, ReadResult
+from roboguide_workbench.evidence import (
+    READ_COSTS,
+    OriginalOperationPending,
+    QueryStatus,
+    ReadResult,
+)
 from roboguide_workbench.routing import Query, ResponsesRouter
 from roboguide_workbench.task_context import TaskDialogue
 from roboguide_workbench.views import safe_text
@@ -461,6 +467,7 @@ class AgentConversation:
         task_read_context: Callable[[str, JSONObject], JSONObject] | None = None,
         task_work_key: Callable[[str, JSONObject], str | None] | None = None,
         on_delta: Callable[[str], None] | None = None,
+        activity: TurnActivity | None = None,
     ) -> AgentAnswer:
         """Continue native tool-call outputs until natural final text or a bounded failure."""
         if not question.strip() or len(question) > 4096:
@@ -493,7 +500,7 @@ class AgentConversation:
             for _ in range(self.calls):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    break
+                    raise WorkbenchError("本轮等待时间已用完。")
                 notify("正在整理回复" if evidence else "正在理解")
                 headers = {"Content-Type": "application/json"}
                 if self.router.key:
@@ -592,8 +599,27 @@ class AgentConversation:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise WorkbenchError("本轮等待时间已用完。")
+                    action = call.name in _ACTION_LABELS
+                    cost = _ACTION_COSTS[call.name] if action else READ_COSTS.get(call.name, 1)
+                    label = _ACTION_LABELS[call.name] if action else _READ_LABELS[call.name]
+                    target = call.arguments.get(
+                        "target",
+                        call.arguments.get(
+                            "node_id",
+                            call.arguments.get("mission_id", call.arguments.get("request_id", "")),
+                        ),
+                    )
+                    run = (
+                        activity.begin(
+                            label, target if isinstance(target, str) else "", call_id=call.call_id
+                        )
+                        if activity is not None
+                        else None
+                    )
                     cached = seen_work.get(work) if work else seen_queries.get(key)
                     if cached is not None:
+                        if activity is not None and run is not None:
+                            activity.finish(run, "reused", reference=str(cached["id"]))
                         output = {
                             "type": "function_call_output",
                             "call_id": call.call_id,
@@ -609,17 +635,23 @@ class AgentConversation:
                         inputs.append(output)
                         public_items.append(output)
                         continue
-                    action = call.name in _ACTION_LABELS
-                    cost = _ACTION_COSTS[call.name] if action else READ_COSTS.get(call.name, 1)
-                    label = _ACTION_LABELS[call.name] if action else _READ_LABELS[call.name]
-                    target = call.arguments.get(
-                        "target",
-                        call.arguments.get("node_id", call.arguments.get("mission_id", "")),
+                    over_budget = spent + cost > self.tools
+                    rejected = action and (
+                        act is None or (call.name in _TASK_MUTATIONS and mutated)
                     )
-                    notify(label + (f"（{safe_text(str(target))}）" if target else ""))
+                    unknown = False
                     try:
-                        if spent + cost > self.tools:
+                        if over_budget:
                             raise ToolRefusal("本轮剩余请求预算不足，继续处理其它可完成的部分。")
+                        if not rejected:
+                            shown_target = (
+                                activity.sanitize(str(target))
+                                if activity is not None
+                                else str(target)
+                            )
+                            notify(
+                                label + (f"（{safe_text(shown_target)[:160]}）" if target else "")
+                            )
                         if action:
                             if act is None:
                                 raise ToolRefusal("当前入口未开放任务工具。")
@@ -644,6 +676,16 @@ class AgentConversation:
                     except ToolRefusal as error:
                         reason = (f"{safe_text(str(target))}：" if target else "") + str(error)
                         pending[pending_key] = (call.name, reason)
+                        if activity is not None and run is not None:
+                            activity.finish(
+                                run,
+                                "budget"
+                                if over_budget
+                                else "refused"
+                                if rejected
+                                else "needs_context",
+                                result=ReadResult(str(error), False),
+                            )
                         output = {
                             "type": "function_call_output",
                             "call_id": call.call_id,
@@ -664,15 +706,31 @@ class AgentConversation:
                         spent += cost
                         if call.name in _TASK_MUTATIONS:
                             mutated = True
+                        unknown = isinstance(error, OriginalOperationPending)
                         prefix = (
-                            "任务操作未确定，保留原命令且不会自动重发："
+                            "原操作结果未知。下一步用 /observe 核对原请求回执。"
+                            if unknown
+                            else "任务操作未完成："
                             if action
                             else "当前读取不可用："
                         )
-                        returned = ReadResult(prefix + safe_text(str(error)), False)
+                        target_label = (
+                            f"{safe_text(target)}："
+                            if isinstance(target, str) and target and not action
+                            else ""
+                        )
+                        returned = ReadResult(target_label + prefix + safe_text(str(error)), False)
                     if not isinstance(returned, ReadResult):
+                        if activity is not None and run is not None:
+                            activity.finish(run, "unavailable")
                         raise WorkbenchError("读取工具未返回有效来源结果。")
                     item = _evidence(call.name, returned, len(evidence) + 1)
+                    if activity is not None and run is not None:
+                        evidence_id = str(item["id"])
+                        if unknown:
+                            activity.finish(run, "unknown", result=returned, reference=evidence_id)
+                        else:
+                            activity.result(run, returned, reference=evidence_id)
                     pending.pop(pending_key, None)
                     evidence.append(item)
                     seen_queries[key] = item
@@ -689,4 +747,4 @@ class AgentConversation:
             retain_pending()
             return _fallback(evidence, str(error), public_items)
         retain_pending()
-        return _fallback(evidence, "本轮回复尚未完成，请继续提问。", public_items)
+        return _fallback(evidence, "本轮模型调用次数已用完。请继续询问未完成的部分。", public_items)

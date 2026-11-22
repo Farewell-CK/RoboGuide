@@ -16,62 +16,30 @@ from mission.models import JSONObject
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.application.current import set_app
-from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.data_structures import Size
 from prompt_toolkit.filters import Condition, is_done
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import ConditionalContainer, FormattedTextControl, HSplit, Layout, Window
 from prompt_toolkit.output.vt100 import Vt100_Output
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
 
+from roboguide_workbench.activity import TurnActivity, activity_summary, displayed_activity
 from roboguide_workbench.answers import bounded_history
 from roboguide_workbench.display import DisplayPersistenceError, DisplayTurn, discard_confirmation
 from roboguide_workbench.evidence import QueryStatus
+from roboguide_workbench.terminal_tools import (
+    COMMAND_HINTS,
+    DetailPager,
+    WorkbenchCompleter,
+    wrap_cells,
+)
 from roboguide_workbench.views import render_mission, safe_text
 from roboguide_workbench.workspace import EXTRA_HELP, WorkbenchSession
 
-COMMANDS = [
-    "/nodes",
-    "/node",
-    "/missions",
-    "/mission",
-    "/compare",
-    "/explain",
-    "/diagnose",
-    "/watch",
-    "/watches",
-    "/unwatch",
-    "/plan",
-    "/plan-detail",
-    "/run",
-    "/request",
-    "/answer",
-    "/answer-to",
-    "/execute",
-    "/approve",
-    "/choose",
-    "/observe",
-    "/reconcile",
-    "/history",
-    "/help",
-    "/raw",
-    "/reset",
-    "/quit",
-    "/status",
-    "/state",
-    "/state-fields",
-    "/sessions",
-    "/new",
-    "/resume",
-    "/check",
-    "/cancel",
-    "/feedback",
-    "/queue",
-    "/dequeue",
-    "/edit-queued",
-]
+COMMANDS = list(COMMAND_HINTS)
 
 # A short queue keeps a fast typist from losing questions while the provider or
 # Controller is working.  It is deliberately local to this terminal process;
@@ -199,22 +167,6 @@ def _prompt_supports_option(prompt: PromptSession[str], option: str) -> bool:
     return False
 
 
-def _wrapped_lines(line: str, width: int) -> list[str]:
-    """Keep complete text while wrapping by terminal cells, including Chinese characters."""
-    result: list[str] = []
-    current: list[str] = []
-    cells = 0
-    for char in line:
-        char_cells = get_cwidth(char)
-        if current and cells + char_cells > width:
-            result.append("".join(current))
-            current, cells = [], 0
-        current.append(char)
-        cells += char_cells
-    result.append("".join(current))
-    return result
-
-
 def _message_preview(text: str, width: int = 80) -> str:
     """Fit an unsent-message preview by terminal cells without altering the queued original."""
     text = safe_text(" ".join(text.split()))
@@ -229,7 +181,10 @@ def _message_preview(text: str, width: int = 80) -> str:
 
 
 def _mount_composer_context(
-    prompt: PromptSession[str], status: Callable[[], str], preview: Callable[[], str]
+    prompt: PromptSession[str],
+    status: Callable[[], str],
+    preview: Callable[[], str],
+    detail: Callable[[], str],
 ) -> None:
     """Keep live context out of input and scrollback, including when CPR is disabled."""
     layout = getattr(prompt, "layout", None)
@@ -237,6 +192,10 @@ def _mount_composer_context(
         return
     layout.container = HSplit(
         [
+            ConditionalContainer(
+                Window(FormattedTextControl(detail), dont_extend_height=True),
+                filter=~is_done & Condition(lambda: bool(detail())),
+            ),
             ConditionalContainer(
                 Window(
                     FormattedTextControl(preview),
@@ -260,6 +219,8 @@ async def interactive(session: WorkbenchSession) -> int:
     queued: deque[tuple[str, JSONObject, list[JSONObject]]] = deque()
     visible_references = session.query_references()
     visible_history = bounded_history(session.store.data.get("messages"))
+    available_details = displayed_activity(session.store.data)
+    pager: DetailPager | None = None
     retained_input = ""
     muted = False
     unavailable = False
@@ -274,23 +235,31 @@ async def interactive(session: WorkbenchSession) -> int:
 
     @keys.add("enter")
     def submit_line(event: KeyPressEvent) -> None:
-        """Submit the composer with Enter, including when multiline editing is enabled."""
-        event.app.current_buffer.validate_and_handle()
+        """Accept a highlighted completion into the draft before any submission."""
+        if pager is not None:
+            return
+        buffer = event.app.current_buffer
+        completion = buffer.complete_state
+        if completion is not None and completion.current_completion is not None:
+            buffer.apply_completion(completion.current_completion)
+            return
+        buffer.validate_and_handle()
 
     @keys.add("escape", "enter")
     def insert_line_break(event: KeyPressEvent) -> None:
         """Insert a line break with Alt/Meta-Enter while keeping Enter as submit."""
-        event.app.current_buffer.insert_text("\n")
+        if pager is None:
+            event.app.current_buffer.insert_text("\n")
 
     @keys.add("c-j")
     def submit_control_j(event: KeyPressEvent) -> None:
-        """Offer a terminal-friendly submit key for clients that do not send Enter."""
-        event.app.current_buffer.validate_and_handle()
+        """Follow the same completion and submission rules for Ctrl-J."""
+        submit_line(event)
 
     @keys.add("f1")
     def choose_first(event: KeyPressEvent) -> None:
         """Choose the displayed planning or single-action option with an explicit key press."""
-        if foreground and not foreground.done():
+        if pager is not None or (foreground and not foreground.done()):
             return
         proposal = session.suggestion
         if proposal:
@@ -301,7 +270,7 @@ async def interactive(session: WorkbenchSession) -> int:
     @keys.add("f2")
     def choose_run(event: KeyPressEvent) -> None:
         """Choose execution only when that exact option is currently displayed."""
-        if foreground and not foreground.done():
+        if pager is not None or (foreground and not foreground.done()):
             return
         if session.suggestion and session.suggestion[0] in {"plan", "run"}:
             event.app.current_buffer.text = "/choose run"
@@ -310,7 +279,7 @@ async def interactive(session: WorkbenchSession) -> int:
     @keys.add("escape", "up")
     def edit_pending(event: KeyPressEvent) -> None:
         """Take the last unsent message back into an empty composer without executing it."""
-        if queued and not event.app.current_buffer.text:
+        if pager is None and queued and not event.app.current_buffer.text:
             text, _, _ = queued.pop()
             event.app.current_buffer.text = text
             event.app.current_buffer.cursor_position = len(text)
@@ -319,11 +288,66 @@ async def interactive(session: WorkbenchSession) -> int:
     @keys.add("escape", "backspace")
     def delete_pending(event: KeyPressEvent) -> None:
         """Withdraw only the last unsent message; the running operation keeps its identity."""
-        if queued:
+        if pager is None and queued:
             text, _, _ = queued.pop()
             notify("已撤回待发消息：" + safe_text(text))
             refresh_composer()
 
+    detail_open = Condition(lambda: pager is not None)
+
+    def open_details() -> None:
+        """Open only the already acknowledged snapshot, leaving any draft intact."""
+        nonlocal pager
+        if available_details:
+            pager = DetailPager(available_details)
+            refresh_composer()
+        else:
+            notify("本会话暂无可展开的工具记录。")
+
+    @keys.add("f3")
+    def toggle_details(event: KeyPressEvent) -> None:
+        """Toggle the local details panel without changing input or session history."""
+        nonlocal pager
+        if pager is None:
+            event.app.current_buffer.cancel_completion()
+            open_details()
+        else:
+            pager = None
+            refresh_composer()
+
+    @keys.add("escape", filter=detail_open, eager=True)
+    def close_details(event: KeyPressEvent) -> None:
+        """Return to the original composer and cursor position."""
+        nonlocal pager
+        pager = None
+        refresh_composer()
+
+    @keys.add("up", filter=detail_open)
+    @keys.add("down", filter=detail_open)
+    @keys.add("pageup", filter=detail_open)
+    @keys.add("pagedown", filter=detail_open)
+    def scroll_details(event: KeyPressEvent) -> None:
+        """Scroll only the detail panel while the draft stays in the original buffer."""
+        if pager is not None:
+            size = terminal_size()
+            steps: dict[Keys | str, int] = {
+                Keys.Up: -1,
+                Keys.Down: 1,
+                Keys.PageUp: -pager.page_size(size.rows),
+                Keys.PageDown: pager.page_size(size.rows),
+            }
+            pager.render(size.columns, size.rows, steps[event.key_sequence[-1].key])
+            refresh_composer()
+
+    @keys.add("left", filter=detail_open)
+    @keys.add("right", filter=detail_open)
+    def browse_turns(event: KeyPressEvent) -> None:
+        """Select an older or newer acknowledged turn using the same local snapshot."""
+        if pager is not None:
+            pager.change_turn(1 if event.key_sequence[-1].key == Keys.Left else -1)
+            refresh_composer()
+
+    completer = WorkbenchCompleter(lambda: visible_references)
     # Keep the constructor surface used by the plain test harness.  The live
     # session receives the richer multiline behavior through attributes below.
     try:
@@ -331,12 +355,12 @@ async def interactive(session: WorkbenchSession) -> int:
         # compatibility with the repository's minimal PromptSession test doubles.
         prompt: PromptSession[str] = PromptSession(
             multiline=True,
-            completer=WordCompleter(COMMANDS, sentence=True),
+            completer=completer,
             key_bindings=keys,
         )
     except TypeError:
         prompt = PromptSession(
-            completer=WordCompleter(COMMANDS, sentence=True),
+            completer=completer,
             key_bindings=keys,
         )
         prompt.multiline = True
@@ -376,7 +400,11 @@ async def interactive(session: WorkbenchSession) -> int:
         width = max(1, terminal_size().columns - 1)
         if started_at is None:
             value = "就绪"
-            hints = ["Enter 发送", "/help", "Alt-Enter 换行"]
+            hints = ["Enter 发送", "/help"]
+            if available_details:
+                hints.append("F3 详情")
+            else:
+                hints.append("Alt-Enter 换行")
             if session.last_state:
                 hints.append(f"状态对象 {safe_text(session.last_state)}")
         elif muted:
@@ -394,7 +422,7 @@ async def interactive(session: WorkbenchSession) -> int:
 
     def preview_text() -> str:
         """Show only the newest few public lines above an independently editable draft."""
-        if not visible_preview.strip() or muted or closing:
+        if pager is not None or not visible_preview.strip() or muted or closing:
             return ""
         size = terminal_size()
         if size.rows < 8:
@@ -403,11 +431,18 @@ async def interactive(session: WorkbenchSession) -> int:
         lines = [
             chunk
             for line in visible_preview.rstrip().split("\n")
-            for chunk in _wrapped_lines(safe_text(line), width)
+            for chunk in wrap_cells(safe_text(line), width)
         ]
         return "\n".join(lines[-min(PREVIEW_MAX_LINES, size.rows // 6) :])
 
-    _mount_composer_context(prompt, composer_status, preview_text)
+    def detail_text() -> str:
+        """Render the panel inside the live prompt, separate from completed scrollback."""
+        if pager is None:
+            return ""
+        size = terminal_size()
+        return pager.render(size.columns, size.rows)
+
+    _mount_composer_context(prompt, composer_status, preview_text, detail_text)
 
     def refresh_composer() -> None:
         """Request a redraw after progress arrives from the worker thread."""
@@ -492,7 +527,11 @@ async def interactive(session: WorkbenchSession) -> int:
         session.stream_output = update_stream
 
     async def display(
-        result: str, suggestion: tuple[str, str] | None = None, *, status: QueryStatus = "complete"
+        result: str,
+        suggestion: tuple[str, str] | None = None,
+        *,
+        status: QueryStatus = "complete",
+        activity_line: str = "",
     ) -> bool:
         """Flush a role-labeled, wrapped assistant turn before acknowledging its state."""
 
@@ -510,10 +549,13 @@ async def interactive(session: WorkbenchSession) -> int:
             for line in lines:
                 # Wrap long evidence lines so the scrollback retains the complete bounded
                 # projection; a visual width limit must never turn facts into an ellipsis.
-                chunks = _wrapped_lines(safe_text(line), max(8, width - 5))
+                chunks = wrap_cells(safe_text(line), max(8, width - 5))
                 for chunk in chunks:
                     print(("RG > " if first_line else "     ") + chunk, file=output, flush=True)
                     first_line = False
+            if activity_line:
+                for chunk in wrap_cells(activity_line + " · F3 详情", width - 1):
+                    print(chunk, file=output, flush=True)
             if suggestion is not None:
                 if suggestion[0] in {"plan", "run"}:
                     shortcut = "F1：只规划；F2：开始执行流程。"
@@ -533,10 +575,19 @@ async def interactive(session: WorkbenchSession) -> int:
     ) -> None:
         """Run one serialized turn and start the next queued question after its receipt drains."""
         nonlocal muted, unavailable, foreground, started_at, phase
-        nonlocal visible_references, visible_history
+        nonlocal visible_references, visible_history, available_details
         started_at, phase = time.monotonic(), "处理中"
         refresh_composer()
         turn = DisplayTurn(session)
+
+        def sanitize_activity(text: str) -> str:
+            """Use the existing local evidence redactor for every retained detail."""
+            from roboguide_workbench.feedback import redact_activity_text
+
+            return redact_activity_text(text, getattr(session.router, "key", "") or "")
+
+        trace = TurnActivity(turn.turn_id, sanitize_activity)
+        session.activity = trace
         session.input_references = original_references
         session.input_history = original_history
 
@@ -553,7 +604,12 @@ async def interactive(session: WorkbenchSession) -> int:
             clear_preview()
             turn.stage()
             if not muted:
-                displayed = await display(result, turn.suggestion, status=session.query_status)
+                displayed = await display(
+                    trace.reply or result,
+                    turn.suggestion,
+                    status=session.query_status,
+                    activity_line=activity_summary(trace),
+                )
                 if displayed and not muted:
                     turn.acknowledge()
         except (ValueError, OSError) as error:
@@ -569,6 +625,7 @@ async def interactive(session: WorkbenchSession) -> int:
             clear_preview()
             session.input_references = None
             session.input_history = None
+            session.activity = None
             try:
                 turn.reject()
             except DisplayPersistenceError as error:
@@ -577,6 +634,7 @@ async def interactive(session: WorkbenchSession) -> int:
             muted = False
             visible_references = session.query_references()
             visible_history = bounded_history(session.store.data.get("messages"))
+            available_details = displayed_activity(session.store.data)
             started_at, phase = None, "待命"
             refresh_composer()
             if not closing and not unavailable and queued:
@@ -645,6 +703,9 @@ async def interactive(session: WorkbenchSession) -> int:
                 if unavailable:
                     closing = True
                     break
+                if text == "/details":
+                    open_details()
+                    continue
                 if text in {"/quit", "/exit"}:
                     closing = True
                     break
@@ -756,6 +817,8 @@ async def interactive(session: WorkbenchSession) -> int:
                             raise DisplayPersistenceError("会话切换提示未显示，请重新进入会话。")
                         visible_references = session.query_references()
                         visible_history = bounded_history(session.store.data.get("messages"))
+                        available_details = displayed_activity(session.store.data)
+                        pager = None
                         manager = WatchManager(session, notify)
                     except DisplayPersistenceError as error:
                         unavailable = True

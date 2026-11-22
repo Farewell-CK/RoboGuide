@@ -107,7 +107,9 @@ def _timestamp(value: object) -> bool:
     return type(value) is int and value >= 0
 
 
-def _stop_lines(raw: JSONObject, mission: str, attempt: dict[str, str]) -> list[str]:
+def _stop_lines(
+    raw: JSONObject, mission: str, attempt: dict[str, str]
+) -> tuple[list[str], bool, list[str]]:
     """Describe verified receipt presence without upgrading it to physical evidence."""
     purpose = raw.get("purpose")
     if (
@@ -149,12 +151,13 @@ def _stop_lines(raw: JSONObject, mission: str, attempt: dict[str, str]) -> list[
         lines.append(f"Controller 记录的原因是{reason_text}。")
     elif phase not in _CONFIRMED_PHASES:
         lines.append("停止记录没有说明卡住的原因。")
-    if phase not in _CONFIRMED_PHASES:
-        missing = [label for key, label in _RECEIPTS.items() if purpose[key] is None]
+    confirmed = phase in _CONFIRMED_PHASES
+    missing = [label for key, label in _RECEIPTS.items() if purpose[key] is None]
+    if not confirmed:
         if missing:
             lines.append("尚待核对" + "、".join(missing) + "，原停止记录中未取得这些证据。")
         lines.append("这次读取无法确认设备已停止。")
-    return lines
+    return lines, confirmed, missing
 
 
 def read_mission_diagnosis(
@@ -175,11 +178,11 @@ def read_mission_diagnosis(
     original: JSONObject = {"mission": mission}
     lines = [f"Mission {safe_text(mission_id)} · {status}"]
 
-    def finish() -> tuple[ReadResult, JSONObject]:
+    def finish(summary: str | None = None) -> tuple[ReadResult, JSONObject]:
         """Return only evidence from successfully joined reads with a scoped raw view."""
         lines.append("输入 /raw 查看本次取得的原记录。")
         complete = all(component["complete"] is True for component in components)
-        return ReadResult("\n".join(lines), complete, tuple(components)), original
+        return ReadResult("\n".join(lines), complete, tuple(components), summary), original
 
     if task_id and task_id not in tasks:
         lines.append(f"这个 Mission 的当前步骤中没有 {safe_text(task_id)}。")
@@ -236,13 +239,25 @@ def read_mission_diagnosis(
         f"关注步骤 {safe_text(task)} · {tasks[task]} · 原执行 {choice['status']} · "
         f"{safe_text(choice['node_id'])}"
     )
+    confirmed = False
+    missing: list[str] = []
     try:
         stop = controller.execution_safety_stop(choice["execution_id"])
-        lines.extend(_stop_lines(stop, mission_id, choice))
+        stop_lines, confirmed, missing = _stop_lines(stop, mission_id, choice)
+        lines.extend(stop_lines)
     except (ValueError, OSError) as error:
         lines.append("原停止记录不可用，取消接收和停止状态目前无法核对。" + safe_text(str(error)))
         components.append({"source": "原停止记录", "complete": False})
     else:
         original["safety_stop"] = stop
         components.append({"source": "原停止记录", "complete": True})
-    return finish()
+    headline = "任务仍在取消中" if status == "Cancelling" else f"任务状态 {status}"
+    proof = "原记录已确认停止" if confirmed else "尚未确认设备停止"
+    summary = [f"{headline}，{proof}。", f"{safe_text(task)} 原执行为 {choice['status']}。"]
+    if missing and not confirmed:
+        summary.append("下一步核对" + "、".join(missing) + "。")
+    elif not confirmed:
+        summary.append("下一步核对原停止记录。")
+    # The exact visible Mission ID still anchors subsequent implicit object references.
+    summary.append(f"Mission {safe_text(mission_id)}")
+    return finish("\n".join(summary))

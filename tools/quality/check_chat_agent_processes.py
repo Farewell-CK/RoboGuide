@@ -87,7 +87,7 @@ def inventory() -> dict[str, Any]:
     }
 
 
-def mission_state() -> dict[str, Any]:
+def mission_state(*, diagnose: bool = False) -> dict[str, Any]:
     """Supply long historical objectives and one active canonical Mission independently of Tasks."""
     records: list[dict[str, Any]] = []
     for index in range(180):
@@ -100,6 +100,13 @@ def mission_state() -> dict[str, Any]:
                     "mission-lifecycle",
                     {"lifecycle": "Running" if index == 0 else "Completed"},
                 ),
+            ]
+        )
+    if diagnose:
+        records.extend(
+            [
+                record("mission-diagnosis", "accepted-plan", {"objective": "软件诊断验证"}),
+                record("mission-diagnosis", "mission-lifecycle", {"lifecycle": "Cancelling"}),
             ]
         )
     records.append(
@@ -202,6 +209,7 @@ class Trace:
     mi_observations: list[dict[str, Any]] = field(default_factory=list)
     provider: list[dict[str, Any]] = field(default_factory=list)
     stale_state: bool = False
+    diagnose: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
     delay_next_inventory: bool = False
     delay_next_provider: bool = False
@@ -307,7 +315,64 @@ def controller_handler(trace: Trace) -> type[JsonHandler]:
             elif self.path == "/v1/state/records?semantic=reported":
                 self.send_json(200, device_state(stale=trace.stale_state)[1])
             elif self.path.startswith("/v1/state/records?"):
-                self.send_json(200, mission_state())
+                self.send_json(200, mission_state(diagnose=trace.diagnose))
+            elif self.path == "/v1/missions/mission-diagnosis":
+                self.send_json(
+                    200,
+                    {
+                        "mission_id": "mission-diagnosis",
+                        "group_id": "group-diagnosis",
+                        "status": "Cancelling",
+                        "tasks": [{"task_id": "publish-fixture", "status": "Active"}],
+                    },
+                )
+            elif self.path == "/v1/missions/mission-diagnosis/execution-attempts":
+                self.send_json(
+                    200,
+                    {
+                        "attempts": [
+                            {
+                                "execution_id": "attempt:diagnosis",
+                                "mission_id": "mission-diagnosis",
+                                "group_id": "group-diagnosis",
+                                "task_id": "publish-fixture",
+                                "role_id": "role-diagnosis",
+                                "node_id": "node-beta",
+                                "status": "Unknown",
+                            }
+                        ]
+                    },
+                )
+            elif self.path == "/v1/executions/attempt:diagnosis/safety-stop":
+                self.send_json(
+                    200,
+                    {
+                        "schema_version": "roboguide.safety-stop-view/v0.2",
+                        "command_receipt_is_stop_proof": False,
+                        "purpose": {
+                            "node_id": "node-beta",
+                            "accepted_at": None,
+                            "stopped_at": None,
+                            "safe_proof": None,
+                            "reason": (
+                                "operation safety declaration or current session is unavailable"
+                            ),
+                            "record": {
+                                "phase": "manual_escalation",
+                                "confirmed_at": None,
+                                "identity": {
+                                    "execution_id": "attempt:diagnosis",
+                                    "group_id": "group-diagnosis",
+                                    "role_id": "role-diagnosis",
+                                    "task_ref": {
+                                        "mission_id": "mission-diagnosis",
+                                        "task_id": "publish-fixture",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                )
             elif self.path == "/v1/missions/mission-unavailable":
                 self.send_json(503, {"error": "deliberate unavailable fixture"})
             elif self.path == "/v1/missions/mission-running":
@@ -446,6 +511,27 @@ def fixture_response(payload: dict[str, Any], number: int) -> dict[str, Any]:
         if "第二个" in question:
             return final_message("第二个节点 node-beta 提供建图合同。")
         return final_message("当前可见两个节点：node-alpha 提供计算，node-beta 提供建图合同。")
+    if "mission-unavailable" in question and "还有多少电" in question:
+        return {
+            "status": "completed",
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": f"owned-call-{number}-{index}",
+                    "name": name,
+                    "arguments": json.dumps(arguments),
+                }
+                for index, (name, arguments) in enumerate(
+                    (
+                        (
+                            "read_state",
+                            {"target": "node-beta", "fields": ["battery", "position", "posture"]},
+                        ),
+                        ("read_mission", {"mission_id": "mission-unavailable"}),
+                    )
+                )
+            ],
+        }
     route: tuple[str, dict[str, Any]] | None = None
     if question == "先只规划一个巡检方案，不执行。":
         route = "clarify_task", {"question": "要巡检哪个区域？"}
@@ -673,7 +759,10 @@ class ChatProcess:
         try:
             if self.process.poll() is None:
                 self.send("/quit")
-                self.process.wait(timeout=self.seconds)
+                deadline = time.monotonic() + self.seconds
+                while self.process.poll() is None and time.monotonic() < deadline:
+                    self.pump()
+                self.process.wait(timeout=0)
             assert self.process.returncode == 0, self.process.returncode
         finally:
             if self.process.poll() is None:
@@ -719,6 +808,95 @@ def state_view_kind(text: str, age_seconds: float, *, real_model: bool) -> str:
     assert age_seconds <= 5.5, "expired fixture values were displayed as current"
     assert all(value in text for value in ("82 %", "fixture-map", "站立")), text
     return "current"
+
+
+def local_tool_views(chat: ChatProcess, trace: Trace, *, narrow: bool) -> None:
+    """Check diagnosis ordering, historical detail, draft preservation and local completion."""
+    label = "详情 1/"
+    session_path = chat.output / "sessions" / f"{chat.session}.json"
+    before = len(trace.reads), len(trace.provider)
+    if narrow:
+        trace.diagnose = True
+        offset = len(chat.text())
+        row = chat.question("为什么任务一直在取消中？")
+        reply = chat.text()[offset:].partition("── RG · 助手")[2]
+        assert reply.split("\n")[1].startswith("RG > 任务仍在取消中，尚未确认设备停止"), reply
+        assert "publish-fixture 原执行为 Unknown" in reply
+        assert "需要人工处理" not in reply and "本轮检查 ·" in reply
+        assert len(trace.reads) == before[0] + 4 and len(trace.provider) == before[1]
+        assert "需要人工处理" in row["assistant"]
+    snapshot = session_path.read_bytes()
+    before_details = len(trace.reads), len(trace.provider), len(trace.writes), len(trace.mi_writes)
+    offset = len(chat.text())
+    draft = "这条中文草稿仍要保留。"
+    if narrow:
+        os.write(chat.master, draft.encode())
+        chat.wait(lambda: draft in chat.text()[offset:], "editable draft before details")
+        offset = len(chat.text())
+        os.write(chat.master, b"\x1bOR")
+    else:
+        chat.send("/details")
+    try:
+        chat.wait(
+            lambda: label in chat.text()[offset:] and "采集 " in chat.text()[offset:],
+            "saved detail page after display acknowledgement",
+        )
+        # At 42 columns, the diagnostic receipt starts below the first detail page.
+        for _ in range(4):
+            if "Controller 记录的原因" in chat.text()[offset:]:
+                break
+            os.write(chat.master, b"\x1b[6~")
+            chat.pump()
+        chat.wait(
+            lambda: "Controller 记录的原因" in chat.text()[offset:],
+            "original diagnosis in local detail",
+        )
+        first_page = len(chat.text())
+        os.write(chat.master, b"\x1b[D")
+        chat.wait(lambda: "详情 2/" in chat.text()[first_page:], "older acknowledged activity")
+    finally:
+        os.write(chat.master, b"\x1b")
+    assert (
+        len(trace.reads),
+        len(trace.provider),
+        len(trace.writes),
+        len(trace.mi_writes),
+    ) == before_details
+    assert session_path.read_bytes() == snapshot
+    if narrow:
+        redraw = len(chat.text())
+        chat.wait(lambda: "你 > " + draft in chat.text()[redraw:], "return to original composer")
+        endings = chat.endings()
+        os.write(chat.master, b"\r")
+        chat.wait(
+            lambda: (
+                chat.endings() > endings
+                and json.loads(session_path.read_bytes())["messages"][-2]["text"] == draft
+            ),
+            "original draft submitted after closing details",
+        )
+        offset = len(chat.text())
+        reads = len(trace.reads)
+        os.write(chat.master, b"/diagnose ")
+        try:
+            chat.wait(
+                lambda: "会话已显示" in chat.text()[offset:], "acknowledged object suggestions"
+            )
+            os.write(chat.master, b"\x1b[B\r")
+            chat.wait(
+                lambda: "/diagnose mission-diagnosis" in chat.text()[offset:],
+                "chosen Mission placed in the draft",
+            )
+            assert len(trace.reads) == reads
+        finally:
+            os.write(chat.master, b"\x15")
+    else:
+        # Esc's standalone keypress has a short terminal timeout; await a fresh prompt.
+        redraw = len(chat.text())
+        chat.process.send_signal(signal.SIGWINCH)
+        chat.wait(
+            lambda: "你 > " in chat.text()[redraw:], "composer restored after resumed details"
+        )
 
 
 def package_provenance(cli: Path, wheel: Path | None) -> dict[str, Any]:
@@ -948,12 +1126,17 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
             assert trace.writes == [] and trace.mi_writes == [], row
             assert "区域" in row["assistant"] and "/choose" not in row["assistant"], row
             transcript.append(row)
+            plan_output_offset = len(chat.text())
             row = question_step(chat, trace, "巡检东区，只规划，不执行；能力缺口交给 MI 继续澄清。")
             assert trace.writes == [], trace.writes
             assert len(trace.mi_writes) == 1 and "/choose" not in row["assistant"], row
             assert original_goal in trace.mi_writes[0]["body"]["instruction"]
             assert "巡检东区" in trace.mi_writes[0]["body"]["instruction"]
             assert "fixture-request" in row["assistant"], row
+            if remote is None:
+                plan_output = chat.text()[plan_output_offset:].partition("── RG · 助手")[2]
+                assert plan_output.splitlines()[1].startswith("RG > 仅规划请求已收到"), plan_output
+                assert "当前设备接入情况" not in plan_output
             transcript.append(row)
             trace.entered.clear()
             trace.release.clear()
@@ -990,6 +1173,24 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
             assert len(bundles) == 1
             with zipfile.ZipFile(bundles[0]) as archive:
                 assert json.loads(archive.read("manifest.json"))["local_only"] is True
+            if remote is None:
+                mixed = question_step(
+                    chat, trace, "node-beta 还有多少电、位置和姿态？也查一下 mission-unavailable。"
+                )
+                assert mixed["controller_reads"] == 4
+                assert all(
+                    word in mixed["assistant"]
+                    for word in (
+                        "82 %",
+                        "fixture-map",
+                        "站立",
+                        "mission-unavailable",
+                        "HTTP 503",
+                        "未完成",
+                    )
+                ), mixed
+                transcript.append(mixed)
+                local_tool_views(chat, trace, narrow=True)
             chat.close()
             chat = ChatProcess(
                 arguments.cli.resolve(),
@@ -1003,6 +1204,8 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
             assert_natural(row["assistant"])
             assert row["provider_calls"] >= 1, row
             transcript.append({**row, "resumed": True})
+            if remote is None:
+                local_tool_views(chat, trace, narrow=False)
             chat.close()
             chat = None
             assert trace.writes == [], trace.writes
@@ -1033,6 +1236,10 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
                 quiet_wait_notice=True if remote is None else None,
                 narrow_composer_preview=True if remote is None else None,
                 single_final_reply=True if remote is None else None,
+                tool_activity_details=True if remote is None else None,
+                details_resume_without_io=True if remote is None else None,
+                partial_compound_query=True if remote is None else None,
+                object_completion_without_submit=True if remote is None else None,
                 editable_queue=True,
                 mi_request_posts=len(trace.mi_writes),
                 mi_request_observations=len(trace.mi_observations),

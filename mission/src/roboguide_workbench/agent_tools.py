@@ -480,7 +480,9 @@ class ReadToolAdapter:
             "node_ids": list(self._shadow.displayed_nodes),
             "mission_ids": list(self._shadow.displayed_missions),
         }
-        returned = ReadResult(text, result.complete, (*result.components, component))
+        returned = ReadResult(
+            text, result.complete, (*result.components, component), result.summary, result.detail
+        )
         self._read_results[read_id] = returned
         return returned
 
@@ -593,6 +595,9 @@ class ReadToolAdapter:
             "\n\n".join(result.text for result in results),
             all(result.complete for result in results),
             tuple(component for result in results for component in result.components),
+            summary="\n\n".join(result.summary or result.text for result in results)
+            if any(result.summary is not None for result in results)
+            else None,
         )
 
     def publish(self, evidence: list[JSONObject], *, publish_raw: bool = True) -> None:

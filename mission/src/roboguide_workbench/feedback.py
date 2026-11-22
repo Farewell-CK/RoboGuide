@@ -427,6 +427,11 @@ def _private_directory(path: Path) -> tuple[Path, int]:
         raise
 
 
+def redact_activity_text(value: str, credential: str) -> str:
+    """Project local display text using the same credential rules as feedback."""
+    return _Redactor((credential,)).text(value)
+
+
 def create_feedback(
     session: WorkbenchSession,
     output_dir: Path | None = None,

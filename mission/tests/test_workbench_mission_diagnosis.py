@@ -138,6 +138,12 @@ def test_diagnosis_reports_the_original_unknown_and_missing_stop_receipts() -> N
     assert "需要人工处理" in result.text and "安全声明或当时的会话不可用" in result.text
     assert "取消接收回执、执行终止记录、安全状态观测" in result.text
     assert "关注步骤 build" not in result.text
+    assert result.summary is not None and result.summary.splitlines() == [
+        "任务仍在取消中，尚未确认设备停止。",
+        "publish 原执行为 Unknown。",
+        "下一步核对取消接收回执、执行终止记录、安全状态观测。",
+        f"Mission {MISSION_ID}",
+    ]
     assert set(raw) == {"mission", "execution_attempts", "safety_stop"}
 
 

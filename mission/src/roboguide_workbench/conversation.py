@@ -21,7 +21,13 @@ from roboguide_workbench.answers import (
     local_response,
 )
 from roboguide_workbench.client import WorkbenchError
-from roboguide_workbench.evidence import READ_COSTS, ReadResult
+from roboguide_workbench.evidence import (
+    READ_COSTS,
+    OriginalOperationPending,
+    ReadResult,
+    command_count,
+    new_pending_command,
+)
 from roboguide_workbench.mission_diagnosis import cancellation_diagnosis_intent, diagnosis_ordinal
 from roboguide_workbench.mission_views import cancelling_missions
 from roboguide_workbench.plan_view import same_plan
@@ -96,7 +102,21 @@ class ConversationSession(WorkbenchSession):
         try:
             if target is None:
                 self.progress("正在查看哪些任务还在取消中")
-                matches, complete = cancelling_missions(self.controller.missions())
+                trace = self.activity
+                run = trace.begin("查找取消中的任务") if trace is not None else None
+                try:
+                    matches, complete = cancelling_missions(self.controller.missions())
+                except (ValueError, OSError):
+                    if trace is not None and run is not None:
+                        trace.finish(run, "unavailable")
+                    raise
+                if trace is not None and run is not None:
+                    trace.finish(
+                        run,
+                        "complete" if complete else "partial",
+                        result=ReadResult(f"查到 {len(matches)} 个处于取消中的任务。"),
+                        reference="Controller · Mission 列表",
+                    )
                 if not self.task_dialogue.pinned:
                     self.task_dialogue.clear()
                 if not matches:
@@ -125,7 +145,7 @@ class ConversationSession(WorkbenchSession):
                 self.query_status = "failed"
                 return "本轮读取预算不足，暂时无法完成任务诊断。"
             self.progress("正在核对原执行与停止记录")
-            result = self.diagnose_mission(target)
+            result = self.diagnose_mission(target, record_activity=True)
             if not self.task_dialogue.pinned:
                 self.task_dialogue.clear()
             return result.text
@@ -168,7 +188,13 @@ class ConversationSession(WorkbenchSession):
             remaining: float,
         ) -> ReadResult:
             """Publish actual new receipt IDs to subsequent reads without guessing targets."""
-            returned = tasks.invoke(name, arguments, original, remaining, user_turns=user_turns)
+            before = command_count(self.store.data)
+            try:
+                returned = tasks.invoke(name, arguments, original, remaining, user_turns=user_turns)
+            except (ValueError, OSError) as error:
+                if new_pending_command(self.store.data, before):
+                    raise OriginalOperationPending(str(error)) from error
+                raise
             adapter.learn_task(tasks.known_nodes)
             return returned
 
@@ -186,6 +212,7 @@ class ConversationSession(WorkbenchSession):
             task_read_context=tasks.cache_context,
             task_work_key=tasks.work_key,
             on_delta=self.stream_output if self.stream_enabled else None,
+            activity=self.activity,
         )
         self.query_status, self.evidence = result.status, result.evidence
         if not tasks.owns_selection:
@@ -226,14 +253,32 @@ class ConversationSession(WorkbenchSession):
                 )
             if result.status != "complete":
                 text += "\n本轮其它操作、读取或回复未完成；未确认部分保持未知。"
+        presentation: str | None = None
+        if self.activity is not None and (task_answer is not None or read_answer is not None):
+            # Keep every plan and clarification in the visible result; only advisory
+            # capability descriptions and detailed diagnostic evidence can be folded.
+            presentation = "\n\n".join(
+                part
+                for part in (
+                    tasks.answer(result.evidence, compact=True),
+                    (read_answer.summary or read_answer.text) if read_answer else None,
+                )
+                if part
+            )
+            if result.status != "complete":
+                presentation += "\n本轮其它操作、读取或回复未完成；未确认部分保持未知。"
         if result.evidence:
             summary = adapter.reference_summary(result.evidence)
             if summary:
                 text += "\n\n" + summary
+                if presentation is not None:
+                    presentation += "\n\n" + summary
             mission = self.last_mission
             adapter.publish(result.evidence, publish_raw=not tasks.owns_selection)
             if tasks.owns_selection:
                 self.last_mission = mission
+        if self.activity is not None:
+            self.activity.reply = presentation
         return text
 
     def _retain_agent_turn(self, question: str, items: list[JSONObject]) -> None:
