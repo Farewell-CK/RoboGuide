@@ -89,12 +89,8 @@
             android:screenOrientation="portrait"
             android:theme="@style/NaviLaunchTheme"
             android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode">
-            <meta-data android:name="io.flutter.embedding.android.NormalTheme"
-                android:resource="@style/NaviNormalTheme" />
-            <!-- app_links handles the existing Supabase confirmation/recovery scheme. -->
-            <meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
+            android:windowSoftInputMode="adjustResize">
+            <!-- Keep existing Supabase recovery links; handled by the native Activity. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -102,7 +98,6 @@
                 <data android:scheme="com.example.indoornavigation" android:host="auth" />
             </intent-filter>
         </activity>
-        <meta-data android:name="flutterEmbedding" android:value="2" />
         <activity android:name="com.seaway.guideassistant.auth.LoginActivity"
             android:exported="false" />
     </application>
