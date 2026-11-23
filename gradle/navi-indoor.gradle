@@ -1,27 +1,33 @@
-// Verify the delivered host APK, including accidental Flutter transitive dependencies.
+// Use a local Maven AAR so Flutter and the existing native project retain their
+// respective Gradle toolchains. The source of that AAR lives in navi_indoor/.
+tasks.register('verifyNaviIndoorModule') {
+    group = 'verification'
+    doLast {
+        def aar = rootProject.file('navi_indoor/build/host/outputs/repo/com/seaway/guideassistant/naviindoor/flutter_release/1.0/flutter_release-1.0.aar')
+        if (!aar.isFile()) {
+            throw new GradleException('NAVI module not built. Run tools/build_navi_indoor.sh (or .ps1) before building :app.')
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'verifyNaviIndoorModule' }
+
+// Check the final APK, since a valid AAR can still lose dotfiles during merging.
 tasks.register('verifyNaviDebugApk') {
     group = 'verification'
     dependsOn 'assembleDebug'
     doLast {
-        // Inspect dependency components, not untyped Android artifacts: a project
-        // publishes several artifact variants and legacy resolution is ambiguous.
-        def components = configurations.debugRuntimeClasspath.incoming.resolutionResult.allComponents
-        def flutter = components.findAll {
-            it.moduleVersion?.group == 'io.flutter' || it.moduleVersion?.name?.startsWith('flutter_')
-        }
-        if (!flutter.isEmpty()) throw new GradleException('Native NAVI must not depend on Flutter artifacts: ' + flutter)
-        if (!components.any { it.id instanceof org.gradle.api.artifacts.component.ProjectComponentIdentifier && it.id.projectPath == ':naviindoor' }) {
-            throw new GradleException('Native NAVI Android module is missing from the host')
-        }
         def apks = fileTree(layout.buildDirectory.dir('outputs/apk/debug')).matching { include '*.apk' }.files
         if (apks.isEmpty()) throw new GradleException('No debug APK produced')
         apks.each { apk ->
             new java.util.zip.ZipFile(apk).withCloseable { zip ->
-                def forbidden = zip.entries().findAll {
-                    it.name.startsWith('assets/flutter_assets/') || it.name.endsWith('/libflutter.so') || it.name.endsWith('/libapp.so')
+                ['assets/flutter_assets/.env', 'assets/flutter_assets/AssetManifest.bin',
+                 'lib/arm64-v8a/libapp.so', 'lib/arm64-v8a/libflutter.so'].each { path ->
+                    if (zip.getEntry(path) == null) throw new GradleException("NAVI asset missing from APK: $path")
                 }
-                if (!forbidden.isEmpty()) throw new GradleException('Flutter runtime remains in native APK: ' + forbidden)
-                if (zip.getEntry('classes.dex') == null) throw new GradleException('APK has no Android bytecode')
+                def env = zip.getInputStream(zip.getEntry('assets/flutter_assets/.env')).getText('UTF-8')
+                if (env.readLines().any { it.trim() && !it.trim().startsWith('#') }) {
+                    throw new GradleException('NAVI APK must use runtime connection setup, not embedded credentials')
+                }
             }
         }
     }
