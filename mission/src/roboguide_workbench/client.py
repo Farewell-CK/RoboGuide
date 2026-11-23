@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import io
+import os
 import json
 import math
 import re
@@ -216,6 +217,33 @@ def _connection_classes(
         source_address: tuple[str, int] | None,
     ) -> socket.socket:
         """Resolve once, then bound every actual TCP attempt by the original remaining time."""
+        # **可选 HTTP 代理支持**: 本模块用裸 http.client（不读 HTTPS_PROXY），
+        # 在"必须经隧道出网"的环境里会直接连不上上游。设置 ROBOGUIDE_HTTP_PROXY
+        # 即改为先向代理发 CONNECT，再在其上做 TLS —— 隧道内 DNS 由代理侧解析，
+        # 因此也不受本机 DNS 污染影响。本机地址(controller/mission)自动跳过。
+        _proxy = os.environ.get("ROBOGUIDE_HTTP_PROXY", "").strip()
+        if _proxy and str(address[0]) not in {"127.0.0.1", "localhost", "::1"}:
+            _parsed = urlsplit(_proxy)
+            if _parsed.hostname:
+                _remaining(deadline)
+                _sock = socket.create_connection(
+                    (_parsed.hostname, _parsed.port or 8080),
+                    timeout=_remaining(deadline),
+                )
+                _head = (f"CONNECT {address[0]}:{address[1]} HTTP/1.1\r\n"
+                         f"Host: {address[0]}:{address[1]}\r\n\r\n").encode()
+                _sock.sendall(_head)
+                _buf = b""
+                while b"\r\n\r\n" not in _buf and len(_buf) < 8192:
+                    _chunk = _sock.recv(4096)
+                    if not _chunk:
+                        break
+                    _buf += _chunk
+                if b" 200 " not in _buf.split(b"\r\n", 1)[0] + b" ":
+                    _sock.close()
+                    raise OSError(f"proxy CONNECT failed: {_buf[:60]!r}")
+                _sock.settimeout(_remaining(deadline))
+                return _sock
         last_error: OSError | None = None
         for family, kind, protocol, _, target in socket.getaddrinfo(
             *address, type=socket.SOCK_STREAM
