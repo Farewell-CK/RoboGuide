@@ -27,7 +27,7 @@ android {
             keyPassword System.getenv("KEY_PASSWORD") ?: localProperties.getProperty("KEY_PASSWORD", "")
         }
     }
-    // Shared Android SDK for the host and native navigation modules.
+    // Flutter camera/media plugins require API 36; keep the host target unchanged.
     compileSdkVersion 36
     defaultConfig {
         applicationId naviIntegrationTest ? "com.seaway.guideassistant.swinl.navi" :
@@ -36,10 +36,10 @@ android {
                 (archiveTest ? "导航助手·数据测试" : "@string/app_name")]
         minSdkVersion 29
         targetSdkVersion 34
-        // Existing RGB-D/VINS native libraries are ARM64.
+        // NAVI's AAR and the existing RGB-D/VINS native libraries are ARM64.
         ndk { abiFilters 'arm64-v8a' }
-        versionCode naviIntegrationTest ? 20 : (swinlFast ? 17 : 8)
-        versionName naviIntegrationTest ? "1.4-navi-native-1" : (swinlFast ? "1.4-swinl-npu-384-v17" : "1.4-swinl-npu-640-v8")
+        versionCode swinlFast ? 17 : 8
+        versionName swinlFast ? "1.4-swinl-npu-384-v17-navi" : "1.4-swinl-npu-640-v8-navi"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
@@ -61,6 +61,12 @@ android {
     packagingOptions {
         exclude 'META-INF/INDEX.LIST'
         exclude 'META-INF/DEPENDENCIES'
+    }
+
+    // Keep Flutter's declared .env asset; Android's default ignores dotfiles.
+    // The checked-in asset is empty of credentials and filled via connection UI.
+    androidResources {
+        ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
 
     buildTypes {
@@ -98,8 +104,8 @@ android {
 }
 
 dependencies {
-    // Built with the same Gradle invocation as the host; no Flutter SDK/AAR step.
-    implementation project(':naviindoor')
+    // Built from the checked-in navi_indoor source, packaged into this APK.
+    implementation 'com.seaway.guideassistant.naviindoor:flutter_release:1.0'
     testImplementation 'junit:junit:4.13.2'
     //内存泄漏检测
 //    debugImplementation "com.squareup.leakcanary:leakcanary-android:2.6"

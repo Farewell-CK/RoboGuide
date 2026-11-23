@@ -3,5 +3,4 @@ include ':app'
 include ':robonix'
 include ':librealsense'
 include ':navoutdoor'
-include ':naviindoor'
 rootProject.name = "GuideAssistant"
