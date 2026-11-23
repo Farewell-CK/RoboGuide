@@ -1,0 +1,49 @@
+{
+  "date": "2026-11-23",
+  "scope": "将原生 NAVI 合入 feat/guide-assistant 后的编译、JVM 回归测试与原生模块 Lint；本次未重新生成 APK，未进行真机现场验收",
+  "target_branch": "feat/guide-assistant",
+  "source_commit": "222887ad6781e211e111f08ec070826b069dccaa",
+  "retained_guide_base": "6f5111d123ea66fda2f404a8c5e8b2dbf2f35089",
+  "tasks": [
+    ":naviindoor:testDebugUnitTest",
+    ":naviindoor:lintDebug",
+    ":app:testDebugUnitTest",
+    ":navoutdoor:testSwinlDebugUnitTest"
+  ],
+  "properties": {
+    "swinlFast": true,
+    "archiveTest": true,
+    "naviIntegrationTest": true
+  },
+  "tests": {
+    "naviindoor": {
+      "tests": 62,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "app": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "navoutdoor": {
+      "tests": 260,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "total_tests": 323,
+  "native_lint": {
+    "errors": 0,
+    "warnings": 54
+  },
+  "build_result": "BUILD SUCCESSFUL",
+  "build_elapsed": "2m 45s",
+  "limitations": [
+    "JVM 与 MockWebServer 测试不能替代现场路线、相机、传感器和真实后端验收",
+    "2026-11-20 的 APK 构建及签名记录属于原生迁移原始版本；本次验证包含 guide-assistant 的 D455 与录制修复，不将旧 APK 当作本次重新编译产物"
+  ]
+}
