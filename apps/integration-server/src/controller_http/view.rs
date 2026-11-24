@@ -14,6 +14,87 @@ pub(super) fn relation_kind_name(kind: domain::ExecutionRelationKind) -> &'stati
         domain::ExecutionRelationKind::FreshnessRequirement => "freshness-requirement",
     }
 }
+
+/// Formats one live Runtime relation snapshot for Mission and reconciliation HTTP responses.
+pub(super) fn relation_snapshot_json(
+    snapshot: &runtime::RuntimeRelationSnapshot,
+) -> serde_json::Value {
+    let relation = snapshot.relation();
+    serde_json::json!({
+        "id": relation.relation_id().as_str(),
+        "kind": relation_kind_name(relation.kind()),
+        "source": {
+            "task_id": relation.source_task_ref().task_id().as_str(),
+            "role_id": relation.source_role_id().as_str(),
+            "execution_id": snapshot.source_execution_id(),
+        },
+        "target": {
+            "task_id": relation.target_task_ref().task_id().as_str(),
+            "role_id": relation.target_role_id().as_str(),
+            "execution_id": snapshot.target_execution_id(),
+        },
+        "state": format!("{:?}", snapshot.state()),
+        "reconciliation_required": snapshot.reconciliation_required(),
+    })
+}
+
+/// Projects a read-only Group shared-view snapshot with freshness and spatial verification status.
+pub(super) fn group_shared_view_json(
+    mission_id: &domain::MissionId,
+    observed_at: domain::TimestampMs,
+    snapshot: &orchestration::GroupSharedViewSnapshot,
+) -> serde_json::Value {
+    let entries = snapshot
+        .entries()
+        .iter()
+        .map(|entry| {
+            let field = match entry.field() {
+                domain::GroupViewField::Pose => "pose",
+                domain::GroupViewField::Velocity => "velocity",
+                domain::GroupViewField::Execution => "execution",
+            };
+            serde_json::json!({
+                "task_id": entry.task_ref().task_id().as_str(),
+                "role_id": entry.role_id().as_str(),
+                "node_id": entry.node_id().as_str(),
+                "field": field,
+                "state_export_id": entry.state_export_id(),
+                "payload_schema": entry.payload_schema(),
+                "execution_status": entry.execution_status().map(|status| format!("{status:?}")),
+                "freshness": entry.freshness().map(|freshness| format!("{freshness:?}")),
+                "record": entry.record(),
+                "spatial_verification": entry
+                    .spatial_verification()
+                    .map(|verification| format!("{verification:?}")),
+                "spatial_evidence": entry.spatial_evidence().map(|evidence| {
+                    serde_json::json!({
+                        "execution_id": evidence.execution_id(),
+                        "node_id": evidence.node_id().as_str(),
+                        "map_id": evidence.selector().map_id().as_str(),
+                        "revision_id": evidence.selector().revision_id().as_str(),
+                        "frame_id": evidence.frame_id(),
+                        "received_at_ms": evidence.received_at().as_millis(),
+                    })
+                }),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "schema_version": "roboguide.group-shared-view/v0.1",
+        "mission_id": mission_id.as_str(),
+        "group_id": snapshot.group_id().as_str(),
+        "context_id": snapshot.context_id().as_str(),
+        "observed_at_ms": observed_at.as_millis(),
+        "spatial_reference": snapshot.spatial_reference().map(|reference| {
+            serde_json::json!({
+                "map_id": reference.selector().map_id().as_str(),
+                "revision_id": reference.selector().revision_id().as_str(),
+                "frame_id": reference.frame_id(),
+            })
+        }),
+        "entries": entries,
+    })
+}
 /// Projects current Shared Node State for Mission Intelligence without adding decision authority.
 pub(crate) fn inventory_json(
     state: &state::InMemorySharedNodeState,
