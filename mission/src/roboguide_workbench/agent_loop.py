@@ -59,7 +59,7 @@ execute_plan/approve_plan 只用于用户明确授权的已完整显示版本；
 设备名可直接使用用户原话如“狗2”，宿主会读取实际目录解析；object: 前缀明确选择目录对象。
 歧义时列出实际可选对象及来源并询问选择，不反复查询同一个含糊 Node ID。
 pending_task 是宿主持久化的完整待补充任务，连续补充不能改成独立新任务或丢弃限制。
-start_task.start_turn 仅提供原文线索；选择 current 也不会裁掉 pending_task 原始要求。
+start_task.start_turn 必须是 proposal_sources 里列出的 id："current" 表示本轮用户原话，"u1"/"u2"… 表示更早的完整用户轮次；禁止传原文片段、序号或无前缀数字。选择 current 也不会裁掉 pending_task 原始要求。
 用户明确说开始新任务时可以另起目标。上下文不完整时请用户完整重述，不从摘要补写。
 execute/approve 只用 current，仍由独立命令检查原计划。本轮精确读取可用于修改或取消；
 读取未展示的新计划不授予执行或审批权限。任务模式纠正后继续推进，不重复创建已成功的任务。
