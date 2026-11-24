@@ -247,7 +247,9 @@ pub(super) fn validate_restored_settlement(
         let terminal_matches_basis = match &value.basis {
             SettlementBasis::Manual { .. } => matches!(
                 attempt.status(),
-                runtime::ExecutionStatus::Cancelled | runtime::ExecutionStatus::Failed
+                runtime::ExecutionStatus::Cancelled
+                    | runtime::ExecutionStatus::Failed
+                    | runtime::ExecutionStatus::Completed
             ),
             SettlementBasis::AutomaticNoEffects { .. } => {
                 attempt.status() == runtime::ExecutionStatus::Cancelled
@@ -317,6 +319,7 @@ pub(crate) fn reconcile_manual(
         Some(
             orchestration::RemoteExecutionStatus::Cancelled
                 | orchestration::RemoteExecutionStatus::Failed
+                | orchestration::RemoteExecutionStatus::Completed
         )
     ) || controller.bridge.current_task_attempt_id(
         &identity.group_id,
@@ -336,8 +339,7 @@ pub(crate) fn reconcile_manual(
             })
     {
         return Err(
-            "reconciliation requires the current cancelled or failed attempt of a cancelling Mission"
-                .into(),
+            "reconciliation requires the current terminal attempt of a cancelling Mission".into(),
         );
     }
     let value = StopSettlement {

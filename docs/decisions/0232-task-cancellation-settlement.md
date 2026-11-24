@@ -18,7 +18,7 @@ physical StopConfirmed，也不能用于恢复、续跑或设备交接。v0.1 �
 
 管理员 POST /v1/executions/{id}/safety-stop/reconcile 提交 stop-reconciliation/v0.1。
 请求固定原停止记录摘要、幂等命令、原 generation、核验内容及 no-effects 或 stopped
-结论。仅当原记录已经转人工、原 attempt 仍为当前同代、原任务已 Cancelled 或 Failed、Mission 正在
+结论。仅当原记录已经转人工、原 attempt 仍为当前同代、原任务已进入终态（Cancelled、Failed 或 Completed）、Mission 正在
 取消时接纳。身份来自已有认证 principal，不能来自请求体。该操作保留原记录与原期限，
 记录新的管理员证据，并复用正常取消收尾。它不写入物理停止证明或授权恢复。
 
@@ -53,3 +53,15 @@ AutomaticNoEffects 继续仅接纳 Cancelled，不能用无副作用观察自动
 
 回归覆盖两种终态的资源保留、管理员与租户权限、SQL 回滚、命令重放及冲突、取消中与
 取消完成后的冷恢复，以及原 Failed 和停止记录保留。现场部署及原任务实际结案另行验收。
+
+## 2026-11-24 维护：并发完成终态的人工取消结案
+
+多机同组（ADR-0134 / ADR-0137）发生全组安全停止并进入 Cancelling 时，同组中另一角色
+可能并发上报原始 Completed（例如同组其他任务触发 SafetyStop 瞬间，该节点已完成本地停稳
+并回报完成）。若该任务的原停止目的保留为 ManualEscalation，人工结案拒绝 Completed 会导
+致整组取消永久死锁、资源槽位无法释放。人工结案与冷恢复验证因此同时接纳当前同代的
+Cancelled、Failed 或 Completed；保留原 Runtime 终态、停止记录及期限，不伪造 Cancelled。
+
+Completed 本身同样不允许释放或续跑：仍须原 Mission 正在取消、精确记录摘要、generation、
+已认证管理员和显式核验内容，再由 apply_pending_cancellations 完成取消收尾。
+AutomaticNoEffects 继续严格仅接纳 Cancelled，不得用无副作用观察自动结案 Failed 或 Completed。

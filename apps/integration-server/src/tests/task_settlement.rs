@@ -100,7 +100,7 @@ fn original_no_effects_settles_cancellation_without_physical_confirmation() {
     assert!(safety_stop::validate_restored(&fixture.controller).is_ok());
 }
 
-/// No-effects evidence cannot automatically settle Failed or restore it as a Cancelled-only proof.
+/// No-effects evidence cannot automatically settle Failed or Completed, or restore them as Cancelled-only proofs.
 #[test]
 fn automatic_no_effects_settlement_still_requires_cancelled_attempt() {
     let mut original = fixture_with_schema(domain::TASK_EFFECT_OBSERVATION_SCHEMA, "no-effects");
@@ -117,32 +117,34 @@ fn automatic_no_effects_settlement_still_requires_cancelled_attempt() {
         None,
     );
     safety_stop::tick(&mut original.controller, domain::TimestampMs::new(11)).unwrap();
-    let mut failed = fixture_with_schema(domain::TASK_EFFECT_OBSERVATION_SCHEMA, "no-effects");
-    admit(&mut failed);
-    receipt(&mut failed);
-    request_cancel(&mut failed);
-    failed.fact(2, ExecutionPhase::Failed, 9);
-    let payload = observation(&failed);
-    observe(
-        &mut failed,
-        "s1",
-        10,
-        serde_json::json!({"observations":[payload]}),
-        None,
-    );
-    safety_stop::tick(&mut failed.controller, domain::TimestampMs::new(11)).unwrap();
-    let mission = failed.attempt.command().mission_id();
-    assert!(safety_stop::blocks_cancellation_release(
-        &failed.controller,
-        mission
-    ));
-    assert!(!failed.allocations().allocations().is_empty());
-    assert!(!safety_stop::blocks_cancellation_release(
-        &original.controller,
-        mission
-    ));
-    failed.controller.safety_stops = original.controller.safety_stops;
-    assert!(safety_stop::validate_restored(&failed.controller).is_err());
+    for terminal in [ExecutionPhase::Failed, ExecutionPhase::Completed] {
+        let mut other = fixture_with_schema(domain::TASK_EFFECT_OBSERVATION_SCHEMA, "no-effects");
+        admit(&mut other);
+        receipt(&mut other);
+        request_cancel(&mut other);
+        other.fact(2, terminal, 9);
+        let payload = observation(&other);
+        observe(
+            &mut other,
+            "s1",
+            10,
+            serde_json::json!({"observations":[payload]}),
+            None,
+        );
+        safety_stop::tick(&mut other.controller, domain::TimestampMs::new(11)).unwrap();
+        let mission = other.attempt.command().mission_id();
+        assert!(safety_stop::blocks_cancellation_release(
+            &other.controller,
+            mission
+        ));
+        assert!(!other.allocations().allocations().is_empty());
+        assert!(!safety_stop::blocks_cancellation_release(
+            &original.controller,
+            mission
+        ));
+        other.controller.safety_stops = original.controller.safety_stops.clone();
+        assert!(safety_stop::validate_restored(&other.controller).is_err());
+    }
 }
 
 /// Incomplete, unrelated, late or device-labelled observations retain the original resource hold.
@@ -309,6 +311,12 @@ fn manual_settlement_of_failed_attempt_releases_cancellation_and_survives_restor
     check_manual_settlement(ExecutionPhase::Failed);
 }
 
+/// A concurrently completed current attempt can close cancellation without rewriting its terminal outcome.
+#[test]
+fn manual_settlement_of_completed_attempt_releases_cancellation_and_survives_restore() {
+    check_manual_settlement(ExecutionPhase::Completed);
+}
+
 /// Reopens the real Runtime and Mission checkpoints without refreshing any stop evidence.
 fn restore_settlement_fixture(fixture: &mut stop_recovery::Fixture, restored_at: u64) {
     let mut saved: ServerCheckpoint =
@@ -338,10 +346,10 @@ fn check_manual_settlement(phase: ExecutionPhase) {
     fixture.fact(2, phase, 9);
     let id = fixture.attempt.execution_id().to_owned();
     let mission = fixture.attempt.command().mission_id().clone();
-    let expected_status = if phase == ExecutionPhase::Failed {
-        orchestration::RemoteExecutionStatus::Failed
-    } else {
-        orchestration::RemoteExecutionStatus::Cancelled
+    let expected_status = match phase {
+        ExecutionPhase::Failed => orchestration::RemoteExecutionStatus::Failed,
+        ExecutionPhase::Completed => orchestration::RemoteExecutionStatus::Completed,
+        _ => orchestration::RemoteExecutionStatus::Cancelled,
     };
     application::apply_runtime_outcomes(
         &mut fixture.controller,
@@ -460,6 +468,12 @@ async fn manual_settlement_public_route_is_authenticated_and_durable() {
 #[tokio::test]
 async fn failed_manual_settlement_public_route_is_authenticated_and_durable() {
     check_manual_settlement_public_route(ExecutionPhase::Failed).await;
+}
+
+/// Completed terminals retain the public route's administrator, tenant and durable rollback fences.
+#[tokio::test]
+async fn completed_manual_settlement_public_route_is_authenticated_and_durable() {
+    check_manual_settlement_public_route(ExecutionPhase::Completed).await;
 }
 
 /// Drives the production HTTP handler and actual SQLite commits for the original terminal outcome.
@@ -613,6 +627,7 @@ fn no_effects_never_authorizes_running_mission_continuation() {
 fn manual_settlement_refuses_incomplete_or_conflicting_original_evidence() {
     check_manual_settlement_refusals(ExecutionPhase::Cancelled);
     check_manual_settlement_refusals(ExecutionPhase::Failed);
+    check_manual_settlement_refusals(ExecutionPhase::Completed);
 }
 
 /// Checks the same original-scope and Mission fences for each manually settleable terminal.
@@ -624,7 +639,6 @@ fn check_manual_settlement_refusals(phase: ExecutionPhase) {
         "evidence",
         "forged-principal",
         "active",
-        "completed",
         "running-mission",
     ] {
         let mut fixture = stop_recovery::Fixture::new();
@@ -633,15 +647,7 @@ fn check_manual_settlement_refusals(phase: ExecutionPhase) {
             request_cancel(&mut fixture);
         }
         if case != "active" {
-            fixture.fact(
-                2,
-                if case == "completed" {
-                    ExecutionPhase::Completed
-                } else {
-                    phase
-                },
-                9,
-            );
+            fixture.fact(2, phase, 9);
         }
         let before = server_checkpoint_json(&fixture.controller).unwrap();
         let mut command = reconciliation(&fixture);
