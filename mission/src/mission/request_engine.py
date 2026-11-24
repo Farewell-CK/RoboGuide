@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import json
 import sqlite3
 import threading
@@ -120,6 +121,29 @@ class _RequestLockEntry:
         """Initialize an unused lock entry for one Mission Request identity."""
         self.lock = threading.RLock()
         self.users = 0
+
+
+def _movable_bodies() -> set[str] | None:
+    """读部署地图里"可搬"实体的 body 名；读不到返回 None(表示无法校验)。"""
+    import json
+
+    path = os.environ.get("ROBOGUIDE_ARENA_MAP", "")
+    if not path:
+        candidate = os.path.join("scenarios", "hcore-multi-embodiment-v0.1", "arena-map.json")
+        path = candidate if os.path.exists(candidate) else ""
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    bodies = {
+        str(item.get("entity_id"))
+        for item in (doc.get("entities") or [])
+        if isinstance(item, dict) and item.get("movable") is True
+    }
+    return bodies or None
 
 
 class MissionRequestEngine:
@@ -981,11 +1005,81 @@ class MissionRequestEngine:
             recovery_evidence=None,
         )
 
+    def _fast_path_ok(self, record: MissionRequestRecord) -> bool:
+        """审查分级：只有"单任务 + 单角色 + 白名单合同 + 参数完整"才跳过 reviewer。
+
+        目的: 常规搬运/导航已被能力合同与部署词表约束, 让它们走快速通道,
+        把 reviewer(实测约 14 s)留给真正需要判断的复杂计划。
+
+        开关(默认 always, 保持现有行为):
+          ROBOGUIDE_REVIEW_MODE=always     永不跳过
+          ROBOGUIDE_REVIEW_MODE=whitelist  仅上述严格条件成立时跳过
+          ROBOGUIDE_REVIEW_MODE=off        一律跳过(等同 review_enabled=false)
+          ROBOGUIDE_FASTPATH_CONTRACTS     允许快速通过的操作, 逗号分隔
+        """
+        mode = os.environ.get("ROBOGUIDE_REVIEW_MODE", "always").strip().lower()
+        if mode == "off":
+            return True
+        if mode != "whitelist":
+            return False
+        plan = record.plan
+        if plan is None:
+            return False
+        try:
+            doc = plan.to_json()
+        except Exception:  # noqa: BLE001 — 序列化异常就交给 reviewer 处理
+            return False
+        tasks = doc.get("tasks") or []
+        if len(tasks) != 1:
+            return False
+        roles = tasks[0].get("roles") or []
+        if len(roles) != 1:
+            return False
+        allowed = {
+            item.strip()
+            for item in os.environ.get(
+                "ROBOGUIDE_FASTPATH_CONTRACTS",
+                "object.relocate@v1,mobility.navigate@v1",
+            ).split(",")
+            if item.strip()
+        }
+        def _walk(value: object):
+            """遍历角色 JSON，收集合同三元组与 parameters（不耦合具体 schema 版本）。"""
+            if isinstance(value, dict):
+                if {"namespace", "name", "version"} <= set(value):
+                    yield ("contract", value)
+                for key, item in value.items():
+                    if key == "parameters" and isinstance(item, dict):
+                        yield ("parameters", item)
+                    yield from _walk(item)
+            elif isinstance(value, list):
+                for item in value:
+                    yield from _walk(item)
+
+        contracts: list[str] = []
+        params: dict[str, object] = {}
+        for kind, value in _walk(roles[0]):
+            if kind == "contract":
+                contracts.append("%s.%s@%s" % (
+                    value.get("namespace"), value.get("name"), value.get("version")))
+            elif kind == "parameters" and not params:
+                params = dict(value)
+        if not contracts or any(item not in allowed for item in contracts):
+            return False
+        target = str(params.get("object") or "").strip()
+        destination = str(params.get("destination") or "").strip()
+        # **目标物必须在部署地图的 movable 实体里**：否则交给 reviewer 澄清，
+        # 免得"teddy"这类不可搬的名字走快速通道、最后在执行侧失败(实测副作用)。
+        movable = _movable_bodies()
+        if movable is not None and target not in movable:
+            return False
+        return bool(target) and bool(destination) and " " not in target
+
     def _review_and_advance(
         self, record: MissionRequestRecord, grounded_intent: GroundedIntent
     ) -> MissionRequestRecord:
         """Review and optionally repair drafts until a bounded stable outcome is reached."""
-        if self._reviewer is None:
+        if self._reviewer is None or self._fast_path_ok(record):
             return self._advance_admitted_draft(record)
         while True:
             record = self._update(record, lifecycle=MissionRequestLifecycle.REVIEWING)
