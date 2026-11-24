@@ -250,14 +250,11 @@ impl<E: EventSink + Clone> IntegrationRuntimeBridge<E> {
             } => {
                 if self
                     .router
-                    .has_session(&registration.node_id)
+                    .routed_session_matches(&registration.node_id, &session_id)
                     .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?
-                    && !self
-                        .router
-                        .session_matches(&registration.node_id, &session_id)
-                        .map_err(|error| IntegrationRuntimeError::Protocol(error.to_string()))?
+                    == Some(false)
                 {
-                    return Err(IntegrationRuntimeError::Protocol(
+                    return Err(IntegrationRuntimeError::FactRejected(
                         "registration session was superseded".into(),
                     ));
                 }

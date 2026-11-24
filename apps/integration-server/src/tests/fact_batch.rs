@@ -49,6 +49,8 @@ struct Fixture {
     receiver: mpsc::UnboundedReceiver<integration::GrpcNodeEventDelivery>,
     /// Independently negotiated physical-owner proxies; no work executes.
     peers: Vec<Peer>,
+    /// Loopback listener address for additional independent sessions.
+    address: std::net::SocketAddr,
     /// Test-owned server stopped on every exit.
     server: tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
 }
@@ -162,42 +164,12 @@ impl Fixture {
             clock,
             receiver,
             peers: Vec::new(),
+            address,
             server,
         };
         for index in 0..2 {
             let declared = registration(index);
-            let mut client =
-                wire::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient::connect(
-                    format!("http://{address}"),
-                )
-                .await
-                .unwrap();
-            let (sender, receiver) = mpsc::unbounded_channel();
-            sender
-                .send(wire::NodeMessage {
-                    message: Some(NodePayload::Hello(wire::Hello {
-                        node_id: format!("worker-{index}"),
-                        protocol_versions: vec![wire::PROTOCOL_VERSION.into()],
-                        node_contract_versions: vec![declared.node_contract_version.clone()],
-                    })),
-                })
-                .unwrap();
-            let mut incoming = client
-                .node_session(UnboundedReceiverStream::new(receiver))
-                .await
-                .unwrap()
-                .into_inner();
-            assert!(matches!(
-                incoming.message().await.unwrap().unwrap().message,
-                Some(ServerPayload::Welcome(_))
-            ));
-            sender
-                .send(wire::NodeMessage {
-                    message: Some(NodePayload::Register(wire::Register {
-                        registration: Some(declared),
-                    })),
-                })
-                .unwrap();
+            let (sender, mut incoming) = fixture.pending(declared).await;
             let delivery = fixture.next().await;
             assert!(fact_is_barrier(delivery.event()));
             assert!(
@@ -224,6 +196,50 @@ impl Fixture {
             });
         }
         fixture
+    }
+
+    /// Opens a real pending registration, leaving acceptance to the fixture writer.
+    async fn pending(
+        &self,
+        declared: wire::NodeRegistration,
+    ) -> (
+        mpsc::UnboundedSender<wire::NodeMessage>,
+        tonic::Streaming<wire::ServerMessage>,
+    ) {
+        let address = self.address;
+        let mut client =
+            wire::robo_guide_node_protocol_client::RoboGuideNodeProtocolClient::connect(format!(
+                "http://{address}"
+            ))
+            .await
+            .unwrap();
+        let (sender, receiver) = mpsc::unbounded_channel();
+        sender
+            .send(wire::NodeMessage {
+                message: Some(NodePayload::Hello(wire::Hello {
+                    node_id: declared.node_id.clone(),
+                    protocol_versions: vec![wire::PROTOCOL_VERSION.into()],
+                    node_contract_versions: vec![declared.node_contract_version.clone()],
+                })),
+            })
+            .unwrap();
+        let mut incoming = client
+            .node_session(UnboundedReceiverStream::new(receiver))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(matches!(
+            incoming.message().await.unwrap().unwrap().message,
+            Some(ServerPayload::Welcome(_))
+        ));
+        sender
+            .send(wire::NodeMessage {
+                message: Some(NodePayload::Register(wire::Register {
+                    registration: Some(declared),
+                })),
+            })
+            .unwrap();
+        (sender, incoming)
     }
 
     /// Waits only for one already transmitted fact, with a bounded test timeout.
@@ -794,6 +810,11 @@ async fn unchanged_telemetry_advances_live_projection_without_writing_sql() {
 #[tokio::test]
 async fn checkpoint_failure_rolls_back_all_inputs_without_ack() {
     let mut fixture = Fixture::new().await;
+    fixture.events = fixture
+        .events
+        .clone()
+        .with_write_failure_fence("checkpoint-test")
+        .unwrap();
     fixture.submit(None);
     let before = fixture.events.load_checkpoint().unwrap().unwrap();
     let trace = fixture.events.events().unwrap();
@@ -802,6 +823,8 @@ async fn checkpoint_failure_rolls_back_all_inputs_without_ack() {
     let first = fixture.heartbeat(0, 1, 3).await;
     let second = fixture.heartbeat(1, 1, 3).await;
     assert!(fixture.run(vec![first, second]).is_err());
+    assert!(!fixture.events.write_status().unwrap().write_enabled);
+    assert!(fixture.events.require_writes_enabled().is_err());
     assert_eq!(fixture.events.load_checkpoint().unwrap().unwrap(), before);
     assert_eq!(fixture.events.events().unwrap(), trace);
     assert_eq!(
@@ -1026,4 +1049,62 @@ async fn collector_preserves_registration_update_barrier_order() {
     fixture.ack(0, 1).await;
     fixture.run(vec![barrier]).unwrap();
     fixture.ack(1, 1).await;
+}
+
+/// A superseded pending registration loses only its own candidate and completion.
+#[tokio::test]
+async fn superseded_registration_preserves_current_lease_and_other_node_writes() {
+    let mut fixture = Fixture::new().await;
+    fixture.events = fixture
+        .events
+        .clone()
+        .with_write_failure_fence("registration-test")
+        .unwrap();
+    let (_old_sender, mut old_peer) = fixture.pending(registration(2)).await;
+    let old = fixture.next().await;
+    let (new_sender, mut new_peer) = fixture.pending(registration(2)).await;
+    let current = fixture.next().await;
+    let trace = fixture.events.events().unwrap();
+    let checkpoint = fixture.events.load_checkpoint().unwrap();
+    fixture.run(vec![old]).unwrap();
+    assert_eq!(fixture.events.events().unwrap(), trace);
+    assert_eq!(fixture.events.load_checkpoint().unwrap(), checkpoint);
+    let rejected = tokio::time::timeout(Duration::from_secs(2), old_peer.message())
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(rejected.code(), tonic::Code::Aborted);
+    assert_eq!(rejected.message(), "session superseded by reconnect");
+    assert!(fixture.events.write_status().unwrap().write_enabled);
+    let GrpcNodeEvent::Registered {
+        session_id,
+        lease_id,
+        ..
+    } = current.event()
+    else {
+        panic!("registration expected")
+    };
+    let expected = (session_id.clone(), lease_id.clone());
+    fixture.run(vec![current]).unwrap();
+    let Some(ServerPayload::Registered(registered)) =
+        new_peer.message().await.unwrap().unwrap().message
+    else {
+        panic!("current registration must succeed")
+    };
+    assert_eq!(
+        (&registered.session_id, &registered.lease_id),
+        (&expected.0, &expected.1)
+    );
+    fixture.peers.push(Peer {
+        sender: new_sender,
+        incoming: new_peer,
+        session: registered.session_id,
+        lease: registered.lease_id,
+    });
+    for index in [2, 1] {
+        let heartbeat = fixture.heartbeat(index, 1, 3).await;
+        fixture.run(vec![heartbeat]).unwrap();
+        fixture.ack(index, 1).await;
+    }
+    assert!(fixture.events.write_status().unwrap().write_enabled);
 }
