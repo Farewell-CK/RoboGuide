@@ -1,0 +1,40 @@
+# 主智能体服务 (Mission Intelligence) 绑定到本场景的 Control。
+#
+# 链路: 一句自然语言 -> Interpreter/Planner/Reviewer/Repairer (LLM) -> MissionPlan
+#       -> 自动提交 Control (http://127.0.0.1:8080/v1/missions)
+#       -> Control Match/Propose/Commit -> 四个 robonix 子智能体 (28111..28114)
+#
+# 与 config/mission-service.toml 的区别只有 endpoint 与审批策略 (仿真闭环不需要审批门)。
+# state_db 由 run-step3-llm-mission.sh 用 sed 替换成当次运行的绝对路径。
+[service]
+listen_host = "127.0.0.1"
+listen_port = 8070
+state_db = "STATE_DB_PLACEHOLDER"
+controller_endpoint = "http://127.0.0.1:8080"
+controller_timeout_seconds = 30
+artifact_endpoint = "http://127.0.0.1:8090"
+grounding_timeout_seconds = 5
+# 瞬时传输失败先重试, 再落成一条 GroundingGap (四个子智能体不发布 state/memory 证据时,
+# 主智能体就在"无实时证据"下规划 —— 这是诚实的降级, 不是失败)。
+grounding_acquisition_attempts = 2
+max_grounding_state_evidence = 64
+max_grounding_memory_evidence = 32
+max_grounding_gaps = 32
+# 本部署承认哪几种 World State 载荷。**空列表 = 一条都不认**: 主智能体读得到记录,
+# 但会在 _state_evidence 里按 schema 白名单全部丢弃, 而且不报 gap (看起来像"没有证据")。
+# 这里开的是四个节点 [[state_exports]] 自报的实体身份 —— 主智能体据此才能把
+# mission.actors[].physical_entity 绑定到具体实体 (dog / rover / ...)。
+grounding_world_payload_schemas = ["roboguide.world.physical-entity-reference/v0.1"]
+max_request_bytes = 1048576
+# 环境权威世界事实: 主智能体据此知道"谁占着机械臂回转带 / 目标在不在臂展内"。
+# 原生产者是已删除的 hcore 桥 (`--planning-world-evidence`, 在世界 reset 时落盘);
+# 现在**没有**生产者, 这个文件不会被生成 —— 在补上之前, 本项 grounding 会拿到空路径
+# 并判不可用 (诚实的失败, 不是假通过)。参考实现见
+# integrations/habitat-local-eaios/habitat_local_eaios/planning_world_evidence.py。
+grounding_planning_world_evidence_path = "PLANNING_WORLD_EVIDENCE_PLACEHOLDER"
+grounding_planning_world_evidence_required = true
+# 部署侧 execution profile: 四个操作各占一份共享空间资源 (与四个节点的 [[resources]] 对齐)。
+execution_profile_path = "scenarios/hcore-multi-embodiment-v0.1/execution-profile.json"
+
+# 空列表 = 通过审查的计划直接提交给 Control, 不阻塞在人工审批。
+approval_required_contracts = []

@@ -1,0 +1,1 @@
+Before anything is moved, check whether the crate crate1 is actually within reach of the fixed-base manipulator. Sweep the pan/tilt camera around the arena, capture one image per bearing, and report whether the crate can be reached from the manipulator.

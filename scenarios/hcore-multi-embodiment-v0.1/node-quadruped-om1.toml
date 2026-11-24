@@ -1,0 +1,212 @@
+# RoboGuide 多本体场景: 四足狗节点 (本地执行统一由 robonix facade 桥接)
+#
+# 物理后端是 H-CoRE 的 MuJoCo 竞技场 (arena_roboguide.xml), 由
+# robonix-src/examples/mujoco/facade/robonix_facade.py 提供 loopback HTTP facade
+# (四个真实 robonix provider 经共享世界服务驱动竞技场里的四个本体)。
+# 本文件只描述 canonical What 与本地 workflow, 不绑定任何特定 OS 框架。
+schema = "roboguide.node-config/v0.7"
+node_id = "hcore-quadruped"
+server_endpoint = "http://127.0.0.1:50051"
+state_directory = "node-state-quadruped"
+reconnect_delay_ms = 500
+
+[[local_systems]]
+id = "quadruped-runtime"
+runtime_name = "robonix-os"
+runtime_version = "0.1.0-mujoco-bridge"
+
+[local_systems.health]
+state_pointer = "/state"
+detail_pointer = "/detail"
+online = ["ONLINE"]
+degraded = ["DEGRADED"]
+offline = ["OFFLINE"]
+
+[local_systems.health.step]
+id = "quadruped-health"
+connection = "quadruped-http"
+
+[local_systems.health.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/health"
+
+[local_systems.health.step.request]
+base = {}
+
+[[connections]]
+driver = "http"
+id = "quadruped-http"
+local_system = "quadruped-runtime"
+endpoint = "http://127.0.0.1:28111"
+timeout_ms = 5000
+
+# ── 实体身份自报 ────────────────────────────────────────────────────────────
+# 主智能体只承认这一条通道上的实体证据: object_class=world 且
+# payload_schema = roboguide.world.physical-entity-reference/v0.1 的 State 记录,
+# 其 value 必须恰好是 {"entity_id": ...}。object_id 与世界证据里的 entity_id
+# 用同一套名字 —— 否则主智能体看到"dog 挡着环带", 却对不上可绑定的实体。
+[[state_exports]]
+id = "physical-entity-identity"
+owner = "quadruped-runtime"
+object_class = "world"
+object_type = "physical-entity"
+object_id = "dog"
+semantic = "reported"
+payload_schema = "roboguide.world.physical-entity-reference/v0.1"
+valid_for_ms = 15000
+interval_ms = 5000
+value_pointer = ""
+
+[state_exports.step]
+id = "quadruped-identity"
+connection = "quadruped-http"
+
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/identity"
+
+[state_exports.step.request]
+base = {}
+
+# ── 自位姿自报 ──────────────────────────────────────────────────────────────
+# 机器人自己的位置由自己的里程计给出 —— 这是 object memory 里置信度最高的一路来源
+# (self-odometry 0.90), 也是"实时地图"能成立的前提: 每台机器人报自己的位置, 而不是
+# 由谁去读别人的真值坐标。
+[[state_exports]]
+id = "self-pose"
+owner = "quadruped-runtime"
+object_class = "world"
+object_type = "entity-pose"
+object_id = "dog"
+semantic = "reported"
+payload_schema = "roboguide.world.entity-pose/v0.1"
+valid_for_ms = 3000
+interval_ms = 1000
+value_pointer = ""
+
+[state_exports.step]
+id = "quadruped-pose"
+connection = "quadruped-http"
+
+[state_exports.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/pose"
+
+[state_exports.step.request]
+base = {}
+
+[[capability_profiles]]
+contract = "mobility.navigate@v1"
+kind = "mobility"
+owner = "quadruped-runtime"
+# push-capable=false: 四足平台与 obs2 的接触位掩码不重叠, 走过去顶不动它。
+# 显式声明 (而非省略) 是必要的: Control 判定约束时用 is_some_and, 未声明该
+# 属性的节点会被排除 —— 声明 false 才能让它匹配"不需要推"的任务。
+attributes = { "push-capable" = false }
+
+[capability_profiles.readiness]
+state_pointer = "/state"
+detail_pointer = "/detail"
+ready = ["READY"]
+unavailable = ["UNAVAILABLE"]
+
+[capability_profiles.readiness.step]
+id = "navigation-readiness"
+connection = "quadruped-http"
+
+[capability_profiles.readiness.step.operation]
+kind = "http"
+method = "GET"
+path = "/v1/capabilities/mobility.navigate"
+
+[capability_profiles.readiness.step.request]
+base = {}
+
+[[resources]]
+id = "hcore-quadruped-space"
+kind = "space"
+capacity = 1
+owner = "quadruped-runtime"
+
+[[operations]]
+operation = "mobility.navigate@v1"
+owner = "quadruped-runtime"
+required_resources = ["hcore-quadruped-space"]
+local_locks = ["mujoco-quadruped-body"]
+
+[operations.workflow]
+poll_interval_ms = 100
+
+[operations.workflow.local_handle]
+kind = "pointer"
+pointer = "/steps/dispatch/execution_id"
+
+[operations.workflow.execution_state]
+state_pointer = "/steps/status/state"
+reason_pointer = "/steps/status/detail"
+accepted = ["ACCEPTED"]
+running = ["RUNNING"]
+completed = ["COMPLETED"]
+failed = ["FAILED"]
+cancelled = ["CANCELLED"]
+case_sensitive = false
+
+[[operations.workflow.execute]]
+id = "dispatch"
+connection = "quadruped-http"
+
+[operations.workflow.execute.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions"
+
+[operations.workflow.execute.request]
+base = {}
+
+[[operations.workflow.execute.request.bindings]]
+target = "/invocation"
+
+[operations.workflow.execute.request.bindings.value]
+kind = "pointer"
+pointer = "/invocation"
+
+[[operations.workflow.status]]
+id = "status"
+connection = "quadruped-http"
+
+[operations.workflow.status.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/status"
+
+[operations.workflow.status.request]
+base = {}
+
+[[operations.workflow.status.request.bindings]]
+target = "/execution_id"
+
+[operations.workflow.status.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"
+
+[[operations.workflow.cancel]]
+id = "cancel"
+connection = "quadruped-http"
+
+[operations.workflow.cancel.operation]
+kind = "http"
+method = "POST"
+path = "/v1/executions/cancel"
+
+[operations.workflow.cancel.request]
+base = {}
+
+[[operations.workflow.cancel.request.bindings]]
+target = "/execution_id"
+
+[operations.workflow.cancel.request.bindings.value]
+kind = "pointer"
+pointer = "/local_handle"

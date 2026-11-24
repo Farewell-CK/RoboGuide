@@ -1,0 +1,10 @@
+{
+  "schema": "roboguide.object-aliases/v0.1",
+  "map_id": "arena_roboguide",
+  "bodies": {
+    "obs2":   { "label": "纸箱",   "movable": true,  "aliases": ["箱子", "纸箱", "纸盒子", "目标箱子", "那个箱子", "box"] },
+    "crate1": { "label": "木箱",   "movable": true,  "aliases": ["木箱", "木头箱", "crate"] },
+    "rover":  { "label": "小车",   "movable": true,  "aliases": ["小车", "车", "底盘", "rover"] },
+    "dog":    { "label": "机器狗", "movable": true,  "aliases": ["机器狗", "狗", "四足"] }
+  }
+}

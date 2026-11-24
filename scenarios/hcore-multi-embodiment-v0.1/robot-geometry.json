@@ -1,0 +1,62 @@
+{
+  "schema": "roboguide.robot-geometry/v0.1",
+  "frame": "arena world, metres, right-handed（x 东 y 北 z 上）",
+  "note": "机器人的**物理参数**，不是位置。位置由 arena-map.json 给（人类部署先验），这里只答'这根杆多长、这个壳多宽'。所有数值都能在 MJCF 里复核，来源写在 provenance 里；改动 MJCF 时必须同步这里。",
+
+  "platforms": [
+    {
+      "entity_id": "rover",
+      "purpose": "地面平台（UGV）。带前铲，是全场唯一能靠接触推走可移障碍的本体；也负责把某个区域占住/让开。",
+      "shape": "box",
+      "half_extents_m": [0.24, 0.14, 0.06],
+      "height_m": 0.12,
+      "provenance": "arena_roboguide.xml: rover_chassis size 0.18 0.14 0.06 + rover_bumper pos 0.21 size 0.03 -> x 方向最远 0.24；body z=0.12"
+    },
+    {
+      "entity_id": "dog",
+      "purpose": "四足平台（Go2 类）。没有前铲，只能移动自己；用于让出回转环带、或到某处做观察。",
+      "shape": "box",
+      "half_extents_m": [0.67, 0.16, 0.15],
+      "height_m": 0.62,
+      "provenance": "arena_roboguide.xml: dog_torso 0.42 0.16 0.15 + dog_head pos 0.52 size 0.15 -> 前端 0.67；尾端 -0.58。为保守起见按对称 [0.67,0.16] 处理（头部朝前的实际支撑会更小）。"
+    },
+    {
+      "entity_id": "crate1",
+      "purpose": "被搬运的目标物。它自己不会动。",
+      "shape": "box",
+      "half_extents_m": [0.13, 0.13, 0.13],
+      "height_m": 0.26,
+      "provenance": "world.py ARM_CRATE_HALF_M = 0.13（与 MJCF 的 crate1 size 一致）"
+    },
+    {
+      "entity_id": "obs2",
+      "purpose": "可被推动的障碍。不是机器人，没有传感器，也不会自己动；只有带前铲的平台能改变它的位置。",
+      "shape": "box",
+      "half_extents_m": [0.30, 0.20, 0.40],
+      "height_m": 0.80,
+      "provenance": "arena_roboguide.xml: obs2_geom size 0.30 0.20 0.40；水平外接半径 sqrt(0.30^2+0.20^2)=0.36，与 world.py PUSH_TARGET_RADIUS_M 一致"
+    }
+  ],
+
+  "manipulator": {
+    "entity_id": "arm",
+    "purpose": "固定基座机械臂（Piper 类）。只搬运它自己的目标物；从不给自己清路。",
+    "shoulder_height_m": 0.75,
+    "upper_link_m": 0.75,
+    "fore_link_m": 0.70,
+    "stow_joints_rad": [-0.85, 2.30],
+    "base_occupancy_radius_m": 0.22,
+    "rotation_margin_m": 0.05,
+    "carry_margin_m": 0.10,
+    "clearance_uses_carry_margin": true,
+    "provenance": "arm_driver/driver.py: ARM_SHOULDER_Z / ARM_L1 / ARM_L2 / ARM_STOW / ARM_INNER_R_M / ARM_ROTATE_R_M 的 +0.05 / ARM_CARRY_MARGIN_M。扫掠半径不是臂展 1.45 m，而是**收臂姿态**下末端相对基座的水平半径。"
+  },
+
+  "derived": {
+    "note": "由上面的物理参数算出，不要手写进部署文件。生产者每次现算，几何一改数就跟着变。",
+    "swing_inner_radius_m": "base_occupancy_radius_m  (基座立柱自身占位，内侧不算阻挡)",
+    "swing_outer_radius_m": "abs(upper_link*cos(q1) + fore_link*cos(q1+q2)) + rotation_margin  (空手收臂回转)",
+    "clearance_outer_radius_m": "swing_outer_radius_m + carry_margin",
+    "single_standard_note": "**只有一个判据**：清环带的目的就是让机械臂能持物回转，所以“已清空”= 障碍边沿在 clearance_outer_radius_m 之外（= 0.6293 + 0.10 = 0.7293）。空手扫掠半径 0.6293 只是这个数的组成部分，不单独作为判据；否则会出现“空手能转、夹着东西就撞”的两套标准。"
+  }
+}

@@ -1,0 +1,5 @@
+The manipulator in the arena is blocked and its job is unfinished: crate1 is still standing on the floor instead of lying on the manipulator's drop point.
+
+Recover the situation and finish the job. Nothing has been pre-arranged for you and no clearing route has been surveyed: you decide how the blocked band gets cleared, which platform takes which part of it, where each platform should stand while it works, and in what order, then see it through to the end.
+
+Two things are not negotiable. An obstacle that is pushed counts as moved only once its displacement has been measured at 0.7 m or more. And the manipulator decides for itself whether its band is clear before it swings -- a plan that asserts the band is free is not evidence that it is.

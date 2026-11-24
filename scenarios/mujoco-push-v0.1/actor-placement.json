@@ -1,0 +1,17 @@
+{
+  "scenario": "mujoco-push-v0.1",
+  "world": "scenarios/hcore-multi-embodiment-v0.1/arena-map.json",
+  "entities": {
+    "obs2":        { "pos": [-0.564, 0.236], "half": [0.30, 0.20], "movable": true,
+                     "note": "目标箱子；/v1/place 必须带 z=0.45，否则与地面穿插被弹飞" },
+    "marker69":    { "pos": [-0.600, 1.150], "half": [0.12, 0.12], "height": 0.60 },
+    "arm_base":    { "pos": [-1.200, -0.400], "half": [0.15, 0.15] },
+    "obs5":        { "pos": [-1.600, 1.900], "half": [0.25, 0.25] },
+    "rover":       { "deploy": [-0.900, 1.300], "note": "车不能被 place(无 freejoint)" }
+  },
+  "goal": { "pos": [0.600, 1.400] },
+  "controlled_experiments": [
+    { "id": "open-field", "box": [0.9, -1.6], "target": [0.9, -0.6],
+      "why": "远离所有固定件，单独测推偏修正" }
+  ]
+}

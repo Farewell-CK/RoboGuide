@@ -1,0 +1,12 @@
+The manipulator in the arena has to take the yellow crate crate1 off the floor and put it down on arm_home_drop, releasing it there rather than merely lifting it.
+
+It cannot start. The band it has to swing through is occupied, and the manipulator's own local sweep refuses to rotate through it. Nothing has been arranged for this job: the other platforms of this fleet are standing wherever they happen to be, and one obstacle that is light enough to be shoved is sitting inside that band. Nothing is pinned in place: any platform may be told to move aside, including the legged one.
+
+Bring the arena back into a state where the manipulator can do its job, and have it do the job. Which platform does which part of the work, where each one should stand while it works, and in what order -- that is your call, from the goal down.
+
+What this fleet can and cannot do is a fact about its hardware, not a procedure to follow:
+
+- the legged platform carries no pushing bumper, so it can never shove anything;
+- only the platform that carries the bumper can move an obstacle by contact, and such a push only counts once that obstacle has been measured to move at least 0.7 m;
+- the manipulator never clears its own way; it only relocates its object, one object at a time;
+- whether the band is actually free at the moment of swinging is decided by the manipulator's own local sweep, never by an assertion made in a plan.

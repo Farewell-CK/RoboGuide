@@ -1,0 +1,80 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "mission-ptz-survey-reach",
+    "objective": "第 0 步 (门禁): PTZ 云台相机环绕矩形场景一周 —— 云台依次扫过四个方位并对四个面各拍一张照片, 由本地判定目标 crate1 是否落在机械臂抓取范围内。在范围内才放行后续的清障与搬运链; 不在范围内本地直接 FAILED, 后续四步不再提交。",
+    "actors": [
+      {
+        "id": "actor-ptz"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "ctx-ptz-survey",
+      "roles": [
+        {
+          "id": "ctx-role-ptz",
+          "actor": "actor-ptz"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "sequential-handoff"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-survey-crate-reach",
+      "description": "PTZ 云台转过四个方位各拍一张照片 (视角依次掠过场地的西南/东南/东北/西北四个面), 再按机械臂臂展判定 crate1 是否可抓。",
+      "context_id": "ctx-ptz-survey",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "role-survey",
+          "context_role": "ctx-role-ptz",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "observation",
+                  "name": "survey",
+                  "version": "v1"
+                },
+                "constraints": []
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "observation",
+              "name": "survey",
+              "version": "v1"
+            },
+            "objective": "环绕场景一周, 四个面各拍一张, 检查 crate1 是否在机械臂抓取范围内。",
+            "parameters": {
+              "target": "crate1",
+              "views": 4
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "crate1 已在机械臂抓取范围内 (四张照片为证)。",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}
