@@ -380,3 +380,13 @@ approve: ask which of the movable bodies above is meant.
 
 只有当 `source` 指向**另一个具体物体或具体坐标**（例如 `"from obs2"`、`"from (1.2,0.3)"`）
 且与 `object` 不一致时, 才需要澄清。
+
+## Refusal wording for non-movable objects
+
+当 `object` 落在"不可搬"清单里（如 `teddy`、`wall_*`、`marker*`、`arm_base`、`ptzcam`），
+提问题时**必须先给结论再给选项**，例如：
+
+> `teddy` 不可搬运（它不在可搬物体清单里）。可选的是：`obs2`（纸箱）、`crate1`（木箱）、
+> `rover`（小车）、`dog`（机器狗）。
+
+不要只说"不在允许列表中"就列选项——用户会以为再试一次就能过。
