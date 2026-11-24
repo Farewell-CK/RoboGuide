@@ -470,6 +470,31 @@ def _prefetch_enabled() -> bool:
     return os.environ.get("ROBOGUIDE_PREFETCH_INVENTORY", "1").strip() != "0"
 
 
+def _movable_bodies() -> list[str]:
+    """列出部署地图里"可搬"的 body 名(arena-map.json 的 movable 实体)。
+
+    为什么需要: 没有这份清单时, 模型会把"teddy"当成可搬对象直接提交,
+    等到执行侧才失败(实测: 从"事前澄清"退化成"请求失败")。
+    """
+    import glob
+
+    pattern = os.environ.get("ROBOGUIDE_ARENA_MAP") or os.path.join(
+        os.getcwd(), "scenarios", "*", "arena-map.json")
+    bodies: set[str] = set()
+    for path in glob.glob(pattern) if "*" in pattern else [pattern]:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                doc = json.load(handle)
+        except (OSError, ValueError):
+            continue
+        for item in doc.get("entities") or []:
+            if isinstance(item, dict) and item.get("movable") is True:
+                name = str(item.get("entity_id") or "").strip()
+                if name:
+                    bodies.add(name)
+    return sorted(bodies)
+
+
 def _annotation_names() -> list[str]:
     """把本部署可用的区域名读出来(来自 scenarios/*/scene-annotations/*.json)。
 
@@ -526,6 +551,10 @@ def _prefetch_block(read: Callable[[str, JSONObject, float], ReadResult],
         text = (result.text or "").strip()
         if text:
             parts.append("[" + label + "]\n" + text)
+    movable = _movable_bodies()
+    if movable:
+        parts.append("[可搬物体]\n" + "、".join(movable)
+                     + "（object 只能用这些 body 名；不在表内的直接说明不可搬，不要提交任务）")
     regions = _annotation_names()
     if regions:
         parts.append("[可用区域名]\n" + "、".join(regions)
