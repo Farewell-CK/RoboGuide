@@ -709,13 +709,22 @@ impl GrpcNodeRouter {
     }
     /// Returns whether a route still belongs to the supplied session, regardless of lease state.
     pub fn session_matches(&self, node_id: &str, session_id: &str) -> Result<bool, Status> {
+        Ok(self.routed_session_matches(node_id, session_id)? == Some(true))
+    }
+
+    /// Compares the session against one route-table snapshot. None denotes an absent route.
+    pub fn routed_session_matches(
+        &self,
+        node_id: &str,
+        session_id: &str,
+    ) -> Result<Option<bool>, Status> {
         let sessions = self
             .sessions
             .lock()
             .map_err(|_| Status::internal("session registry unavailable"))?;
         Ok(sessions
             .get(node_id)
-            .is_some_and(|route| route.session_id == session_id))
+            .map(|route| route.session_id == session_id))
     }
 
     /// Returns whether any route currently exists for a Node.
