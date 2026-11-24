@@ -6,6 +6,8 @@ State 记录对象、Desired/Committed/Reported/Observed/Derived/Belief 语义�
 
 Belief 需要具名 producer 与原 lineage。confidence 不能被当成方差，重复输入与重启不能刷新 TTL。Source 时钟与 Controller receive time 不跨主机直接比较。
 
+在持久化与事件瘦身层面，[ADR-0257](docs/decisions/0257-process-local-node-liveness.md) 将稳态心跳续期保持在进程内实时租约（仅首次会话或健康状态跳变写入事件），[ADR-0258](docs/decisions/0258-periodic-node-telemetry-persistence.md) 通过 `ROBOGUIDE_TELEMETRY_PERSISTENCE_POLICY` 对周期诊断样本执行语义变更或最大间隔落盘，配合 Storage v3（[ADR-0244](docs/decisions/0244-state-retention-and-deduplicated-storage.md)）正文去重降低 SQLite WAL 膨胀，同时豁免决策、World 与 safe-state 观测；节点侧 `CoalescedStateOutbox` 在漫游拥塞时按 `export_id` 合并旧样本。
+
 ## Memory：内容与使用生命周期
 
 Execution、Spatial、Semantic、Experience、Artifact 内容由原 provider 保有。catalog 提供 discovery；Artifact CAS 保存不可变 bytes；接收端 provider 保存 import/placement/use evidence。配置 EAIOS workflow 时，Node ledger 不偷偷复制后端内容。
@@ -31,6 +33,8 @@ Execution、Spatial、Semantic、Experience、Artifact 内容由原 provider 保
 地图 bytes placement 不等于 active-map 或 localization。active map 保留原 typed provenance、Node、Group、attempt 和目标。worker/use/map/handoff 引用参与原 provider 的保守 GC gate；tombstone 先于 unlink。
 
 静止恢复持有实际 writer leases，核对声明 SQL 和内容。活动引用必须与同包 CAS bytes 一致，缺少必须表、bytes 或存在 tombstone 冲突时拒绝。它不覆盖未声明的全局引用或在线跨主机复制。
+
+在多机建图协作场景中，[`spatial-provider`](https://github.com/Farewell-CK/RoboGuide/blob/main/integrations/spatial-provider/README.md) 与 `memory-provider` 支持可选配准策略（`correlative-icp` 或 `opencv-akaze`，PR #25）执行占用栅格地图融合并发布到 `:8090` CAS；目标节点下载校验并在本地导入后，由 `POST /v1/maps/{id}/replicas` 精确记录接收者与当前会话身份（PR #18）。
 
 参阅[State 模块](modules/state.md)、[Memory/恢复档案](archives.md)与[运维路径](operations.md)。
 

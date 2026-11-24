@@ -24,7 +24,7 @@ flowchart LR
 
 | 你想做什么 | 阅读路径 |
 | --- | --- |
-| 理解架构与设计理由 | [架构导览](architecture-tour.md) → [概念与术语](concepts.md) → [完整执行链](lifecycle.md) |
+| 理解架构与设计理由 | [架构导览](architecture-tour.md) → [核心数据流图解](docs/architecture/v2/system-dataflows.md) → [概念与术语](concepts.md) → [完整执行链](lifecycle.md) |
 | 在本地运行 | [快速开始](getting-started.md) → [开发与接入](integration-guide.md) |
 | 找到代码入口 | [模块地图](modules/domain-ports.md) → [实现状态](status.md) |
 | 部署和排查故障 | [部署与运维](operations.md) → [状态与版本](reference.md) |
@@ -40,6 +40,6 @@ flowchart LR
 
 ## 当前能做到哪里
 
-当前已有完整计划接纳、DAG 调度、执行尝试、来源 State、Memory 准备与使用、运行期修订、逻辑 quota 和恢复工具等软件路径。每项验证范围与剩余工作见[实现状态](status.md)；软件进程和文件验收不构成设备安全或总体完成证据。
+当前已有完整计划接纳、DAG 调度、四种执行耦合模式（ADR-0026/0027）、执行尝试、来源 State、遥测事件瘦身与 Storage v3、多机空间记忆融合、运行期修订、逻辑 quota、恢复工具、`roboguide chat` 对话工作台与只读 `console/` 控制台等软件路径。每项验证范围与剩余工作见[实现状态](status.md)；软件进程和文件验收不构成设备安全或总体完成证据。
 
 版本与构建来源集中在[参考页](reference.md)，避免把历史快照当成当前能力。

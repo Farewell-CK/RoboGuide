@@ -47,3 +47,5 @@ flowchart TB
 `mission/checkpoint.rs` 保存接纳计划与时间锚，`mission/lifecycle.rs` 把 completion 和 satisfaction 分开，`mission/revision.rs` 保留原目标与版本历史。`integration_bridge/` 组合传输事实与现有 Runtime，不另建 execution map。
 
 调度不足保留 durable deferral，不阻塞其他 Mission。取消、hold、恢复与 revision 保留各自 gate；终态 evidence 不是所有情况下足够的停止或内容撤销证据。
+
+在准入与异常收尾路径上，`POST /v1/missions/validate-plan` 支持 `?timing=v0.1` 与 `?timing=history-v0.1`（ADR-0259 / PR #30）沿 DAG 诊断前置与截止时间冲突；当自然设备故障经 `SafeStateObservation` 独立确认安全停机后，系统解锁同 Mission 的 `plan_revision` 动态接管（PR #33）；需要人工取消收口时，[`reconcile_manual`](https://github.com/Farewell-CK/RoboGuide/blob/main/apps/integration-server/src/application/safety_stop/settlement.rs)（ADR-0232 / PR #17/#40）支持对 `Cancelled`、`Failed` 与 `Completed` 尝试记录审计结案而不补造物理停止证明。

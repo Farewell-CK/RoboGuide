@@ -4,8 +4,10 @@ These sources retain architecture authority, decisions and historical evidence. 
 
 | Archive topic | Meaning and limits | Original sources |
 | --- | --- | --- |
-| V2 architecture | Authoritative baseline and implementation topology; the DOCX is historical | [V2](docs/architecture/v2/index.md) |
+| V2 architecture | Authoritative baseline, five core protocol dataflows, implementation topology; the DOCX is historical | [V2](docs/architecture/v2/index.md), [Dataflows](docs/architecture/v2/system-dataflows.md) |
 | Decisions | Original numbers/status and rationale; Accepted is not complete acceptance | [Topics](decisions.md), [catalog](docs/decisions/index.md) |
+| Acceptance archive index | Thematic index to all 143 retained Oct/Nov 2026 software and field acceptance records | [Acceptance index](docs/development/acceptance/index.md) |
+| Historical dev log | Lossless archive of the original root `README.md` (`e4c03a55`) Oct–Nov 2026 development log | [README archive](docs/development/readme-development-log-archive-2026-11.md) |
 | Implementation audit | Separates implementation, wiring, software acceptance and deployment gaps | [Latest inventory](docs/development/roboguide-branch-audit-2026-10-22.md) |
 | Memory / scoped revision | Original permission, import/use/revoke, nonempty Memory and independent goal proof | [MI/Memory composition](docs/development/acceptance/2026-10-21-runtime-mi-scoped-memory.md) |
 | References and recovery | Active refs match original-provider CAS; no global coverage claim | [Reference recovery](docs/development/acceptance/2026-10-21-recovery-active-content-reference.md) |

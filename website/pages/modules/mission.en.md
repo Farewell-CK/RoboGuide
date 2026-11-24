@@ -48,3 +48,5 @@ Missing current Nodes is a scheduling condition, not permission for Interpreter 
 Runtime workers discover original Requests from committed Generating tickets filtered by stable principal/tenant. Original claims/nonces and SQL intents precede provider I/O. Uncertain calls use read-only reconciliation; replacing stores/nonces cannot repeat them. Candidates/advice grant no Control permission; independent Review and original-goal proofs remain mandatory.
 
 Code paths: `request_engine.py`, `plan_validation.py`, `runtime_replanning.py`, `runtime_work_store.py`.
+
+For interactive operations, `roboguide_workbench` (`roboguide chat`) provides a native agent loop, device `/state` queries, `/cancel` confirmation, mission diagnosis, and runbooks (PR #34 / ADR-0251–0256); MI also includes prompt stability, transport/field latency optimizations, and request provenance capture (PR #28/#29/#31).

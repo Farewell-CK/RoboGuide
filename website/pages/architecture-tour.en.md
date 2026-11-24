@@ -74,6 +74,28 @@ remain separate. The old V2 PNG is a historical conceptual snapshot.
 - Memory Scope, Visibility and Placement are independent. A CAS reference does not establish receiver import.
 - Recovery preserves original facts, budgets and permission. Local EAIOS and independent evidence constrain device safety.
 
+## Three-plane flows and four coupling modes
+
+At runtime, RoboGuide separates the **Control Plane (HTTP :8080 / gRPC :50051)**, the **State and Spatial CAS Plane (:8090 / Storage v3)**, and the **Mode 4 Direct Peer Data Plane**. Five detailed protocol diagrams are documented in [System architecture and core dataflows](docs/architecture/v2/system-dataflows.md) (in Chinese with bilingual terminology).
+
+```mermaid
+flowchart TB
+  CHAT["roboguide chat / Mission Console :8095"] -->|"HTTP"| MS["Mission Service :8070"]
+  MS -->|"POST /validate-plan, /v1/missions"| CTRL["Controller (:8080 HTTP / :50051 gRPC)"]
+  CTRL ---|"SQLite Storage v3 + ADR-0257/0258 slimming"| CAS["Artifact HTTP & CAS :8090"]
+  SP["Spatial Provider (multi-robot fusion)"] -->|"SHA-256 immutable bundles"| CAS
+  CTRL <-->|"gRPC :50051 Execute / Snapshot / PeerReadiness"| NODE["roboguide-node + Local EAIOS"]
+  NODE <-->|"mTLS upload / pull map bytes :8090"| CAS
+  NODE <-->|"Mode 4 direct edge data plane (zero Controller bytes)"| PEER["Peer Local EAIOS"]
+```
+
+| Coupling mode (ADR-0026 / ADR-0027) | Control-plane gating | Data plane and immediate safety |
+| --- | --- | --- |
+| `Independent` | Standard Task DAG, `Match -> Commit -> Bind` | Each Node runs independently |
+| `SequentialHandoff` | Predecessor `TaskSatisfied` + Memory/Artifact release gates | Handoff via `:8090` CAS and explicit `import / use` |
+| `ConcurrentCooperation` | `RequiresActive` / `SharedSpatialReference`, `GET /v1/missions/{id}/shared-view`, `relation_fences`, `/reconcile` | Shared state freshness classified by receive-time TTL; local safety stays in Local EAIOS |
+| `TightlyCoupledCooperation` | Runtime manages only two-ended `PeerChannel` (`Planned -> Ready -> Fenced -> Closed`) | High-frequency control and disconnect braking run peer-to-peer at edge with zero bytes through Controller |
+
 ## Continue reading
 
 [Concepts](concepts.md) explains identities; [Lifecycle](lifecycle.md) follows normal and failure paths; [State and Memory](state-memory.md) covers evidence and content; [Status](status.md) records implementation limits.

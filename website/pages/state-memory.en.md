@@ -6,6 +6,8 @@ Records preserve object identity, Desired/Committed/Reported/Observed/Derived/Be
 
 Belief requires a named producer and original lineage. Confidence is not variance; duplicate inputs and restart never refresh TTL. Independent source clocks cannot be directly compared with Controller receive time.
 
+For telemetry scalability, [ADR-0257](docs/decisions/0257-process-local-node-liveness.md) keeps steady-state heartbeat renewals in process-local live state (persisting transitions and first session facts), while [ADR-0258](docs/decisions/0258-periodic-node-telemetry-persistence.md) filters periodic diagnostics via `ROBOGUIDE_TELEMETRY_PERSISTENCE_POLICY` onto Storage v3 deduplicated bodies ([ADR-0244](docs/decisions/0244-state-retention-and-deduplicated-storage.md)) without skipping decision, World, or safe-state records; Node-side `CoalescedStateOutbox` coalesces stale samples per `export_id`.
+
 ## Memory: content and permission lifecycle
 
 Execution, Spatial, Semantic, Experience and Artifact content remains with the original provider. The catalog supports discovery; Artifact CAS stores immutable bytes; receivers retain provider-qualified import/placement/use evidence. Configured EAIOS workflows do not silently copy backend content into the Node ledger.
@@ -31,6 +33,8 @@ Execution, Spatial, Semantic, Experience and Artifact content remains with the o
 Byte placement does not establish active-map selection or localization. Active Map retains original typed provenance, Node, Group, attempt and target. Worker/use/map/handoff references participate in original-provider conservative GC; tombstones precede unlink.
 
 Quiescent recovery holds actual writer leases and validates declared SQL/content. Active references must resolve to the same bundle's CAS bytes. Missing mandatory tables/content or tombstone conflicts refuse publication. This does not cover undeclared global references or online cross-host replication.
+
+For multi-robot mapping, [`spatial-provider`](https://github.com/Farewell-CK/RoboGuide/blob/main/integrations/spatial-provider/README.md) and `memory-provider` support selectable occupancy registration (`correlative-icp` or `opencv-akaze`, PR #25) before publishing fused immutable bundles to `:8090` CAS; target Nodes pull, SHA-256 verify, import locally, and record exact receiver/session provenance via `POST /v1/maps/{id}/replicas` (PR #18).
 
 See [State](modules/state.md), [Memory/recovery archives](archives.md) and [operations](operations.md).
 

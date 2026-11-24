@@ -99,3 +99,33 @@ Original Role units and Mission tenant are accounted atomically at Commit/releas
 Active Memory/map/handoff references must resolve to actual bytes in the same bundle; missing content or tombstone conflicts refuse.
 
 [ADR-0145, original language](docs/decisions/0145-recovery-active-content-reference-binding.md).
+
+## Coupling modes and peer readiness
+
+MissionPlan distinguishes `Independent`, `SequentialHandoff`, `ConcurrentCooperation`, and `TightlyCoupledCooperation`. Runtime enforces `SharedSpatialReference`, Group shared views, and two-ended `PeerChannelReadiness` fences while keeping high-frequency relative control in Local EAIOS.
+
+[ADR-0026](docs/decisions/0026-execution-coupling-and-group-views.md) · [ADR-0027](docs/decisions/0027-runtime-coordination-evidence-completion.md).
+
+## Cancellation settlement and explicit Unknown
+
+Automated no-effect settlement and administrator reconciliation (`reconcile_manual`) never fabricate physical stop proof; missing local terminal outcomes stay non-terminal `Unknown`.
+
+[ADR-0232](docs/decisions/0232-task-cancellation-settlement.md) · [ADR-0233](docs/decisions/0233-local-administrator-cancel-settlement.md) · [ADR-0250](docs/decisions/0250-explicit-local-execution-unknown.md).
+
+## Hot enrollment, online publications, and storage governance
+
+Covers explicit online adoption of static Node certificates, online entity/feasibility publication, streaming Catalog recovery projections (storage v2), and lossless body deduplication (storage v3).
+
+[ADR-0239](docs/decisions/0239-online-static-node-identity-adoption.md) · [ADR-0242](docs/decisions/0242-online-deployment-publications.md) · [ADR-0243](docs/decisions/0243-catalog-recovery-checkpoint.md) · [ADR-0244](docs/decisions/0244-state-retention-and-deduplicated-storage.md).
+
+## Conversation workbench and preflight extensions
+
+`roboguide chat` provides read-only evidence queries, explicit submission intent, and a native agent loop; private Node preflight and dependency-window preflight validate workflow sources and DAG timing before admission.
+
+[ADR-0251](docs/decisions/0251-readonly-conversation-workbench.md) · [ADR-0254](docs/decisions/0254-installed-chat-workbench.md) · [ADR-0255](docs/decisions/0255-private-node-plan-preflight.md) · [ADR-0256](docs/decisions/0256-complete-node-preflight-sources.md) · [ADR-0259](docs/decisions/0259-dependency-window-preflight.md).
+
+## Telemetry and liveness slimming
+
+Steady-state heartbeats advance process-local leases without SQL commits; `ROBOGUIDE_TELEMETRY_PERSISTENCE_POLICY` persists periodic diagnostics only on semantic change or max interval while always retaining decision, World, and safe-state records.
+
+[ADR-0257](docs/decisions/0257-process-local-node-liveness.md) · [ADR-0258](docs/decisions/0258-periodic-node-telemetry-persistence.md).

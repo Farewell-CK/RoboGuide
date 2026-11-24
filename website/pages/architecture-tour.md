@@ -71,6 +71,28 @@ Replica 元数据共识、内容恢复和物理连续性分别有自己的合同
 - Memory Scope、Visibility、Placement 独立；CAS 引用不证明接收端已导入。
 - 恢复保留原事实、预算与权限；设备安全仍由 Local EAIOS 及独立证据约束。
 
+## 三平面通信与四种协作耦合模式
+
+系统运行期将 **控制面（HTTP :8080 / gRPC :50051）**、**状态与空间记忆 CAS 面（:8090 / Storage v3）** 与 **Mode 4 端到端直连数据面** 分层解耦，五类细化协议数据流见[核心系统数据流图解](docs/architecture/v2/system-dataflows.md)（含部署拓扑、任务控制流、遥测瘦身与空间融合流、协作分流与分级恢复流）。
+
+```mermaid
+flowchart TB
+  CHAT["roboguide chat / Mission Console :8095"] -->|"HTTP"| MS["Mission Service :8070"]
+  MS -->|"POST /validate-plan, /v1/missions"| CTRL["Controller (:8080 HTTP / :50051 gRPC)"]
+  CTRL ---|"SQLite Storage v3 + ADR-0257/0258 瘦身"| CAS["Artifact HTTP & CAS :8090"]
+  SP["Spatial Provider (多机地图融合)"] -->|"SHA-256 不可变包"| CAS
+  CTRL <-->|"gRPC :50051 Execute / Snapshot / PeerReadiness"| NODE["roboguide-node + Local EAIOS"]
+  NODE <-->|"mTLS 上传 / 下载地图字节 :8090"| CAS
+  NODE <-->|"Mode 4 边缘直连数据面 (零经由 Controller)"| PEER["同伴 Local EAIOS"]
+```
+
+| 协作模式（ADR-0026 / ADR-0027） | 控制面协调机制 | 数据面与本地安全归属 |
+| --- | --- | --- |
+| `Independent` | 标准 Task DAG、`Match -> Commit -> Bind` | 各节点独立执行 |
+| `SequentialHandoff` | 前序 `TaskSatisfied` + Memory/Artifact 释放门禁 | 经 `:8090` CAS 与显式 `import / use` 交接 |
+| `ConcurrentCooperation` | `RequiresActive` / `SharedSpatialReference`、`GET /v1/missions/{id}/shared-view`、`relation_fences` 与 `/reconcile` | 共享状态按 receive-time TTL 分类；本地避障由 Local EAIOS 自持 |
+| `TightlyCoupledCooperation` | Runtime 仅管理双端 `PeerChannel`（`Planned -> Ready -> Fenced -> Closed`） | 高频相对控制与断链齐刹直连边缘节点，Controller 零经过数据面流量 |
+
 ## 下一步
 
 [核心概念](concepts.md)解释对象关系；[执行生命周期](lifecycle.md)串起正常与异常路径；[State 与 Memory](state-memory.md)说明数据和证据；[实现状态](status.md)列出实际边界。

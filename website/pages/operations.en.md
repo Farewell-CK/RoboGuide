@@ -76,3 +76,13 @@ See the [deployment and recovery contract](docs/development/replicated-federatio
 ## Online coordinated Archive
 
 Explicit process v0.9 retains its original v0.6/v0.7 profile through `coordinated_archive_base`. A global recovery-admin first inspects `/v1/maintenance/coordinated-archive/operations`, then requests an exact cutoff under a fresh original command ID. Duplicate IDs are readonly. Observing Unknown never repeats publication, and abandonment never manufactures completion. Packages are private control metadata; Artifact-admin grants cannot read them. Parent11 and recovery v0.30 require original journals, manifests and actual qualified CAS bytes before publication. Complete restore starts no services. See the [Archive contract](docs/development/coordinated-content-archive-v0.1.md).
+
+## Runtime switches and operational endpoints (`e4c03a55`)
+
+| Operational scenario | Setting / Endpoint | Scope and evidence boundary |
+| --- | --- | --- |
+| **Periodic telemetry slimming** | `ROBOGUIDE_TELEMETRY_PERSISTENCE_POLICY=/path/policy.json` | Ignores declared volatile clock fields for approved schemas and persists on change or `max_persist_interval_ms`; Decision/World/SafeState remain exempt (ADR-0258) |
+| **Private Node plan preflight** | `ROBOGUIDE_NODE_PREFLIGHT_CONFIGS`, `ROBOGUIDE_NODE_PREFLIGHT_PROFILE=complete-sources/v0.1` | Enables private TOML and external descriptor source digests in `/v1/missions/validate-plan` (ADR-0255/0256) |
+| **Online static-Node adoption** | `POST /v1/node-identities/adopt` | Enrolls static Node certificates into lifecycle management while preserving credentials and cold-restore boundaries (ADR-0239 / [`hot-node-enrollment-v0.1.md`](docs/development/hot-node-enrollment-v0.1.md)) |
+| **Relation views and reconciliation** | `GET /v1/missions/{id}/shared-view?context_id=...`, `POST /v1/missions/{id}/relations/{relation_id}/reconcile` | Reads Mode 3/4 shared-view freshness and clears `relation_fences` after recovery (PR #40) |
+| **Safety-stop and manual settlement** | `GET /v1/executions/{id}/safety-stop`, `POST /v1/executions/{id}/safety-stop/reconcile` | Inspects independent `SafeStateObservation`; settles `Cancelled`/`Failed`/`Completed` attempts manually under admin identity (PR #17/#33/#40) |

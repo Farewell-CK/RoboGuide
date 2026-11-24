@@ -48,3 +48,5 @@ flowchart TB
 运行期 worker 从已提交 Generating ticket 按 stable principal/tenant 发现原 Request。原 claim/nonce 与 SQL intent 先于 provider I/O；不确定调用只读对账，不换 store 或 nonce 重做。候选与建议没有 Control 权限，独立 Review 和原目标 proof 仍是必需门禁。
 
 代码路径：`request_engine.py`、`plan_validation.py`、`runtime_replanning.py`、`runtime_work_store.py`。
+
+面向运维与现场操作，`roboguide_workbench`（`roboguide chat`）提供原生 Agent Loop、设备 `/state` 查询、`/cancel` 确认、任务诊断与内置 Runbook（PR #34 / ADR-0251–0256）；MI 侧已合入提示词稳定性与传输/字段延迟优化及请求级 provenance 记录（PR #28/#29/#31）。

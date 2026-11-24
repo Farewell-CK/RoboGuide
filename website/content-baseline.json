@@ -1,6 +1,6 @@
 {
-  "code_commit": "375eef7d6736e19c625bc0954207e940a2e95b60",
-  "reviewed_at": "2026-10-25",
+  "code_commit": "e4c03a55d3221da6aa1283fd2cbbc0c06c943069",
+  "reviewed_at": "2026-11-25",
   "versions": {
     "MissionPlan (configured default)": "roboguide.mission-plan/v0.8",
     "MissionPlan (explicit Memory)": "roboguide.mission-plan/v0.9",

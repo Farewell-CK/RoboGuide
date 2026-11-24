@@ -47,3 +47,5 @@ flowchart TB
 `mission/checkpoint.rs` retains the accepted plan/time anchor; `mission/lifecycle.rs` separates completion and satisfaction; `mission/revision.rs` preserves original goals/version history. `integration_bridge/` composes transport facts with existing Runtime rather than another execution map.
 
 Shortages retain durable deferrals without blocking other Missions. Cancellation, hold, recovery and revision retain their own gates. Terminal evidence alone is not sufficient for every stop or content-revocation requirement.
+
+For admission and exception settlement, `POST /v1/missions/validate-plan` accepts `?timing=v0.1` and `?timing=history-v0.1` (ADR-0259 / PR #30) to diagnose DAG dependency-window conflicts; confirmed natural device-failure `SafeStateObservation` evidence unlocks in-Mission `plan_revision` takeover (PR #33); and [`reconcile_manual`](https://github.com/Farewell-CK/RoboGuide/blob/main/apps/integration-server/src/application/safety_stop/settlement.rs) (ADR-0232 / PR #17/#40) settles `Cancelled`, `Failed`, and `Completed` attempts without fabricating physical stop proof.

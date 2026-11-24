@@ -73,3 +73,13 @@ release；旧布局保留原格式。凭证是独立显式挂载输入，恢复�
 ## 在线协调归档
 
 使用显式 process v0.9 的 `coordinated_archive_base` 保留原 v0.6/v0.7 profile。global recovery-admin 先查询 `/v1/maintenance/coordinated-archive/operations`，再用新的原 command ID 请求精确 cutoff。重复 ID 只读；Unknown 查询不重发发布，显式 abort 也不补造完成。包是私有控制元数据，Artifact admin 不具有读取权限。parent11 与 recovery v0.30 在发布前校验必需 journal、原 manifest 和实际 qualified CAS 字节；完整恢复不启动服务。见[归档合同](docs/development/coordinated-content-archive-v0.1.md)。
+
+## 运行期参数与常用运维接口（`e4c03a55`）
+
+| 运维场景 | 配置 / 接口 | 说明与证据边界 |
+| --- | --- | --- |
+| **周期遥测事件瘦身** | `ROBOGUIDE_TELEMETRY_PERSISTENCE_POLICY=/path/policy.json` | 仅对列出的诊断 schema 忽略声明时钟字段，按内容变更或 `max_persist_interval_ms` 落盘；Decision/World/SafeState 豁免（ADR-0258） |
+| **Node 私有前检** | `ROBOGUIDE_NODE_PREFLIGHT_CONFIGS`、`ROBOGUIDE_NODE_PREFLIGHT_PROFILE=complete-sources/v0.1` | 为 `/v1/missions/validate-plan` 启用私有 TOML 与外部 descriptor 来源摘要校验（ADR-0255/0256） |
+| **静态 Node 在线采用** | `POST /v1/node-identities/adopt` | 管理员将静态 Node 证书纳入生命周期热注册并保留原凭据与冷恢复边界（ADR-0239 / [`hot-node-enrollment-v0.1.md`](docs/development/hot-node-enrollment-v0.1.md)） |
+| **协作关系查看与对账** | `GET /v1/missions/{id}/shared-view?context_id=...`、`POST /v1/missions/{id}/relations/{relation_id}/reconcile` | 查看 Mode 3/4 共享视图新鲜度并在条件恢复后受控解除 `relation_fences`（PR #40） |
+| **安全停机与人工取消结案** | `GET /v1/executions/{id}/safety-stop`、`POST /v1/executions/{id}/safety-stop/reconcile` | 核对独立 `SafeStateObservation`；支持对 `Cancelled`/`Failed`/`Completed` 尝试执行受控人工结案（PR #17/#33/#40） |

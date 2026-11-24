@@ -4,8 +4,10 @@
 
 | 档案主题 | 内容与边界 | 原文入口 |
 | --- | --- | --- |
-| V2 架构 | 权威基线、实现拓扑；原 DOCX 是历史快照 | [V2](docs/architecture/v2/index.md) |
+| V2 架构 | 权威基线、五类协议数据流图解、实现拓扑；原 DOCX 是历史快照 | [V2](docs/architecture/v2/index.md)、[数据流图解](docs/architecture/v2/system-dataflows.md) |
 | 架构决策 | 编号、原状态与决定；Accepted 不等于全面验收 | [ADR 主题](decisions.md)、[全索引](docs/decisions/index.md) |
+| 验收记录全索引 | 143 份 2026-10 / 2026-11 软件与真机验收记录分主题目录（原字保留） | [验收总索引](docs/development/acceptance/index.md) |
+| 历史研发流水账 | 原根目录 `README.md`（`e4c03a55`）10~11 月演进与验收日志无损归档 | [README 归档](docs/development/readme-development-log-archive-2026-11.md) |
 | 当前实现核对 | 区分已实现、接线、软件验收与部署缺口 | [最新存量](docs/development/roboguide-branch-audit-2026-10-22.md) |
 | Memory / scoped revision | 原授权、导入/use/revoke、非空 Memory 与独立目标验证 | [MI/Memory 组合](docs/development/acceptance/2026-10-21-runtime-mi-scoped-memory.md) |
 | 引用与恢复 | active refs 对应原 provider CAS；不是全局覆盖 | [引用恢复验收](docs/development/acceptance/2026-10-21-recovery-active-content-reference.md) |
