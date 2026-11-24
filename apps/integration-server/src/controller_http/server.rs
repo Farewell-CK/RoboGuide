@@ -4,8 +4,8 @@ use super::protocol::{
     parse_query, read_control_http_request, write_http_response, write_text_response,
 };
 use super::view::{
-    inventory_json, memory_providers_json, relation_kind_name, state_providers_json,
-    state_records_json_with_tenant,
+    group_shared_view_json, inventory_json, memory_providers_json, relation_snapshot_json,
+    state_providers_json, state_records_json_with_tenant,
 };
 use crate::application::ApplicationWriteGate;
 use crate::diagnostics::StageObservation;
@@ -243,6 +243,27 @@ fn authorize_tenant_path(
     Ok(())
 }
 
+/// Parses `/v1/missions/{mission_id}/shared-view` into its exact Mission identity.
+fn parse_shared_view_path(path: &str) -> Option<&str> {
+    let mission_id = path
+        .strip_prefix("/v1/missions/")?
+        .strip_suffix("/shared-view")?;
+    (!mission_id.is_empty() && !mission_id.contains('/')).then_some(mission_id)
+}
+
+/// Parses `/v1/missions/{mission_id}/relations/{relation_id}/reconcile` into exact identities.
+fn parse_relation_reconcile_path(path: &str) -> Option<(&str, &str)> {
+    let body = path
+        .strip_prefix("/v1/missions/")?
+        .strip_suffix("/reconcile")?;
+    let (mission_id, relation_id) = body.split_once("/relations/")?;
+    (!mission_id.is_empty()
+        && !mission_id.contains('/')
+        && !relation_id.is_empty()
+        && !relation_id.contains('/'))
+    .then_some((mission_id, relation_id))
+}
+
 /// Central fail-closed route authorization; the immutable Mission contract remains independently checked.
 fn authorize_operator_request(
     request: &ControlHttpRequest,
@@ -401,6 +422,7 @@ fn authorize_operator_request(
             }
         }
         ("POST", path) if path.starts_with("/v1/missions/") && path.ends_with("/review") => 2,
+        ("POST", path) if parse_relation_reconcile_path(path).is_some() => 2,
         ("POST", path) if path.starts_with("/v1/groups/") && path.ends_with("/recover") => 2,
         ("POST", path) if path.starts_with("/v1/executions/") && path.ends_with("/recover") => 2,
         ("POST", path) if path.starts_with("/v1/executions/") && path.ends_with("/cancel") => 1,
@@ -2920,6 +2942,75 @@ where
                 ),
             }
         }
+        ("GET", path) if parse_shared_view_path(path).is_some() => {
+            let mission_text = parse_shared_view_path(path).expect("shared-view path matched");
+            let mission_id = match domain::MissionId::new(mission_text) {
+                Ok(mission_id) => mission_id,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": error.to_string()}),
+                    )
+                    .await;
+                }
+            };
+            let parameters = parse_query(query);
+            let Some(context_text) = parameters
+                .get("context_id")
+                .copied()
+                .filter(|value| !value.trim().is_empty())
+            else {
+                return write_http_response(
+                    stream,
+                    "400 Bad Request",
+                    serde_json::json!({"error": "shared-view requires query parameter context_id"}),
+                )
+                .await;
+            };
+            let context_id = match domain::CoordinationContextId::new(context_text) {
+                Ok(context_id) => context_id,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": error.to_string()}),
+                    )
+                    .await;
+                }
+            };
+            let now = clock.now();
+            let live = controller
+                .lock()
+                .map_err(|_| "controller lock is poisoned")?;
+            match live.orchestrator.execution(&mission_id) {
+                Some(execution) => match live.bridge.group_shared_view(
+                    execution.plan(),
+                    execution.group_id(),
+                    &context_id,
+                    now,
+                ) {
+                    Ok(snapshot) => (
+                        "200 OK",
+                        group_shared_view_json(&mission_id, now, &snapshot),
+                    ),
+                    Err(error) => {
+                        let detail = error.to_string();
+                        let status =
+                            if detail.contains("unknown") || detail.contains("no shared view") {
+                                "404 Not Found"
+                            } else {
+                                "409 Conflict"
+                            };
+                        (status, serde_json::json!({"error": detail}))
+                    }
+                },
+                None => (
+                    "404 Not Found",
+                    serde_json::json!({"error": "unknown Mission"}),
+                ),
+            }
+        }
         ("GET", path) if path.starts_with("/v1/missions/") => {
             let now = clock.now();
             let mission_text = path
@@ -2961,25 +3052,7 @@ where
                         .bridge
                         .relation_snapshots(execution.group_id())
                         .into_iter()
-                        .map(|snapshot| {
-                            let relation = snapshot.relation();
-                            serde_json::json!({
-                                "id": relation.relation_id().as_str(),
-                                "kind": relation_kind_name(relation.kind()),
-                                "source": {
-                                    "task_id": relation.source_task_ref().task_id().as_str(),
-                                    "role_id": relation.source_role_id().as_str(),
-                                    "execution_id": snapshot.source_execution_id(),
-                                },
-                                "target": {
-                                    "task_id": relation.target_task_ref().task_id().as_str(),
-                                    "role_id": relation.target_role_id().as_str(),
-                                    "execution_id": snapshot.target_execution_id(),
-                                },
-                                "state": format!("{:?}", snapshot.state()),
-                                "reconciliation_required": snapshot.reconciliation_required(),
-                            })
-                        })
+                        .map(|snapshot| relation_snapshot_json(&snapshot))
                         .collect::<Vec<_>>();
                     let peer_channels = controller
                         .bridge
@@ -3318,6 +3391,207 @@ where
                     ),
                 },
             }
+        }
+        ("POST", path) if parse_relation_reconcile_path(path).is_some() => {
+            let (mission_text, relation_text) =
+                parse_relation_reconcile_path(path).expect("relation reconcile path matched");
+            if !request_body.trim().is_empty() {
+                let body: serde_json::Value = match serde_json::from_str::<serde_json::Value>(
+                    request_body,
+                ) {
+                    Ok(body) if body.is_object() => body,
+                    _ => {
+                        return write_http_response(
+                            stream,
+                            "400 Bad Request",
+                            serde_json::json!({"error": "invalid relation reconciliation JSON object"}),
+                        )
+                        .await;
+                    }
+                };
+                if let Some(reason) = body.get("reason")
+                    && !reason
+                        .as_str()
+                        .is_some_and(|text| !text.trim().is_empty() && text.len() <= 512)
+                {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": "reconciliation reason must be a bounded non-empty string"}),
+                    )
+                    .await;
+                }
+            }
+            let mission_id = match domain::MissionId::new(mission_text) {
+                Ok(mission_id) => mission_id,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": error.to_string()}),
+                    )
+                    .await;
+                }
+            };
+            let relation_id = match domain::ExecutionRelationId::new(relation_text) {
+                Ok(relation_id) => relation_id,
+                Err(error) => {
+                    return write_http_response(
+                        stream,
+                        "400 Bad Request",
+                        serde_json::json!({"error": error.to_string()}),
+                    )
+                    .await;
+                }
+            };
+            let gate_wait = StageObservation::start(
+                &diagnostics,
+                DiagnosticKind::Http,
+                DiagnosticStage::WriteGate,
+                None,
+            );
+            let write_guard = event_write_gate.lock()?;
+            drop(gate_wait);
+            if let Err(error) = event_log.begin_batch() {
+                drop(write_guard);
+                return write_http_response(
+                    stream,
+                    "503 Service Unavailable",
+                    serde_json::json!({"error": format!("relation reconciliation transaction unavailable: {error}")}),
+                )
+                .await;
+            }
+            let now = clock.now();
+            let result: Result<serde_json::Value, (&'static str, String)> = (|| {
+                let unavailable = |error: String| ("503 Service Unavailable", error);
+                let live = controller
+                    .lock()
+                    .map_err(|_| unavailable("controller lock is poisoned".into()))?;
+                authorize_tenant_path(&live, tenant.as_deref(), path)
+                    .map_err(|error| ("403 Forbidden", error))?;
+                let clone_sample = StageObservation::start(
+                    live.bridge.diagnostics(),
+                    DiagnosticKind::Http,
+                    DiagnosticStage::Clone,
+                    None,
+                );
+                let mut candidate = live.clone();
+                drop(clone_sample);
+                drop(live);
+                let execution = candidate
+                    .orchestrator
+                    .execution(&mission_id)
+                    .ok_or(("404 Not Found", "unknown Mission".to_string()))?;
+                if execution.isolation().is_some() {
+                    return Err((
+                        "409 Conflict",
+                        "isolated Mission cannot reconcile relations before review/resume".into(),
+                    ));
+                }
+                if execution.lifecycle() != orchestration::MissionExecutionLifecycle::Running {
+                    return Err((
+                        "409 Conflict",
+                        "only a running Mission can reconcile execution relations".into(),
+                    ));
+                }
+                let group_id = execution.group_id().clone();
+                if !candidate
+                    .bridge
+                    .relation_snapshots(&group_id)
+                    .iter()
+                    .any(|snapshot| snapshot.relation().relation_id() == &relation_id)
+                {
+                    return Err((
+                        "404 Not Found",
+                        format!("unknown execution relation {relation_id} in Group {group_id}"),
+                    ));
+                }
+                let correlation =
+                    domain::CorrelationId::new(format!("relation-reconcile-{mission_id}"))
+                        .map_err(|error| unavailable(error.to_string()))?;
+                let mut events = event_log.clone();
+                let reconcile_error_status = |error: Box<dyn std::error::Error + Send + Sync>| {
+                    let status = if error.downcast_ref::<state::SqliteEventLogError>().is_some()
+                        || error.downcast_ref::<serde_json::Error>().is_some()
+                    {
+                        "503 Service Unavailable"
+                    } else {
+                        "409 Conflict"
+                    };
+                    (status, error.to_string())
+                };
+                run_mission_transition(
+                    &mut candidate,
+                    &mission_id,
+                    orchestration::MissionIsolationSource::TaskOutcome,
+                    now,
+                    &correlation,
+                    &mut events,
+                    |candidate, _events| {
+                        candidate
+                            .bridge
+                            .acknowledge_relation_reconciliation(&group_id, &relation_id)
+                            .map_err(Into::into)
+                    },
+                )
+                .map_err(reconcile_error_status)?;
+                application::apply_runtime_outcomes(&mut candidate, now, &correlation, &mut events)
+                    .map_err(reconcile_error_status)?;
+                drive_ready_tasks(&mut candidate, now, &correlation, &mut events)
+                    .map_err(reconcile_error_status)?;
+                if let Some(error) = event_log
+                    .take_error()
+                    .map_err(|error| unavailable(error.to_string()))?
+                {
+                    return Err(unavailable(format!(
+                        "relation reconciliation event sink failed: {error}"
+                    )));
+                }
+                let checkpoint = crate::diagnostics::http_checkpoint(&candidate)
+                    .map_err(|error| unavailable(error.to_string()))?;
+                crate::diagnostics::http_save(event_log, &checkpoint, &diagnostics)
+                    .map_err(|error| unavailable(error.to_string()))?;
+                crate::diagnostics::http_commit(event_log, &diagnostics)
+                    .map_err(|error| unavailable(error.to_string()))?;
+                let mission_status = candidate
+                    .orchestrator
+                    .execution(&mission_id)
+                    .map(|execution| format!("{:?}", execution.lifecycle()))
+                    .unwrap_or_else(|| "Unknown".into());
+                let relation = candidate
+                    .bridge
+                    .relation_snapshots(&group_id)
+                    .into_iter()
+                    .find(|snapshot| snapshot.relation().relation_id() == &relation_id)
+                    .map(|snapshot| relation_snapshot_json(&snapshot));
+                let mut live = controller
+                    .lock()
+                    .map_err(|_| unavailable("controller lock is poisoned".into()))?;
+                *live = candidate;
+                if let Err(error) = flush_unisolated_commands(&mut live, clock) {
+                    eprintln!("durable relation-reconciled outbox deferred: {error}");
+                }
+                Ok(serde_json::json!({
+                    "status": "reconciled",
+                    "mission_id": mission_id.as_str(),
+                    "group_id": group_id.as_str(),
+                    "relation_id": relation_id.as_str(),
+                    "mission_status": mission_status,
+                    "relation": relation,
+                }))
+            })();
+            let response = match result {
+                Ok(body) => ("200 OK", body),
+                Err((status, error)) => match event_log.rollback_batch() {
+                    Ok(()) => (status, serde_json::json!({"error": error})),
+                    Err(rollback) => (
+                        "503 Service Unavailable",
+                        serde_json::json!({"error": format!("relation reconciliation unavailable: {error}; rollback failed: {rollback}")}),
+                    ),
+                },
+            };
+            drop(write_guard);
+            response
         }
         ("POST", path) if path.starts_with("/v1/missions/") && path.ends_with("/cancel") => {
             let mission_text = path

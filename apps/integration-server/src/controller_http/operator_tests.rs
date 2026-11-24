@@ -24,6 +24,9 @@ mod verifier_authorization_tests;
 #[path = "retention_maintenance_tests.rs"]
 mod retention_maintenance_tests;
 
+#[path = "relation_routes_tests.rs"]
+mod relation_routes_tests;
+
 /// Metrics-only identity is explicitly global yet cannot read business projections or any mutation.
 #[tokio::test]
 async fn metrics_reader_cannot_read_business_or_acquire_mutation_authority() {
