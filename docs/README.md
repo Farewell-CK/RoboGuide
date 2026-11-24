@@ -10,7 +10,7 @@
 | 你想做什么 | 推荐阅读顺序 |
 | --- | --- |
 | **理解整体设计与数据流** | [V2 架构手册](architecture/v2/architecture-handbook.md) → [核心系统数据流图解](architecture/v2/system-dataflows.md) → [V2 现行架构](architecture/v2/README.md) |
-| **参与核心 Rust / Python 开发** | [开发基线](development/README.md) → [编码规范](development/coding-standards.md) → [ADR 核心主题](#二架构决策记录decisions-00010259共-257-份) |
+| **参与核心 Rust / Python 开发** | [开发基线](development/README.md) → [编码规范](development/coding-standards.md) → [ADR 核心主题](#adr-topics) |
 | **接入新机器人 / Local EAIOS** | [设备扩展规范 v0.2](extensions/device-extension-conformance-v0.2.md) → [跨语言契约 `contracts/`](../contracts/) → [接入经验清单](development/local-eaios-integration-lessons.md) |
 | **生产部署、复制高可用与排障** | [可执行部署 Profile](development/deployment-profile-v0.1.md) → [观测与告警](development/observability-v0.1.md) → [故障与可靠矩阵](development/runtime-reliability-fault-matrix.md) |
 | **查证实验与历史验收证据** | [验收记录总索引](development/acceptance/README.md) → [原 README 研发日志归档](development/readme-development-log-archive-2026-11.md) → [Eval Harness](../evaluation/README.md) |
@@ -35,6 +35,8 @@
 > 新增架构参考材料请先完整核对再归入 `architecture/<version>/`，勿将临时 DOCX/PDF 或大图留在仓库根目录。
 
 ---
+
+<a id="adr-topics"></a>
 
 ## 二、架构决策记录（`decisions/`，`0001`–`0259`，共 257 份）
 

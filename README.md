@@ -5,7 +5,7 @@ RoboGuide 联合调度 **Capability · Compute · Space · Time**，把自然语
 
 > **A distributed operating-system framework for heterogeneous embodied agents** — coordinating Capability, Compute, Space, and Time around long-lived Missions while preserving Local EAIOS autonomy and immediate safety.
 
-[双语文档站 (中文 / English)](https://roboguide-docs.chaokedu.workers.dev) · [V2 架构基线](docs/architecture/v2/README.md) · [核心数据流图解](docs/architecture/v2/system-dataflows.md) · [文档总索引](docs/README.md) · [Mission Console](console/README.md) · [3 分钟快速开始](#3-分钟快速开始) · [历史研发日志归档](docs/development/readme-development-log-archive-2026-11.md)
+[双语文档站 (中文 / English)](https://roboguide-docs.chaokedu.workers.dev) · [V2 架构基线](docs/architecture/v2/README.md) · [核心数据流图解](docs/architecture/v2/system-dataflows.md) · [文档总索引](docs/README.md) · [Mission Console](console/README.md) · [3 分钟快速开始](#quickstart) · [历史研发日志归档](docs/development/readme-development-log-archive-2026-11.md)
 
 ---
 
@@ -150,6 +150,8 @@ RoboGuide 遵循最小必要恢复权限原则，任何通信中断或未知结�
 | **L4** | Runtime / Mission Intelligence | 经独立安全停机证据确认自然设备故障后解锁 `plan_revision` 同 Mission 动态接管（PR #33）；或通过 `POST /v1/executions/{id}/safety-stop/reconcile` 对已取消/失败/完成尝试执行受控人工结案（ADR-0232 / PR #17/#40） | 软件修订与人工结案均保留原历史与独立停止证明边界 |
 
 ---
+
+<a id="quickstart"></a>
 
 ## 3 分钟快速开始
 
