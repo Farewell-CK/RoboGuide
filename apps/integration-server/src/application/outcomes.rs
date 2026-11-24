@@ -1,6 +1,8 @@
 //! Terminal Runtime outcome and Mission cancellation application.
 
 use crate::*;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 /// Hands terminal Runtime facts to Mission orchestration without Runtime-owned completion.
 pub(crate) fn apply_runtime_outcomes(
     controller: &mut ControllerState,
@@ -301,6 +303,32 @@ pub(crate) fn apply_pending_cancellation(
     apply_pending_cancellations_scoped(controller, timestamp, correlation_id, events, Some(mission))
 }
 
+/// 取消兜底宽限：执行侧迟迟不确认（典型：attempt 卡在 RecoveryRequired、
+/// 底层 execution 早已不存在）时，超过这个时长仍非终态就把 Mission 收到 Cancelled。
+///
+/// 为什么需要它: 取消收尾原本只等 `group_attempts_terminal()`；而僵尸 attempt
+/// 永远不会变终态，于是 Mission 永久停在 Cancelling（实测历史记录一直挂着）。
+const CANCEL_ABANDON_GRACE_MS: u64 = 30_000;
+
+/// 记录某个 Mission 首次被观察到 Cancelling 的时刻，并在超过宽限后返回 true。
+fn cancel_grace_expired(mission: &domain::MissionId, now: domain::TimestampMs) -> bool {
+    static FIRST_SEEN: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+    let seen = FIRST_SEEN.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = mission.to_string();
+    let now_ms = now.as_millis();
+    let mut guard = match seen.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let first = *guard.entry(key.clone()).or_insert(now_ms);
+    if now_ms.saturating_sub(first) >= CANCEL_ABANDON_GRACE_MS {
+        guard.remove(&key);
+        true
+    } else {
+        false
+    }
+}
+
 /// Reuses the normal terminal, stop-settlement and Memory fences within an optional exact scope.
 fn apply_pending_cancellations_scoped(
     controller: &mut ControllerState,
@@ -335,10 +363,15 @@ fn apply_pending_cancellations_scoped(
         .filter(|mission| target.is_none_or(|target| target == mission))
         .filter_map(|mission_id| {
             let execution = controller.orchestrator.execution(&mission_id)?;
+            let attempts_terminal = controller
+                .bridge
+                .group_attempts_terminal(execution.group_id());
+            // **兜底**: attempt 一直非终态（僵尸执行）时，超过宽限也允许收尾，
+            // 否则 Mission 会永久停在 Cancelling。语义上等同于"对端已不可确认"。
+            let abandoned = !attempts_terminal
+                && cancel_grace_expired(&mission_id, timestamp);
             (execution.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling
-                && controller
-                    .bridge
-                    .group_attempts_terminal(execution.group_id())
+                && (attempts_terminal || abandoned)
                 && !safety_stop::blocks_cancellation_release(controller, &mission_id)
                 && !super::memory_use::blocks_release(controller, &mission_id))
             .then_some(mission_id)
