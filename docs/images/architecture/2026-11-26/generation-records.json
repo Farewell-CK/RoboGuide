@@ -1,0 +1,22 @@
+{
+  "schema": "roboguide.image-generation-records/v1",
+  "code_commit": "3c7136d67e7638d09bde54d32dac55ec87f94c3c",
+  "requested_model": "gpt-image-2.6-sunburst",
+  "interface": "/v1/images/generations",
+  "cli": "imagegen/scripts/image_gen.py",
+  "parameters": {
+    "quality": "high",
+    "size": "1536x1024",
+    "output_format": "png"
+  },
+  "attempts": [
+    {
+      "figure": "overview:zh",
+      "attempted_at": "2026-11-25T17:24:21.060199+00:00",
+      "outcome": "rejected",
+      "http_status": 403,
+      "reason": "Image generation is not enabled for this group"
+    }
+  ],
+  "completed": []
+}

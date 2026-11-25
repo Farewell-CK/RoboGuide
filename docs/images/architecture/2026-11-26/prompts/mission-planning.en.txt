@@ -1,0 +1,17 @@
+Create a precise publication-quality SOFTWARE ARCHITECTURE DIAGRAM, not an illustration. Landscape 1536x1024. White background, dark navy text, flat rectangular containers with thin borders, generous spacing, crisp legible typography. No photos, robots, decorative icons, gradients, 3D effects or watermark. Navy denotes control commands, teal denotes facts/evidence, ochre denotes content/data. Use only the exact labels supplied. Show explicit arrowheads, no ambiguous bidirectional arrows, avoid crossing arrows and tiny text. Do not add capabilities, claims, services or connections. Keep labels short and do not include source paths, URLs, dates or commit IDs inside the image. Every supplied node and required edge must appear. Grouping boundaries are semantically important. This is the implemented software structure, not proof of physical safety. Make the visual understandable at normal web-page width.
+Title (exact): From conversation to a reviewed plan
+Language: English.
+Exact node labels in order:
+1. Chat / User goal
+2. Mission Request
+3. Grounding snapshot
+4. Interpreter / Clarify
+5. Planner
+6. Reviewer
+7. Bounded Repair
+8. Read-only preflight
+9. Execute grant / Risk approval
+10. Controller admission
+Required topology and grouping:
+Number the main path 1 to 8: Chat -> Mission Request -> Grounding -> Interpreter -> Planner -> Reviewer -> Read-only preflight -> Execute grant/Risk approval -> Controller admission. Reviewer -> Bounded Repair -> Reviewer is an explicit bounded loop. Interpreter clarification returns to Chat. Label preflight as read-only; it reserves no resources. Exact displayed plan revision/digest binds authorization. Show Request and Controller Mission as distinct boundaries, not one identity. No direct model-to-device arrow.
+Do not add a footer or extraneous text. Use all exact node labels; explain only via these labels, arrows and the short callouts requested.

@@ -1,0 +1,18 @@
+Create a precise publication-quality SOFTWARE ARCHITECTURE DIAGRAM, not an illustration. Landscape 1536x1024. White background, dark navy text, flat rectangular containers with thin borders, generous spacing, crisp legible typography. No photos, robots, decorative icons, gradients, 3D effects or watermark. Navy denotes control commands, teal denotes facts/evidence, ochre denotes content/data. Use only the exact labels supplied. Show explicit arrowheads, no ambiguous bidirectional arrows, avoid crossing arrows and tiny text. Do not add capabilities, claims, services or connections. Keep labels short and do not include source paths, URLs, dates or commit IDs inside the image. Every supplied node and required edge must appear. Grouping boundaries are semantically important. This is the implemented software structure, not proof of physical safety. Make the visual understandable at normal web-page width.
+Title (exact): Processes, storage and failure domains
+Language: English.
+Exact node labels in order:
+1. Mission Service
+2. Request SQL
+3. Controller
+4. Controller SQL / Checkpoint
+5. Artifact CAS
+6. Node Service
+7. Node Journal
+8. Local EAIOS / Providers
+9. Optional Replica Quorum
+10. Optional other Controller domain
+11. Quiescent Recovery Tool
+Required topology and grouping:
+Draw software process containers and their OWN distinct storage. Mission Service -> Controller using HTTP; Mission Service attaches Request SQL. Controller attaches Controller SQL/Checkpoint and Artifact CAS. Controller <-> Node Service via gRPC using two directional labeled arrows; Node Service owns Node Journal and connects to Local EAIOS/Providers. Dashed optional area Replica Quorum connects to Controller metadata/content durability, not to robot execution. Another dashed optional Controller domain connects via Federation. Quiescent Recovery Tool reads declared closed storage/content into a separate backup/restore box represented by the label itself, never connects to actuators. Short note: Process != Host != Node != PhysicalEntity. No concrete IPs, credentials, physical failover claims or claim that storage v3 and replication are automatically combined.
+Do not add a footer or extraneous text. Use all exact node labels; explain only via these labels, arrows and the short callouts requested.

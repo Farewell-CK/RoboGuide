@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
 import json
-import sys
+import posixpath
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from diagram_assets import diagram_registry
+from diagram_assets import diagram_registry, digest, published_asset
 from site_support import ROOT, contract_versions, source_revision, validate_pairs
 
 
@@ -46,59 +47,105 @@ def maintained_routes() -> set[str]:
         stem = relative.removesuffix(".en.md") if en else relative.removesuffix(".md")
         route = ("" if stem == "index" else stem + "/") + "index.html"
         routes.add(("en/" if en else "") + route)
+    for source in (ROOT / "docs").rglob("*.md"):
+        relative = source.relative_to(ROOT).as_posix()
+        if not (
+            relative.startswith(("docs/getting-started/", "docs/guides/"))
+            or (
+                relative.startswith("docs/architecture/v2/")
+                and source.name
+                in {
+                    name + suffix + ".md"
+                    for name in (
+                        "README",
+                        "architecture-handbook",
+                        "current-architecture",
+                        "system-dataflows",
+                        "architecture-tour",
+                        "execution-lifecycle",
+                        "state-memory",
+                        "concepts",
+                    )
+                    for suffix in ("", ".en")
+                }
+            )
+            or relative
+            in {
+                "docs/README.md",
+                "docs/README.en.md",
+                "docs/operations/README.md",
+                "docs/operations/README.en.md",
+                "docs/reference/contracts-and-build.md",
+                "docs/reference/contracts-and-build.en.md",
+                "docs/reference/implementation-status.md",
+                "docs/reference/implementation-status.en.md",
+            }
+        ) or ("/reference/" in relative and not relative.startswith("docs/reference/")):
+            continue
+        en = relative.endswith(".en.md")
+        stem = relative.removesuffix(".en.md") if en else relative.removesuffix(".md")
+        stem = stem.removesuffix("README") if stem.endswith("README") else stem + "/"
+        routes.add(("en/" if en else "") + stem + "index.html")
     for prefix in ("", "en/"):
         routes.add(prefix + "reference/index.html")
-        routes.add(prefix + "docs/architecture/v2/architecture-handbook/index.html")
-        routes.add(prefix + "docs/architecture/v2/current-architecture/index.html")
-        routes.add(prefix + "docs/architecture/v2/index.html")
     return routes
 
 
 def architecture_diagram_errors() -> list[str]:
-    """Reject overview drift between downloadable Mermaid and maintained entry pages."""
+    """Require localized current figures and refuse Mermaid in maintained guide sources."""
     errors: list[str] = []
-    for suffix in ("", ".en"):
-        asset_suffix = "-english" if suffix else ""
-        source = (
-            ROOT / f"docs/images/roboguide-current-architecture{asset_suffix}.mmd"
-        ).read_text()
-        expected = "```mermaid\n" + source.rstrip() + "\n```"
-        paths = [
-            f"docs/architecture/v2/current-architecture{suffix}.md",
-            f"website/pages/architecture-tour{suffix}.md",
-        ]
-        if not suffix:
-            paths.extend(("README.md", "docs/architecture/v2/README.md"))
-        else:
-            paths.append("docs/architecture/v2/README.en.md")
-        for name in paths:
-            text = (ROOT / name).read_text()
-            start = "<!-- architecture-overview:start -->"
-            end = "<!-- architecture-overview:end -->"
-            if text.count(start) != 1 or text.count(end) != 1:
-                errors.append(f"{name}: missing or duplicate architecture overview markers")
-            elif text.split(start)[1].split(end)[0].strip() != expected:
-                errors.append(
-                    f"{name}: overview differs from canonical {suffix or 'Chinese'} Mermaid"
-                )
+    sources = json.loads((ROOT / "website/source-pages.json").read_text(encoding="utf-8"))["pages"]
+    for name in set(sources.values()) | {"README.md"}:
+        if "```mermaid" in (ROOT / name).read_text(encoding="utf-8"):
+            errors.append(f"{name}: maintained guide still contains Mermaid")
+    topics = (
+        "overview",
+        "mission-planning",
+        "dispatch",
+        "completion",
+        "state-memory",
+        "recovery",
+        "cooperation",
+        "deployment",
+    )
+    for locale, suffix in (("zh", ""), ("en", ".en")):
+        text = (ROOT / f"docs/architecture/v2/current-architecture{suffix}.md").read_text(
+            encoding="utf-8"
+        )
+        for topic in topics:
+            if text.count(f"<!-- diagram:{topic}:{locale} -->") != 1:
+                errors.append(f"architecture atlas requires one {topic}:{locale} figure")
     return errors
 
 
-def inspect(site: Path) -> list[str]:
+def inspect(site: Path, *, text_preview: bool = False) -> list[str]:
     """Return publication errors; archived anchor imperfections remain separately counted."""
     validate_pairs(ROOT / "website/pages")
-    diagram_registry()
+    registry = diagram_registry(allow_pending=text_preview)
     errors = architecture_diagram_errors()
+    site = site.resolve()
+    files = {path.relative_to(site).as_posix(): path for path in site.rglob("*") if path.is_file()}
+    for item in registry.values():
+        fields = ("prompt", "image") if item["status"] == "reviewed" else ("prompt",)
+        for field in fields:
+            name = item["prompt"] if field == "prompt" else item["image"]
+            expected = item["prompt_sha256"] if field == "prompt" else item["image_sha256"]
+            destination = published_asset(name, item["locale"]).lstrip("/")
+            if destination not in files or digest(files[destination].read_bytes()) != expected:
+                errors.append(
+                    f"published architecture {field} differs from reviewed bytes: {destination}"
+                )
     documents = {
-        path.resolve(): Document(path.read_text(encoding="utf-8")) for path in site.rglob("*.html")
+        name: Document(path.read_text(encoding="utf-8"))
+        for name, path in files.items()
+        if name.endswith(".html")
     }
     maintained = maintained_routes()
     for route in sorted(maintained):
-        if not (site / route).is_file():
+        if route not in files:
             errors.append(f"missing maintained bilingual output: {route}")
     historical_anchors: set[str] = set()
-    for path, document in documents.items():
-        relative = path.relative_to(site.resolve()).as_posix()
+    for relative, document in documents.items():
         if relative in maintained:
             for identifier in document.duplicates:
                 errors.append(f"{relative}: duplicate anchor {identifier}")
@@ -110,13 +157,18 @@ def inspect(site: Path) -> list[str]:
                 errors.append(f"{relative}: local filesystem link leaked: {link}")
                 continue
             target = (
-                site / unquote(parsed.path).lstrip("/")
-                if parsed.path.startswith("/")
-                else path.parent / unquote(parsed.path)
-            ).resolve()
-            if target.is_dir():
-                target /= "index.html"
-            if not target.is_file():
+                relative
+                if not parsed.path
+                else posixpath.normpath(
+                    unquote(parsed.path).lstrip("/")
+                    if parsed.path.startswith("/")
+                    else posixpath.join(posixpath.dirname(relative), unquote(parsed.path))
+                )
+            )
+            index = target.rstrip("/") + "/index.html" if target != "." else "index.html"
+            if target not in files and index in files:
+                target = index
+            if target not in files:
                 errors.append(f"{relative}: missing local target {link}")
             elif parsed.fragment and target in documents:
                 anchor = unquote(parsed.fragment)
@@ -126,7 +178,9 @@ def inspect(site: Path) -> list[str]:
                         errors.append(message)
                     else:
                         historical_anchors.add(message)
-    metadata = json.loads((site / "build-info.json").read_text())
+    metadata = json.loads((site / "build-info.json").read_text(encoding="utf-8"))
+    if not metadata.get("publication_ready", False) and not text_preview:
+        errors.append("text-only preview cannot be published as a completed update")
     if metadata["source_commit"] != source_revision():
         errors.append("build-info source does not match checkout")
     if metadata["versions"] != contract_versions():
@@ -138,10 +192,16 @@ def inspect(site: Path) -> list[str]:
 
 def main() -> int:
     """Inspect a built static site and refuse broken publication targets."""
-    site = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "website/site"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("site", nargs="?", type=Path, default=ROOT / "website/site")
+    parser.add_argument(
+        "--text-preview", action="store_true", help="Inspect a local text-only preview"
+    )
+    args = parser.parse_args()
+    site = args.site
     if not site.is_dir():
         raise SystemExit("build the site before running check_site.py")
-    errors = inspect(site)
+    errors = inspect(site, text_preview=args.text_preview)
     for error in errors:
         print(f"error: {error}")
     return int(bool(errors))

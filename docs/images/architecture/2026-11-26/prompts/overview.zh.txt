@@ -1,0 +1,19 @@
+Create a precise publication-quality SOFTWARE ARCHITECTURE DIAGRAM, not an illustration. Landscape 1536x1024. White background, dark navy text, flat rectangular containers with thin borders, generous spacing, crisp legible typography. No photos, robots, decorative icons, gradients, 3D effects or watermark. Navy denotes control commands, teal denotes facts/evidence, ochre denotes content/data. Use only the exact labels supplied. Show explicit arrowheads, no ambiguous bidirectional arrows, avoid crossing arrows and tiny text. Do not add capabilities, claims, services or connections. Keep labels short and do not include source paths, URLs, dates or commit IDs inside the image. Every supplied node and required edge must appear. Grouping boundaries are semantically important. This is the implemented software structure, not proof of physical safety. Make the visual understandable at normal web-page width.
+Title (exact): RoboGuide 系统总览
+Language: Simplified Chinese; preserve the supplied English technical identifiers.
+Exact node labels in order:
+1. 用户 / Operator
+2. Mission Intelligence
+3. Controller
+4. Orchestration
+5. Control · Commit / Bind
+6. Runtime · Attempt / Intent
+7. Integration · Node Protocol
+8. State / Memory Catalog
+9. Artifact CAS
+10. Node Service
+11. Local EAIOS
+12. Memory / Spatial / Sync Providers
+Required topology and grouping:
+Top: user -> MI -> Orchestration. Controller container encloses Orchestration, Control, Runtime, Integration, State/Memory Catalog, Artifact CAS. Main command chain Orchestration -> Control -> Runtime -> Integration -> Node Service -> Local EAIOS. Node Service is outside Controller. Providers connect locally to Node Service. Facts flow back Node Service -> Integration -> State/Memory Catalog; State/Memory Catalog supplies read-only evidence to Control. Content flows Artifact CAS <-> Node Service with two clearly labeled directional arrows. Do not put Local EAIOS inside Controller. Providers do not directly allocate resources.
+Do not add a footer or extraneous text. Use all exact node labels; explain only via these labels, arrows and the short callouts requested.

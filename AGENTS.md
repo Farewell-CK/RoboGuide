@@ -2593,3 +2593,15 @@ transports, databases, algorithms, or hardware APIs without evidence and a decis
 Changing ownership, dependency direction, authority, lifecycle, or public contracts
 requires an ADR; architecture-semantic changes update V2 first. Do not describe
 Shared Node State Slice v0.1 as complete State, Belief, Allocation, or Memory.
+
+## Current documentation publication ownership
+
+Current bilingual reader sources live under docs/getting-started, docs/architecture/v2,
+docs/guides, docs/operations and docs/reference. website/pages contains route wrappers;
+website/source-pages.json binds each public route to its canonical repository source.
+website/doc_inventory.py verifies complete original Git-blob coverage and preserved history.
+Architecture figures use API-generated PNGs and explicit model/prompt/code provenance in
+website/diagram-assets.json. Never substitute Mermaid or manually drawn assets. A local
+--text-preview may inspect prose while generation is blocked, but normal publication refuses
+pending images. Update the paired source, route mapping and generation evidence together.
+Run the documentation checks in website/README.md; runtime/physical checks are separate.

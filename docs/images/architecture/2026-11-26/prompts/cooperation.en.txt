@@ -1,0 +1,17 @@
+Create a precise publication-quality SOFTWARE ARCHITECTURE DIAGRAM, not an illustration. Landscape 1536x1024. White background, dark navy text, flat rectangular containers with thin borders, generous spacing, crisp legible typography. No photos, robots, decorative icons, gradients, 3D effects or watermark. Navy denotes control commands, teal denotes facts/evidence, ochre denotes content/data. Use only the exact labels supplied. Show explicit arrowheads, no ambiguous bidirectional arrows, avoid crossing arrows and tiny text. Do not add capabilities, claims, services or connections. Keep labels short and do not include source paths, URLs, dates or commit IDs inside the image. Every supplied node and required edge must appear. Grouping boundaries are semantically important. This is the implemented software structure, not proof of physical safety. Make the visual understandable at normal web-page width.
+Title (exact): Four cooperation modes
+Language: English.
+Exact node labels in order:
+1. 1 · Independent
+2. Independent tasks / Normal DAG
+3. 2 · SequentialHandoff
+4. TaskSatisfied + Memory handoff
+5. 3 · ConcurrentCooperation
+6. Shared view / Relation fences
+7. 4 · TightlyCoupledCooperation
+8. PeerChannel readiness gate
+9. Edge UDP sync control
+10. Shared UTC playback · Separate Missions
+Required topology and grouping:
+Four equal numbered panels, each mode heading connects only to its own mechanism. Mode1 -> independent tasks/normal DAG. Mode2 -> TaskSatisfied+Memory handoff. Mode3 -> Shared view/Relation fences. Mode4 -> PeerChannel readiness gate -> Edge UDP sync control. Show Controller and Edge separation inside Mode4: the readiness gate is Control-side, UDP control is Local/provider-side; high-rate motion packets bypass Controller. Separate bottom strip Shared UTC playback/Separate Missions belongs to Independent mode, NOT a fifth mode and not Mode4. Include short note that per-performer Missions provide fleet fault isolation; same-Mission failure retains Mission-wide stop behavior.
+Do not add a footer or extraneous text. Use all exact node labels; explain only via these labels, arrows and the short callouts requested.
