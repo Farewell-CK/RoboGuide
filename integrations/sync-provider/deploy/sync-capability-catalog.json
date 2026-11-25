@@ -1,0 +1,129 @@
+{
+  "schema_version": "roboguide.capability-catalog/v0.3",
+  "capabilities": [
+    {
+      "contract": {
+        "namespace": "mobility",
+        "name": "sync-follow",
+        "version": "v1"
+      },
+      "description": "Tightly-coupled N-robot parameterized trajectory following with 20 Hz sparse-neighbor consensus, transitive gossip barriers, dual-tier peer watchdog, and <50 ms ESTOP flooding.",
+      "attributes": [
+        {
+          "name": "sync-topology",
+          "type": "string",
+          "description": "Peer graph coupling topology supported by the local sync provider."
+        },
+        {
+          "name": "max-linear-speed-mps",
+          "type": "number",
+          "description": "Hard ceiling on commanded forward linear velocity in meters per second."
+        }
+      ]
+    },
+    {
+      "contract": {
+        "namespace": "choreography",
+        "name": "play",
+        "version": "v1"
+      },
+      "description": "Large-scale shared-wall-clock trajectory playback triggered at UTC T0 with Fail-Closed Chrony/PTP offset gating and single-robot fault isolation.",
+      "attributes": [
+        {
+          "name": "sync-mode",
+          "type": "string",
+          "description": "Time synchronization mechanism used to trigger playback."
+        },
+        {
+          "name": "max-clock-offset-ms",
+          "type": "number",
+          "description": "Maximum allowed local wall-clock offset before Fail-Closed rejection."
+        }
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "operation": {
+        "namespace": "mobility",
+        "name": "sync-follow",
+        "version": "v1"
+      },
+      "description": "Execute a closed-loop multi-robot synchronized path along a roboguide.sync-track/v1 track spec.",
+      "parameters": [
+        {
+          "name": "track_spec_json",
+          "type": "string",
+          "required": true,
+          "description": "Serialized JSON string conforming to roboguide.sync-track/v1."
+        },
+        {
+          "name": "neighbors_json",
+          "type": "string",
+          "required": true,
+          "description": "Serialized JSON array of sparse graph neighbor endpoints and weights."
+        },
+        {
+          "name": "sync_params_json",
+          "type": "string",
+          "required": false,
+          "description": "Optional serialized JSON object overriding consensus gain, barrier timeout, or watchdog thresholds."
+        },
+        {
+          "name": "context_id",
+          "type": "string",
+          "required": false,
+          "description": "Logical context identifier shared across the synchronized peer channel."
+        },
+        {
+          "name": "context_role_id",
+          "type": "string",
+          "required": false,
+          "description": "Role identifier of this robot within the coordination group."
+        }
+      ],
+      "required_capabilities": [
+        {
+          "namespace": "mobility",
+          "name": "sync-follow",
+          "version": "v1"
+        }
+      ]
+    },
+    {
+      "operation": {
+        "namespace": "choreography",
+        "name": "play",
+        "version": "v1"
+      },
+      "description": "Play a time-indexed roboguide.choreography/v1 trajectory triggered at shared UTC T0.",
+      "parameters": [
+        {
+          "name": "choreography_spec_json",
+          "type": "string",
+          "required": true,
+          "description": "Serialized JSON string conforming to roboguide.choreography/v1."
+        },
+        {
+          "name": "t0_utc_ms",
+          "type": "integer",
+          "required": true,
+          "description": "Shared UNIX epoch trigger timestamp in milliseconds."
+        },
+        {
+          "name": "max_clock_offset_ms",
+          "type": "number",
+          "required": false,
+          "description": "Fail-Closed clock offset ceiling in milliseconds."
+        }
+      ],
+      "required_capabilities": [
+        {
+          "namespace": "choreography",
+          "name": "play",
+          "version": "v1"
+        }
+      ]
+    }
+  ]
+}
