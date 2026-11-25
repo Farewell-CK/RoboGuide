@@ -232,7 +232,9 @@ def render_mission(raw: JSONObject, mission_id: str) -> str:
             suffix = "…（已截断，/raw 查看原响应）" if len(detail) > 4096 else ""
             lines.append(f"{field}（原始记录）：{detail[:4096]}{suffix}")
     isolation = raw.get("isolation")
-    _iso_source = str((isolation or {}).get("source", "")).lower().replace("-", "").replace("_", "")
+    _iso_source = ""
+    if isinstance(isolation, dict):
+        _iso_source = str(isolation.get("source", "")).lower().replace("-", "").replace("_", "")
     if isinstance(isolation, dict) and _iso_source == "safetystop":
         # **解释"为什么停在 Cancelling"**: 取消收尾被未对账的安全停机挡住了,
         # 这不是超时能解的 —— 需要管理员身份的显式对账(operator 会被 403)。
