@@ -1,0 +1,5 @@
+# Keep byte-hashed diagram/vendor assets and shell scripts on LF across platforms.
+website/custom_theme/javascripts/vendor/** text eol=lf
+docs/images/**/*.svg text eol=lf
+docs/images/**/*.mmd text eol=lf
+*.sh text eol=lf

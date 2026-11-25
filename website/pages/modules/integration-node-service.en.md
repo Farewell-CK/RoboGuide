@@ -53,3 +53,5 @@ Wire v0.4, semantic Node Contract and config schema are separate version axes. T
 The Node journal holds original sibling/inode leases across clones and fences old writers. Local protocol drivers are generic; vendor semantics remain in deployment workflows.
 
 Original receipts, terminals, stop proofs and provider revokes travel as separate evidence. gRPC delivery is not business completion.
+
+For Wi-Fi roaming resilience, Node Service enables HTTP/2 keepalive probes and `CoalescedStateOutbox` merging per `export_id` (PR #19/#27), while Controller scopes superseded registration rejections to the original session (PR #39). Setting `ROBOGUIDE_NODE_PREFLIGHT_CONFIGS` and `ROBOGUIDE_NODE_PREFLIGHT_PROFILE=complete-sources/v0.1` (ADR-0255/0256) validates Node workflow pointers and external descriptors offline or via `/v1/missions/validate-plan`.

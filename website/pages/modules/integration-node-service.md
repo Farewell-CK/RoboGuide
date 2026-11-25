@@ -53,3 +53,5 @@ wire v0.4、语义 Node Contract 和 config schema 是不同版本轴。基础�
 Node journal 使用原 sibling/inode leases，克隆保留 lease；schema fence 拒绝旧 writer。Local EAIOS 的协议 driver 是通用实现，厂商语义在部署 workflow 内维护。
 
 原命令 receipt、terminal、stop proof 和 provider revoke 通过不同证据路径返回，不能把 gRPC 送达等同于业务完成。
+
+在弱网与漫游韧性方面，Node Service 启用 HTTP/2 keepalive 探活与 `CoalescedStateOutbox` 按 `export_id` 合并（PR #19/#27），并在被新注册覆盖时仅将拒绝限定于原会话（PR #39），防止高并发重连产生假性拒绝。设置 `ROBOGUIDE_NODE_PREFLIGHT_CONFIGS` 与 `ROBOGUIDE_NODE_PREFLIGHT_PROFILE=complete-sources/v0.1`（ADR-0255/0256）可离线或经 `/v1/missions/validate-plan` 预检 Node workflow Pointer 与外部描述符完整性。

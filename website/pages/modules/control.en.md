@@ -48,6 +48,8 @@ Due future intervals recheck Match/Commit/Bind. Overrun retains open occupancy r
 
 Recovery proposals own no resources. Original Group/Role pending recovery Commit is consumed by Rebind or explicitly released by Abort. Ordinary Actor recovery cannot authorize cross-entity takeover.
 
+Dependency-window diagnostics use `POST /v1/missions/validate-plan?timing=v0.1` (ADR-0259), and expired windows surface `scheduling_deferral` (`window-missed`) on Mission details. After confirmed `SafeStateObservation` on natural device failure, Control preserves prior stop records while permitting successor Group `Match -> Commit -> Bind` (PR #33).
+
 ### Costs from current sources
 
 Explicit decision-policy registry v0.2 connects original tenant, Node session, State source, schema, TTL and metric units to normal and recovery scheduling. Unknown, stale, conflicting or absent required metrics have no numeric cost; available GPU capacity follows the explicit preference. Original observations and policy enter durable audit. `/v1/missions/{id}/scheduling-costs` is a read-only Mission-authorized view. The local reference provider measures actual host load and leaves other metrics null. Costs order candidate exploration without granting resources or bypassing eligibility.

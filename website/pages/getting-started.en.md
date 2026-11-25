@@ -56,6 +56,19 @@ curl --fail-with-body http://127.0.0.1:8070/v1/mission-requests   -H 'Content-Ty
 
 Results depend on published Catalog, grounding, model and deployment. Clarification/approval may be required; the example is not guaranteed executable. Use the Request ID to observe original progress and answer questions. Uncertain outcomes do not authorize duplicate submission.
 
+For interactive CLI sessions or the mission visualizer:
+
+```bash
+# Initialize and start the conversation workbench (natural-language planning, /state, diagnosis)
+uv run roboguide init
+uv run roboguide chat
+
+# Start Mission Console (default http://127.0.0.1:8095, with offline replay)
+python3 console/serve.py
+```
+
+The live console can submit or cancel Missions through the connected Controller. Use replay to view a demo.
+
 ## Checks and next steps
 
 Follow repository AGENTS for maintained fmt, Clippy, pytest, Ruff, mypy and function-documentation scopes. Continue with [integration](integration-guide.md) or [Eval Harness](modules/evaluation.md).

@@ -62,3 +62,18 @@ SoftwareComplete 交付同时要求[当前完整 CI 绿色](https://github.com/F
 [运行协调验收](docs/development/acceptance/2026-10-25-execution-coordination.md)通过真实 CPU 抢占、耦合恢复、文件完整性 hazard、原实例重启和完整声明数据冷恢复。设备协调保留原 reviewed Memory 与独立设备 assurance 门禁；没有设备或外部模型。
 
 [跨域软件验收](docs/development/acceptance/2026-10-25-federation-execution.md)通过正常执行、真实 Prepare 响应丢失、原 Root SIGKILL、完成后原实例重启和六份声明数据冷恢复。只读观察不声称瞬时全局就绪；实际执行仍消费原完整决定、全体 Commit 回执和本域当前门禁。
+
+## 2026-11 增量演进与核对边界（`e4c03a55`）
+
+本小节同步 2026-10-26 之后至 `origin/main@e4c03a55` 的增量代码演进与对应软件门禁范围；所有既有 10-26 历史验收结论保留原文。真机现场运行结果与物理部署证据独立记录，不与下述软件路径或单测结果混同：
+
+| 增量主题 | 主线提交 / PR / ADR | 已实现路径与代码/软件验证边界 | 仍须独立验证的物理或生产边界 |
+| --- | --- | --- | --- |
+| 选择性通用能力整合与存储/恢复治理 | `96a396a1`、`db0cdbb6`（ADR-0239/0242/0243/0244/0250） | 静态 Node 证书在线采用、在线实体发布、流式启动投影、Storage v3 正文去重与 `Unknown` 非终态映射；见[整合计划](docs/development/selective-main-integration-plan-20261112.md) | 现场部署开关选择、长跑磁盘回收与设备物理安全 |
+| Liveness 续期与周期遥测事件瘦身 | PR #20（ADR-0257）、PR #21（ADR-0258） | 稳态心跳仅更新内存租约，跳变/首次会话落盘；`ROBOGUIDE_TELEMETRY_PERSISTENCE_POLICY` 按语义变更或最大间隔落盘，Decision/World/SafeState 豁免 | 实际生产节点配置与百节点压测下控制面负载上限 |
+| Wi-Fi 漫游重连韧性与旧注册隔离 | PR #19、PR #27、PR #39 | HTTP/2 keepalive 漫游恢复、Node `CoalescedStateOutbox` 合并、`superseded` 注册拒绝限定原会话，避免漫游重连误拒绝新会话 | 复杂多 AP 现场射频干扰与终端切换延迟 |
+| 多机占据栅格融合与副本身份 | PR #25、PR #18 | `spatial-provider` / `memory-provider` 支持可配准策略（`correlative-icp` / `opencv-akaze`）的多机占用栅格融合；map replica 绑定准确接收方与会话（[副本验收](docs/development/acceptance/2026-11-17-map-replica-identity.md)） | 真实双狗未知区重定位精度与物理导航安全性 |
+| 自然故障安全停机与运行期动态接管 | PR #22、PR #32、PR #33 | `SafeStateObservation` 独立安全停机证据确认自然设备故障后解锁 `plan_revision` 同 Mission 动态接管；保留原历史与 `Unknown` 边界 | 真实硬件底盘停稳状态与跨机器物理接替 |
+| 依赖时间窗前检与 Node 私有前检 | PR #30（ADR-0259）、`4cef2266`（ADR-0255/0256） | `/v1/missions/validate-plan?timing=v0.1\|history-v0.1` 沿 DAG 计算最早开始冲突；`ROBOGUIDE_NODE_PREFLIGHT_CONFIGS` 与 `complete-sources/v0.1` 离线核对配置与外部描述符 | 真实运行期模型耗时与现场网络拥塞 |
+| 协作关系薄 HTTP 路由与人工取消结案 | PR #17、PR #40（ADR-0026/0027/0232） | 暴露 `GET /v1/missions/{id}/shared-view?context_id=...` 与 `POST /v1/missions/{id}/relations/{relation_id}/reconcile`；`reconcile_manual` 支持 `Cancelled`/`Failed`/`Completed` 尝试的人工取消结案（[结案记录](docs/development/acceptance/2026-11-17-failed-manual-cancel-settlement.md)） | Mode 4 边缘局部相对控制与断链急停物理表现 |
+| 对话工作台、MI 延迟与到达工具 | PR #28/#29/#31/#34、PR #35（ADR-0251–0256） | `roboguide chat` 原生 Agent Loop、设备 `/state` 查询与诊断、MI 传输/Prompt 延迟优化与 `tools/onsite_arrival` 可复用人工到达确认工具 | 真实操作员对话场景与外场观测闭环 |

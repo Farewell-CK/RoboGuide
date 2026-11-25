@@ -49,3 +49,5 @@ State API 联邦 Desired、Committed、Reported、Observed、Derived、Belief �
 Artifact filesystem 实现只处理 digest、路径、streaming 和 durability；内容授权在应用 writer 与原 provider 生命周期检查。bytes 存在不授权 alias，历史 Imported 不授权新 Task。
 
 当前 provider 的紧凑 use/worker/map/handoff 引用保守阻止 GC。恢复核对实际 active refs 与同 provider CAS，不把 released 历史当成仍需保留已删除 bytes 的理由。
+
+`controller_v3_events`（Storage v3，ADR-0244）在原事件事务内执行无损正文引用去重；结合 ADR-0257 稳态心跳进程内续期与 ADR-0258 `ROBOGUIDE_TELEMETRY_PERSISTENCE_POLICY` 变更/间隔落盘，可在保持只读 `GET /v1/state/records` 实时投影最新性的同时大幅削减 WAL 写入。多机建图则通过 `:8090` CAS 与 `POST /v1/maps/{id}/replicas`（PR #18/#25）保存融合地图副本与接收会话归属。

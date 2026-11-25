@@ -56,6 +56,19 @@ curl --fail-with-body http://127.0.0.1:8070/v1/mission-requests   -H 'Content-Ty
 
 结果依赖已发布 Catalog、grounding、模型和部署，可能需要澄清或审批，不保证示例语句一定可执行。Request ID 用于原进度查询和回答，不把 uncertain outcome 当成可安全重复提交。
 
+如需使用命令行交互终端或任务旅程控制台：
+
+```bash
+# 初始化并使用对话工作台（支持自然语言规划、/state 查询与任务诊断）
+uv run roboguide init
+uv run roboguide chat
+
+# 启动 Mission Console（默认 http://127.0.0.1:8095，内置演示回放）
+python3 console/serve.py
+```
+
+实时控制台连接 Controller 后可提交或取消 Mission。仅演示时使用回放。
+
 ## 质量检查与下一步
 
 按仓库 AGENTS 的维护范围执行 fmt、Clippy、pytest、Ruff、mypy 和函数文档检查。首次接入另读[开发与接入](integration-guide.md)；实验编排见[Eval Harness](modules/evaluation.md)。

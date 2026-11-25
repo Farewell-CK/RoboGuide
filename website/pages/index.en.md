@@ -24,7 +24,7 @@ flowchart LR
 
 | Your goal | Start here |
 | --- | --- |
-| Understand architecture and rationale | [Architecture tour](architecture-tour.md) → [Concepts](concepts.md) → [Execution lifecycle](lifecycle.md) |
+| Understand architecture and rationale | [Architecture tour](architecture-tour.md) → [System dataflows](docs/architecture/v2/system-dataflows.md) → [Concepts](concepts.md) → [Execution lifecycle](lifecycle.md) |
 | Run locally | [Getting started](getting-started.md) → [Development and integration](integration-guide.md) |
 | Find code entrypoints | [Module map](modules/domain-ports.md) → [Implementation status](status.md) |
 | Deploy and troubleshoot | [Operations](operations.md) → [Versions and references](reference.md) |
@@ -40,6 +40,6 @@ flowchart LR
 
 ## What exists today
 
-Software paths include complete-plan admission, DAG scheduling, execution attempts, source-aware State, Memory preparation/use, runtime revision, logical quota and recovery tools. [Implementation status](status.md) separates validation coverage from remaining work. Process/file checks do not establish device safety or overall completion.
+Software paths include complete-plan admission, DAG scheduling, four execution coupling modes (ADR-0026/0027), execution attempts, source-aware State, telemetry slimming with Storage v3, multi-robot spatial occupancy fusion, runtime revision, logical quota, recovery tools, the `roboguide chat` workbench, and the `console/` mission UI. [Implementation status](status.md) separates validation coverage from remaining work. Process/file checks do not establish device safety or overall completion.
 
 [Reference](reference.md) contains contract versions and build provenance so historical snapshots remain identifiable.

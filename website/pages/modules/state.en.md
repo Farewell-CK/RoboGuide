@@ -49,3 +49,5 @@ State API federates original Desired, Committed, Reported, Observed, Derived and
 Artifact filesystem code handles digests, paths, streaming and durability. Application writers and original-provider lifecycle gates enforce content authority. Existing bytes cannot authorize aliases; Imported history cannot authorize a new Task.
 
 Compact provider use/worker/map/handoff references conservatively gate GC. Recovery validates active refs against the same provider CAS; released history does not require already deleted bytes.
+
+Storage v3 (`controller_v3_events`, ADR-0244) deduplicates telemetry payload bodies within the original event transaction. Paired with ADR-0257 process-local heartbeat renewal and ADR-0258 `ROBOGUIDE_TELEMETRY_PERSISTENCE_POLICY` change/interval persistence, `GET /v1/state/records` retains fresh live projections while cutting redundant WAL writes. Multi-robot mapping artifacts flow through `:8090` CAS and `POST /v1/maps/{id}/replicas` (PR #18/#25) with exact receiver and session provenance.

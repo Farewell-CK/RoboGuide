@@ -35,3 +35,14 @@ logs/
 
 # Optional browser validation dependencies; never needed by the static site.
 /website/browser-tests/node_modules/
+
+# Local OS and editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Local root-level SQLite runtime files
+/*.sqlite3
+/*.sqlite3-wal
+/*.sqlite3-shm

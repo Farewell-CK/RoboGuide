@@ -51,4 +51,6 @@ A `(Group, Task, Role)` slot may retain multiple historical attempts. New attemp
 
 `requires-active` reduces current execution state; `shared-spatial-reference` checks current attempt/owner/map revision/frame. Violated/Unknown fences need explicit acknowledgement even if the relation recovers. Peer readiness observes channels already established by Local EAIOS; Node Protocol carries no high-frequency peer data.
 
+Controller HTTP (PR #40) exposes `GET /v1/missions/{id}/shared-view?context_id=...` (classifying freshness as `Fresh`, `Stale`, or `Unknown`) and `POST /v1/missions/{id}/relations/{relation_id}/reconcile` to clear `relation_fences` once conditions recover. Across the four coupling modes (ADR-0026/0027), `TightlyCoupledCooperation` (Mode 4) keeps only the `PeerChannel` lifecycle (`Planned -> Ready -> Fenced -> Closed`) in Runtime while high-frequency peer data and immediate safety stay directly between Local EAIOS endpoints.
+
 Restore clears process-local session anchors and retains nonterminal ambiguity as Unknown. It neither resends physical operations nor refreshes receive time.

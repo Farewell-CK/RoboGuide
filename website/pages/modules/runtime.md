@@ -51,4 +51,6 @@ sequenceDiagram
 
 `requires-active` 从当前 execution state 归约，`shared-spatial-reference` 核对当前 attempt/owner/map revision/frame。Violated/Unknown 的 fence 即使关系恢复也需显式确认解除。peer readiness 只观察 Local EAIOS 已建立的通道，Node Protocol 不传高频 peer data。
 
+Controller HTTP（PR #40）提供只读 `GET /v1/missions/{id}/shared-view?context_id=...` 查看各绑定位姿/状态与 receive-time TTL 分类（`Fresh`/`Stale`/`Unknown`），并通过 `POST /v1/missions/{id}/relations/{relation_id}/reconcile` 在条件恢复后受控解除 `relation_fences`。四种耦合模式中，`TightlyCoupledCooperation`（Mode 4）由 Runtime 仅管 `PeerChannel` 状态机（`Planned -> Ready -> Fenced -> Closed`），高频相对控制直接走 Local EAIOS 端到端数据面，零字节经由 Controller。
+
 恢复清空进程本地 session anchor，原非终态保留 Unknown；不会因重启重新发送物理操作或刷新 receive time。

@@ -99,3 +99,33 @@ Proposal 不持有资源，Commit 形成原子承诺，Rebind 只消费已提交
 同一恢复包中的活动 Memory/map/handoff 引用必须对应实际 bytes，缺失或 tombstone 冲突拒绝。
 
 [ADR-0145 原文](docs/decisions/0145-recovery-active-content-reference-binding.md)。
+
+## 协作耦合模式与通道就绪
+
+MissionPlan 区分 `Independent`、`SequentialHandoff`、`ConcurrentCooperation` 与 `TightlyCoupledCooperation` 四种协作模式；Runtime 管理 `SharedSpatialReference`、共享视图与双端 `PeerChannelReadiness` 围栏，高频相对控制留在 Local EAIOS。
+
+[ADR-0026](docs/decisions/0026-execution-coupling-and-group-views.md) · [ADR-0027](docs/decisions/0027-runtime-coordination-evidence-completion.md)。
+
+## 取消结案与 Unknown 语义
+
+无副作用取消结案与管理员人工对账（`reconcile_manual`）不将决策等价为物理停止证明；本地执行缺失终态时保守保留 `Unknown` 非终态。
+
+[ADR-0232](docs/decisions/0232-task-cancellation-settlement.md) · [ADR-0233](docs/decisions/0233-local-administrator-cancel-settlement.md) · [ADR-0250](docs/decisions/0250-explicit-local-execution-unknown.md)。
+
+## 节点热接入、在线发布与存储治理
+
+支持静态 Node 证书显式在线采用、实体与可行性来源在线发布，以及流式 Catalog 恢复投影（存储 v2）与无损正文去重（存储 v3）。
+
+[ADR-0239](docs/decisions/0239-online-static-node-identity-adoption.md) · [ADR-0242](docs/decisions/0242-online-deployment-publications.md) · [ADR-0243](docs/decisions/0243-catalog-recovery-checkpoint.md) · [ADR-0244](docs/decisions/0244-state-retention-and-deduplicated-storage.md)。
+
+## 对话工作台与前检扩展
+
+`roboguide chat` 提供只读状态/证据查询、任务提交意图与原生 Agent Loop；Node 私有配置前检与依赖时间窗前检分别在提交前校验映射完整来源与截止时间冲突。
+
+[ADR-0251](docs/decisions/0251-readonly-conversation-workbench.md) · [ADR-0254](docs/decisions/0254-installed-chat-workbench.md) · [ADR-0255](docs/decisions/0255-private-node-plan-preflight.md) · [ADR-0256](docs/decisions/0256-complete-node-preflight-sources.md) · [ADR-0259](docs/decisions/0259-dependency-window-preflight.md)。
+
+## 遥测事件瘦身
+
+稳态心跳仅更新进程内租约而跳过冗余 SQL 提交；周期诊断样本按 `ROBOGUIDE_TELEMETRY_PERSISTENCE_POLICY` 在内容变更或最大间隔时落盘，安全停机与决策证据始终持久化。
+
+[ADR-0257](docs/decisions/0257-process-local-node-liveness.md) · [ADR-0258](docs/decisions/0258-periodic-node-telemetry-persistence.md)。

@@ -48,6 +48,8 @@ Commit 在全部检查通过后才同时写 resource reservation、原 Role dema
 
 恢复 proposal 不占资源；pending recovery Commit 由原 Group/Role 保有，Rebind 消费或显式 Abort 释放。普通 Actor recovery 不获得跨实体 takeover 权限。
 
+调度延迟与超期窗口诊断见 `POST /v1/missions/validate-plan?timing=v0.1`（ADR-0259），实际超期时 Task 详情返回 `scheduling_deferral` 与 `window-missed` 原因；经 `SafeStateObservation` 确认自然设备故障后，Control 保留原停止记录并配合新 Group 重新执行 `Match -> Commit -> Bind`（PR #33）。
+
 ### 当前来源成本排序
 
 显式 decision-policy registry v0.2 将原 tenant、Node session、State 来源、schema、TTL 和指标单位接到普通与恢复调度。未知、过期、冲突或缺失指标没有数值成本；GPU 可用量按显式偏好排序。原观测和策略进入持久审计，`/v1/missions/{id}/scheduling-costs` 提供受 Mission 权限保护的只读视图。本地参考 provider 只测实际 host load，其余指标为 null。成本仅决定候选搜索顺序，不能授予资源或绕过 eligibility。
