@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import http.client
 import io
-import os
 import json
 import math
+import os
 import re
 import socket
 import ssl
@@ -230,11 +230,15 @@ def _connection_classes(
                     (_parsed.hostname, _parsed.port or 8080),
                     timeout=_remaining(deadline),
                 )
-                _head = (f"CONNECT {address[0]}:{address[1]} HTTP/1.1\r\n"
-                         f"Host: {address[0]}:{address[1]}\r\n\r\n").encode()
+                _head = (
+                    f"CONNECT {address[0]}:{address[1]} HTTP/1.1\r\n"
+                    f"Host: {address[0]}:{address[1]}\r\n\r\n"
+                ).encode()
                 _sock.sendall(_head)
                 _buf = b""
                 while b"\r\n\r\n" not in _buf and len(_buf) < 8192:
+                    # 每一轮都按剩余 deadline 收敛超时，避免读代理应答时越过总预算
+                    _sock.settimeout(_remaining(deadline))
                     _chunk = _sock.recv(4096)
                     if not _chunk:
                         break
