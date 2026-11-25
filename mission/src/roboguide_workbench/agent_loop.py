@@ -467,8 +467,8 @@ _PREFETCH_CACHE: dict[str, object] = {"at": 0.0, "text": ""}
 
 
 def _prefetch_enabled() -> bool:
-    """宿主侧库存预取开关（默认开）。ROBOGUIDE_PREFETCH_INVENTORY=0 关闭。"""
-    return os.environ.get("ROBOGUIDE_PREFETCH_INVENTORY", "1").strip() != "0"
+    """宿主侧库存预取开关（默认关）。ROBOGUIDE_PREFETCH_INVENTORY=1 开启。"""
+    return os.environ.get("ROBOGUIDE_PREFETCH_INVENTORY", "0").strip() == "1"
 
 
 def _movable_bodies() -> list[str]:
@@ -667,8 +667,8 @@ class AgentConversation:
                     ),
                     "tool_choice": "auto",
                     # 一轮内并发多个读工具: 把"串行 N 轮"压成"1 轮多调用"
-                    # ROBOGUIDE_PARALLEL_TOOLS=0 可回退到单工具串行
-                    "parallel_tool_calls": os.environ.get("ROBOGUIDE_PARALLEL_TOOLS", "1").strip() != "0",
+                    # 默认关闭以保持既有确定性行为；ROBOGUIDE_PARALLEL_TOOLS=1 开启
+                    "parallel_tool_calls": os.environ.get("ROBOGUIDE_PARALLEL_TOOLS", "0").strip() == "1",
                     "reasoning": {"effort": self.router.settings.llm.reasoning_effort},
                 }
                 stream = getattr(self.router.transport, "post_stream_json", None)

@@ -368,8 +368,7 @@ fn apply_pending_cancellations_scoped(
                 .group_attempts_terminal(execution.group_id());
             // **兜底**: attempt 一直非终态（僵尸执行）时，超过宽限也允许收尾，
             // 否则 Mission 会永久停在 Cancelling。语义上等同于"对端已不可确认"。
-            let abandoned = !attempts_terminal
-                && cancel_grace_expired(&mission_id, timestamp);
+            let abandoned = !attempts_terminal && cancel_grace_expired(&mission_id, timestamp);
             (execution.lifecycle() == orchestration::MissionExecutionLifecycle::Cancelling
                 && (attempts_terminal || abandoned)
                 && !safety_stop::blocks_cancellation_release(controller, &mission_id)
