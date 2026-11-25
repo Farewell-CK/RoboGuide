@@ -1,0 +1,52 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.10",
+  "mission": {
+    "id": "mission-choreography-robot-01-example",
+    "objective": "Per-performer Independent choreography mission template triggered at shared UTC t0_utc_ms. Submit one Mission per isolated robot/subgroup with identical t0_utc_ms so a single robot failure never triggers Mission-wide sibling SafetyStop cancellation across the fleet.",
+    "actors": [
+      { "id": "robot-01", "physical_entity": "entity-robot-01" }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "choreography-robot-01-context",
+      "roles": [
+        { "id": "robot-01", "actor": "robot-01" }
+      ],
+      "relations": [],
+      "executor_constraints": [],
+      "coupling_mode": "independent"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "choreo-robot-01",
+      "description": "Choreography lane 1 triggered at shared T0 with single-robot fault isolation.",
+      "context_id": "choreography-robot-01-context",
+      "depends_on": [],
+      "coupling_mode": "independent",
+      "roles": [
+        {
+          "id": "choreo-role-01",
+          "context_role": "robot-01",
+          "resource_scope": "task",
+          "requirements": {
+            "capabilities": [{ "contract": { "namespace": "choreography", "name": "play", "version": "v1" }, "constraints": [] }],
+            "resources": [{ "kind": "space", "units": 1 }]
+          },
+          "execution_intent": {
+            "operation": { "namespace": "choreography", "name": "play", "version": "v1" },
+            "objective": "Play lane 1 keyframes at shared T0.",
+            "parameters": {
+              "t0_utc_ms": 1800000000000,
+              "max_clock_offset_ms": 20.0,
+              "choreography_spec_json": "{\"schema_version\":\"roboguide.choreography/v1\",\"v_max\":0.30,\"fault_policy\":\"isolate-local-stop\",\"keyframes\":[{\"t_s\":0.0,\"x\":0.0,\"y\":0.0,\"yaw\":0.0,\"action\":\"ready\"},{\"t_s\":4.0,\"x\":0.8,\"y\":0.0,\"yaw\":0.0,\"action\":\"step\"},{\"t_s\":8.0,\"x\":0.8,\"y\":0.0,\"yaw\":1.57,\"action\":\"pose\"}]}"
+            }
+          }
+        }
+      ],
+      "timing": { "earliest_start_offset_ms": 0, "latest_start_offset_ms": null, "completion_deadline_offset_ms": 60000 },
+      "satisfaction": { "expected_effect": "robot-01 plays lane 1 cleanly at T0.", "basis": "execution-report", "verifier": null }
+    }
+  ]
+}
