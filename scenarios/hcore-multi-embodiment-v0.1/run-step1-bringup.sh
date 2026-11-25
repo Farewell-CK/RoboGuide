@@ -13,7 +13,7 @@ export RUSTUP_HOME=/var/tmp/rg-rustup CARGO_HOME=/var/tmp/rg-cargo CARGO_TARGET_
 . "$CARGO_HOME/env"
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
 
-PY=/home/sunweihao/miniconda3/envs/py310/bin/python
+PY="${RBNX_PYTHON:-python3}"
 RUN=/var/tmp/rg-run/hcore-het-1
 rm -rf "$RUN"; mkdir -p "$RUN/artifacts"
 

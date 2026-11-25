@@ -34,8 +34,8 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 SCEN = HERE
 OUT = os.path.join(SCEN, "results")
 RUN = "/var/tmp/rg-run/metrics"
-PY = "/home/sunweihao/miniconda3/envs/py310/bin/python"
-BIN = "/var/tmp/rg-target/debug"
+PY = os.environ.get("RBNX_PYTHON", "python3")
+BIN = os.environ.get("RBNX_BIN_DIR", "/var/tmp/rg-target/debug")
 
 FACADE_PORT = {"quadruped": 28111, "rover": 28112, "ptz": 28113, "arm": 28114}
 NODES = ["quadruped-om1", "rover-robonix", "ptz-ros2", "arm-roboos"]

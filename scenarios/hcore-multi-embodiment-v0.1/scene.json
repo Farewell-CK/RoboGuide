@@ -1,9 +1,10 @@
 {
   "schema": "robonix.scene/v1",
   "sources": {
-    "map": "/home/sdb/sunweihao/myproject/RoboGuide/scenarios/hcore-multi-embodiment-v0.1/arena-map.json",
-    "mjcf": "/home/sdb/sunweihao/myproject/H-CoRE-sub/hcore_mjc_repro/arena_roboguide.xml",
-    "appearance": "/home/sdb/sunweihao/myproject/RoboGuide/scenarios/hcore-multi-embodiment-v0.1/object-appearance.json"
+    "map": "scenarios/hcore-multi-embodiment-v0.1/arena-map.json",
+    "mjcf": "${HECORE_ROOT:-../H-CoRE-sub}/hcore_mjc_repro/arena_roboguide.xml",
+    "appearance": "scenarios/hcore-multi-embodiment-v0.1/object-appearance.json",
+    "note": "路径相对 repository root；mjcf 由 H-CoRE 仓库提供，可用 HECORE_ROOT 覆盖。该块仅记录出处，运行时只读取 entities。"
   },
   "entities": {
     "rover": {

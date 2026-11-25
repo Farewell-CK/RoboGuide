@@ -35,7 +35,7 @@ export RUSTUP_HOME=/var/tmp/rg-rustup CARGO_HOME=/var/tmp/rg-cargo CARGO_TARGET_
 . "$CARGO_HOME/env"
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
 
-PY=/home/sunweihao/miniconda3/envs/py310/bin/python
+PY="${RBNX_PYTHON:-python3}"
 SCEN=scenarios/hcore-multi-embodiment-v0.1
 RUN="${RG_RUN:-/var/tmp/rg-run/hcore-het-llm-1}"
 INSTRUCTION_FILE="${RG_INSTRUCTION:-${1:-$SCEN/instructions/01-clear-the-band.txt}}"
