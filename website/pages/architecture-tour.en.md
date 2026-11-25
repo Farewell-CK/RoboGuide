@@ -80,8 +80,9 @@ At runtime, RoboGuide separates the **Control Plane (HTTP :8080 / gRPC :50051)**
 
 ```mermaid
 flowchart TB
-  CHAT["roboguide chat / Mission Console :8095"] -->|"HTTP"| MS["Mission Service :8070"]
-  MS -->|"POST /validate-plan, /v1/missions"| CTRL["Controller (:8080 HTTP / :50051 gRPC)"]
+  CHAT["roboguide chat"] -->|"HTTP"| MS["Mission Service :8070"]
+  CON["Mission Console :8095"] -->|"GET status / POST submit or cancel"| CTRL
+  MS -->|"POST /v1/missions/validate-plan, /v1/missions"| CTRL["Controller (:8080 HTTP / :50051 gRPC)"]
   CTRL ---|"SQLite Storage v3 + ADR-0257/0258 slimming"| CAS["Artifact HTTP & CAS :8090"]
   SP["Spatial Provider (multi-robot fusion)"] -->|"SHA-256 immutable bundles"| CAS
   CTRL <-->|"gRPC :50051 Execute / Snapshot / PeerReadiness"| NODE["roboguide-node + Local EAIOS"]
@@ -94,7 +95,7 @@ flowchart TB
 | `Independent` | Standard Task DAG, `Match -> Commit -> Bind` | Each Node runs independently |
 | `SequentialHandoff` | Predecessor `TaskSatisfied` + Memory/Artifact release gates | Handoff via `:8090` CAS and explicit `import / use` |
 | `ConcurrentCooperation` | `RequiresActive` / `SharedSpatialReference`, `GET /v1/missions/{id}/shared-view`, `relation_fences`, `/reconcile` | Shared state freshness classified by receive-time TTL; local safety stays in Local EAIOS |
-| `TightlyCoupledCooperation` | Runtime manages only two-ended `PeerChannel` (`Planned -> Ready -> Fenced -> Closed`) | High-frequency control and disconnect braking run peer-to-peer at edge with zero bytes through Controller |
+| `TightlyCoupledCooperation` | Runtime manages only two-ended `PeerChannel` (`Planned -> Ready -> Fenced -> Closed`) | Local EAIOS owns high-frequency control and immediate safety. Peer traffic bypasses Controller, and physical behavior requires deployment validation |
 
 ## Continue reading
 

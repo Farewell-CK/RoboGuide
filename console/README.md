@@ -3,11 +3,10 @@
 > **状态：开发中（experimental）。** 布局、功能与事件映射仍在快速演进，
 > 未冻结；演示剧本是手工构造的叙事，不是回归基线。
 
-只读的任务旅程可视化控制台：展示 RoboGuide 接受任务后，事件证据流经
+任务旅程可视化控制台：展示 RoboGuide 接受任务后，事件证据流经
 Mission Intelligence → Control Plane → Execution Group → Runtime → Nodes →
 Physical World 各层的真实效果。支持**多 Mission 并发**与**整机集群视图**。
-它不是新的 Control / Runtime / State 权威，只消费既有 HTTP API
-（`/v1/events`、`/v1/inventory`、`/v1/missions` 等）。
+它不是新的 Control / Runtime / State 权威，复用既有 HTTP API 查询状态、提交 Mission 和取消 Mission。演示回放无需连接后端。
 
 ## 运行
 
@@ -82,7 +81,7 @@ console/
 │   ├── stage.js      # SVG 分层舞台 + 光包动画引擎
 │   ├── panels.js     # Mission/DAG/调度日历/恢复阶梯/State&Memory/事件流
 │   ├── replay.js     # 演示剧本（真实事件字段）
-│   ├── api.js        # 只读 HTTP 客户端
+│   ├── api.js        # 事件查询与 Mission 提交、取消客户端
 │   └── main.js       # 组合根：模式切换、状态机、Live 轮询
 └── scenarios/        # 仓库 scenario MissionPlan 副本，供实时模式提交
 ```

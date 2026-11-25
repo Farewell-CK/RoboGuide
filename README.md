@@ -87,15 +87,15 @@ flowchart TB
 flowchart TB
   subgraph CLIENTS["用户与观测入口"]
     CHAT["roboguide chat / Operator 客户端"]
-    CONS["Mission Console :8095 (只读代理)"]
+    CONS["Mission Console :8095 (本地界面与同源代理)"]
   end
 
   subgraph CONTROL["控制面 HTTP / gRPC (低频高权威)"]
     MS["Mission Service :8070 (可配如 :8073)"]
     CTRL["Controller / integration-server (HTTP :8080, gRPC :50051)"]
     CHAT -->|"/v1/mission-requests"| MS
-    MS -->|"POST /validate-plan, /v1/missions"| CTRL
-    CONS -.->|"GET /v1/events, /inventory, /missions"| CTRL
+    MS -->|"POST /v1/missions/validate-plan, /v1/missions"| CTRL
+    CONS -->|"GET 状态与事件 / POST 提交或取消 Mission"| CTRL
     CHAT -.->|"GET /v1/state/records, /safety-stop"| CTRL
   end
 
@@ -133,7 +133,7 @@ flowchart TB
 | **Mode 1: `Independent`** | 单机或无运行时耦合的独立任务 | 标准 Task DAG、`Match -> Commit -> Bind -> Execute` | 各 Node 独立执行，无跨 Role 共享视图或 Peer 通道 |
 | **Mode 2: `SequentialHandoff`** | 顺序接力任务（如探索后盲导、拍照后巡检） | 前序 `TaskSatisfied` + Memory/Artifact 释放门禁解锁后继 Task | 数据经由不可变 Artifact CAS 与显式 `import / use` 交接 |
 | **Mode 3: `ConcurrentCooperation`** | 并发协同（如双机协同护航、共享同一地图基准） | 声明 `RequiresActive` / `SharedSpatialReference`；提供 `GET /v1/missions/{id}/shared-view?context_id=...`；异常触发 `relation_fences`，人工/条件恢复走 `POST /v1/missions/{id}/relations/{relation_id}/reconcile` | 共享状态受 receive-time TTL 分类为 `Fresh / Stale / Unknown`，局部避障由 Local EAIOS 自持 |
-| **Mode 4: `TightlyCoupledCooperation`** | 紧耦合协同（如并排锁相编队、同步掉头、断链齐刹） | 依赖双端 `PeerChannelReadiness` 观测维护通道生命周期 `Planned -> Ready -> Fenced -> Closed`；未就绪或断链即 Fence | **高频相对控制与硬件级安全停机在 Local EAIOS 间点对点直连，Controller 侧数据面零转发** |
+| **Mode 4: `TightlyCoupledCooperation`** | 紧耦合协同（如并排编队） | 依赖双端 `PeerChannelReadiness` 观测维护通道生命周期 `Planned -> Ready -> Fenced -> Closed`；未就绪或断链即 Fence | 高频相对控制与即时安全由部署侧 Local EAIOS 实现。点对点数据面绕过 Controller，实机效果依赖本地部署 |
 
 ---
 
@@ -198,9 +198,13 @@ uv run roboguide chat
 ### 路径 D：零依赖 Mission Console 控制台与双语文档站预览
 
 ```bash
-# 启动只读任务旅程可视化控制台（默认 http://127.0.0.1:8095，内置无后端演示回放模式）
+# 启动任务旅程控制台（默认 http://127.0.0.1:8095，演示回放不需要后端）
 python3 console/serve.py
+```
 
+实时控制台可通过已连接的 Controller 提交或取消任务。只看演示时使用回放模式。
+
+```bash
 # 本地同步并构建 MkDocs 双语文档站（严格校验模式）
 python website/sync_docs.py
 uvx --from mkdocs --with-requirements website/requirements.txt mkdocs build --strict -f website/mkdocs.yml
@@ -249,7 +253,7 @@ RoboGuide/
 ├── evaluation/                   # Eval Harness（roboguide_eval）、E1 评测定义、离线发布工具与历史冻结基线
 ├── experiments/                  # 历史 EP51 审计快照（2026-09-20，保持只读原位留档）
 ├── tools/                        # 部署检查、可观测性、现场到达验收（onsite_arrival）与 CI 进程级质检门禁（quality）
-├── console/                      # Mission Console 只读任务旅程可视化控制台（零依赖静态前端 + serve.py）
+├── console/                      # Mission Console 任务旅程可视化控制台（零依赖静态前端 + serve.py）
 ├── website/                      # MkDocs Material 双语文档站源码、内容基线、图表校验与 Playwright 烟雾测试
 └── docs/                         # 架构基线（v2/）、257 份 ADR（decisions/）、接入规范（extensions/）与历史验收档案
 ```
@@ -266,7 +270,7 @@ RoboGuide/
 | **架构决策记录（ADR）** | [`docs/decisions/`](docs/decisions/) · [`website/pages/decisions.md`](website/pages/decisions.md) | 257 份历史与现行 ADR（`0001`–`0259`） |
 | **设备与 EAIOS 接入** | [`device-extension-conformance-v0.2.md`](docs/extensions/device-extension-conformance-v0.2.md) · [`contracts/`](contracts/) | 不修改核心源码接入新机器人的配置规范 |
 | **双语站点源码与同步门禁** | [`website/README.md`](website/README.md) · [`website/pages/status.md`](website/pages/status.md) | 中英文维护指南与最新 `e4c03a55` 实现边界对账 |
-| **实验评测与可视化控制台** | [`evaluation/README.md`](evaluation/README.md) · [`console/README.md`](console/README.md) | Eval Harness 与只读任务旅程控制台用法 |
+| **实验评测与可视化控制台** | [`evaluation/README.md`](evaluation/README.md) · [`console/README.md`](console/README.md) | Eval Harness 与任务旅程控制台用法 |
 | **验收记录与历史研发流水账** | [`docs/development/acceptance/README.md`](docs/development/acceptance/README.md) · [`readme-development-log-archive-2026-11.md`](docs/development/readme-development-log-archive-2026-11.md) | 143 份软件/真机验收归档与原 README 研发日志无损归档 |
 
 > **贡献与代码规范**：提交前请遵循 [`AGENTS.md`](AGENTS.md) 与 [`docs/development/coding-standards.md`](docs/development/coding-standards.md) 中的 Rust/Python 文档注释、格式化、类型检查与进程级门禁要求。

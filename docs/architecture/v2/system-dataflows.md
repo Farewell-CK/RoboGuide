@@ -2,7 +2,7 @@
 
 > **System Architecture & Five Core Protocol Dataflows (Baseline: `origin/main@e4c03a55`)**
 >
-> 本文档依据 `e4c03a55` 主线真实源码整理，与 [V2 现行架构](README.md)、[当前代码架构图册](current-architecture.md) 保持同一语义权威。所有端口、HTTP 路由、gRPC 消息体与持久化表名均来自仓库实际实现，不引入虚构接口或隐式权威。
+> 本文档依据 `e4c03a55` 主线真实源码整理，与 [V2 现行架构](README.md)、[当前代码架构图册](current-architecture.md) 使用相同术语。权威语义见 V2 架构与正式契约，下图用于导读和定位实现。
 
 ## 0. 默认端口、协议与代码边界总览
 
@@ -11,21 +11,21 @@
 | **Mission Service** | `127.0.0.1:8070` HTTP（现场可配置如 `:8073`） | 自然语言 Request、Grounding、`Plan / Review / Repair` 与审批提交；[`config/mission-service.toml`](../../../config/mission-service.toml) · [`mission/src/mission/`](../../../mission/src/mission/) |
 | **Controller HTTP** | `127.0.0.1:8080` HTTP / mTLS | Mission 准入前检、调度与状态联邦、共享视图、安全停机核验与恢复控制；[`apps/integration-server/src/controller_http/server.rs`](../../../apps/integration-server/src/controller_http/server.rs) |
 | **Artifact HTTP & CAS** | `127.0.0.1:8090` HTTP / mTLS | 不可变字节上传与 SHA-256 校验（CAS）、`/v1/maps` 与 `/v1/memories` 目录与副本凭证；[`apps/integration-server/src/artifact_http/server.rs`](../../../apps/integration-server/src/artifact_http/server.rs) |
-| **Node Protocol v0.4** | `0.0.0.0:50051` gRPC 双向流（支持 mTLS） | 节点注册、心跳租约、`Execute / Cancel`、`ExecutionSnapshot`、`StateObservationBatch`、`PeerChannelReadiness` 与 `Ack`；[`contracts/node/v0.17/roboguide-node.proto`](../../../contracts/node/v0.17/roboguide-node.proto) |
-| **Mission Console** | `127.0.0.1:8095` HTTP 同源只读代理 | 静态控制台与只读代理，仅转发 `/v1/events`、`/v1/inventory`、`/v1/missions` 等已有路由；[`console/serve.py`](../../../console/serve.py) |
+| **Node Protocol v0.4** | `127.0.0.1:50051` gRPC 双向流（监听地址可配，支持 mTLS） | 节点注册、心跳租约、`Execute / Cancel`、`ExecutionSnapshot`、`StateObservationBatch`、`PeerChannelReadiness` 与 `Ack`；[`contracts/node/v0.17/roboguide-node.proto`](../../../contracts/node/v0.17/roboguide-node.proto) |
+| **Mission Console** | `127.0.0.1:8095` HTTP 同源代理 | 提供演示回放和实时查看，向配置的 Controller / Mission 上游转发 GET 与 POST；实时模式可提交和取消 Mission；[`console/serve.py`](../../../console/serve.py) |
 | **Local EAIOS / Provider** | 本地 HTTP / gRPC / MCP / Unix Socket | 承载本地导航、底盘即时安全、点云/栅格建图与融合，完全独立于 RoboGuide Core；[`integrations/`](../../../integrations/) |
 
 ---
 
 ## 图 1：跨进程 / 跨主机部署与通信拓扑图
 
-展示用户端（`roboguide chat`、只读 `Mission Console`、外部/移动端操作端）、`Mission Service`、中心 `Controller`（`integration-server` 与可选 `controller-replica`）以及边缘节点（`roboguide-node` + Local EAIOS + Spatial/Memory Provider）之间的进程与网络边界。
+展示用户端（`roboguide chat`、`Mission Console`、外部/移动端操作端）、`Mission Service`、中心 `Controller`（`integration-server` 与可选 `controller-replica`）以及边缘节点（`roboguide-node` + Local EAIOS + Spatial/Memory Provider）之间的进程与网络边界。
 
 ```mermaid
 flowchart TB
   subgraph USERS["客户端与运维接入层"]
     CHAT["roboguide chat (roboguide_workbench)"]
-    CONS["Mission Console :8095 (静态前端 + 只读代理)"]
+    CONS["Mission Console :8095 (静态前端 + 同源代理)"]
     OP["外部 Operator / Mobile 客户端"]
   end
 
@@ -64,13 +64,13 @@ flowchart TB
 
   CHAT -->|"POST /v1/mission-requests"| MS
   CHAT -.->|"GET /v1/state/records, /safety-stop"| CHTTP
-  CONS -.->|"GET /v1/events, /inventory, /missions"| CHTTP
-  CONS -.->|"只读代理转发"| MS
+  CONS -->|"GET 状态与事件 / POST 提交或取消 Mission"| CHTTP
+  CONS -.->|"可转发 GET / POST 到配置的 Mission 上游"| MS
   OP -->|"mTLS Operator / Verifier API"| CHTTP
   MS -->|"POST /v1/missions/validate-plan, /v1/missions"| CHTTP
   MS -.->|"GET /v1/state/records (Grounding State 只读)"| CHTTP
   MS -.->|"GET /v1/maps, /v1/memories (Grounding Memory 元数据)"| AHTTP
-  MW <-->|"GET /v1/runtime-plan-work, POST /plan-revisions"| CHTTP
+  MW <-->|"GET /v1/runtime-plan-work, POST /v1/missions/{id}/plan-revisions"| CHTTP
 
   NA <-->|"gRPC :50051 双向流 (mTLS 可选)"| GRPC
   NB <-->|"gRPC :50051 双向流 (mTLS 可选)"| GRPC
@@ -135,7 +135,7 @@ flowchart TB
     MAP_CAT --> FUSE["Spatial Provider 多机占用栅格融合 (PR #25: CORRELATIVE_ICP / opencv-akaze)"]
     FUSE -->|"上传融合后新图包并发布新 Revision"| CAS_OUT["Artifact CAS :8090 融合地图不可变字节"]
     CAS_OUT -->|"目标节点拉取 GET /v1/artifacts/{sha256} + 本地 SHA-256 校验"| NODE_IMP["目标 roboguide-node 校验并导入 Local EAIOS"]
-    NODE_IMP -->|"POST /v1/maps/{id}/replicas (PR #18) & /localization-evidence"| REPLICA["记录受信 (MapSelector, NodeId, Session) 副本与重定位强证据"]
+    NODE_IMP -->|"POST /v1/maps/{id}/replicas 与 /v1/maps/{id}/revisions/{rev}/localization-evidence"| REPLICA["记录受信 (MapSelector, NodeId, Session) 副本与重定位强证据"]
   end
 ```
 
@@ -143,7 +143,7 @@ flowchart TB
 
 ## 图 4：四种协作耦合模式的控制面 / 数据面分流图（ADR-0026 / ADR-0027 / PR #40）
 
-清晰区分 `MissionPlan` 中四种 `ExecutionCouplingMode` 的协调路径。**核心边界**：Control/Runtime 仅处理状态投影、关系围栏（`relation_fences`）与双端通道就绪度确认；**Mode 4 的高频相对控制与硬件互锁完全在边缘 Local EAIOS 之间直连，Controller 侧数据面零经过**。
+清晰区分 `MissionPlan` 中四种 `ExecutionCouplingMode` 的协调路径。**核心边界**：Control/Runtime 仅处理状态投影、关系围栏（`relation_fences`）与双端通道就绪度确认；**Mode 4 的相对控制和本地安全由部署侧 Local EAIOS 负责**。对等数据面绕过 Controller，实机控制及断链表现需要部署验收。
 
 ```mermaid
 flowchart TB
@@ -165,7 +165,7 @@ flowchart TB
   subgraph MODE4["Mode 4 紧耦合协同: 控制面通道就绪与边缘直连数据面"]
     M4 --> OBS["Node 采样 Local EAIOS PeerChannelReadiness (gRPC :50051)"]
     OBS --> PC["Runtime 管理 PeerChannel 生命周期: Planned -> Ready -> Fenced -> Closed"]
-    PC -->|"双端确认且未过期才下发 Execute"| P2P["Local EAIOS A ↔ Local EAIOS B: 端到端高频控制与断链齐刹"]
+    PC -->|"双端确认且未过期才下发 Execute"| P2P["Local EAIOS A ↔ Local EAIOS B: 部署侧对等数据与本地安全"]
     PC -.->|"Controller 数据面流量 = 0 B (超时/断链即 Fence)"| P2P
   end
 ```
@@ -193,8 +193,8 @@ flowchart TB
   SAFE_OBS -.->|"缺安全证明或超时"| HOLD["保持 ManualEscalation / Mission Hold (拒绝重派与自动续跑)"]
 
   BRANCH -->|"L2/L3 同计划角色替换"| RECOVER["POST /v1/executions/{id}/recover -> Control Match / Commit / Rebind 新 Attempt"]
-  BRANCH -->|"L4 运行期动态重规划接管 (PR #33)"| REV["GET /v1/runtime-plan-work -> MI Worker Claim + Review -> POST /plan-revisions -> 新 Group 接管"]
-  BRANCH -->|"人工取消对账结案 (ADR-0232 / PR #17/#40)"| SETTLE["POST /v1/executions/{id}/safety-stop/reconcile (reconcile_manual 支持 Cancelled / Failed / Completed)"]
+  BRANCH -->|"L4 运行期动态重规划接管 (PR #33)"| REV["GET /v1/runtime-plan-work -> MI Worker Claim + Review -> POST /v1/missions/{id}/plan-revisions -> 新 Group 接管"]
+  HOLD -->|"取消中 + 当前同代终态 + 管理员核验"| SETTLE["POST /v1/executions/{id}/safety-stop/reconcile (仅取消结案，保留原停止记录)"]
 ```
 
 ---

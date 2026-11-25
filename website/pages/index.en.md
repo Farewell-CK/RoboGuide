@@ -40,6 +40,6 @@ flowchart LR
 
 ## What exists today
 
-Software paths include complete-plan admission, DAG scheduling, four execution coupling modes (ADR-0026/0027), execution attempts, source-aware State, telemetry slimming with Storage v3, multi-robot spatial occupancy fusion, runtime revision, logical quota, recovery tools, the `roboguide chat` workbench, and the read-only `console/` UI. [Implementation status](status.md) separates validation coverage from remaining work. Process/file checks do not establish device safety or overall completion.
+Software paths include complete-plan admission, DAG scheduling, four execution coupling modes (ADR-0026/0027), execution attempts, source-aware State, telemetry slimming with Storage v3, multi-robot spatial occupancy fusion, runtime revision, logical quota, recovery tools, the `roboguide chat` workbench, and the `console/` mission UI. [Implementation status](status.md) separates validation coverage from remaining work. Process/file checks do not establish device safety or overall completion.
 
 [Reference](reference.md) contains contract versions and build provenance so historical snapshots remain identifiable.

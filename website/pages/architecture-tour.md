@@ -77,8 +77,9 @@ Replica 元数据共识、内容恢复和物理连续性分别有自己的合同
 
 ```mermaid
 flowchart TB
-  CHAT["roboguide chat / Mission Console :8095"] -->|"HTTP"| MS["Mission Service :8070"]
-  MS -->|"POST /validate-plan, /v1/missions"| CTRL["Controller (:8080 HTTP / :50051 gRPC)"]
+  CHAT["roboguide chat"] -->|"HTTP"| MS["Mission Service :8070"]
+  CON["Mission Console :8095"] -->|"GET 状态 / POST 提交或取消 Mission"| CTRL
+  MS -->|"POST /v1/missions/validate-plan, /v1/missions"| CTRL["Controller (:8080 HTTP / :50051 gRPC)"]
   CTRL ---|"SQLite Storage v3 + ADR-0257/0258 瘦身"| CAS["Artifact HTTP & CAS :8090"]
   SP["Spatial Provider (多机地图融合)"] -->|"SHA-256 不可变包"| CAS
   CTRL <-->|"gRPC :50051 Execute / Snapshot / PeerReadiness"| NODE["roboguide-node + Local EAIOS"]
@@ -91,7 +92,7 @@ flowchart TB
 | `Independent` | 标准 Task DAG、`Match -> Commit -> Bind` | 各节点独立执行 |
 | `SequentialHandoff` | 前序 `TaskSatisfied` + Memory/Artifact 释放门禁 | 经 `:8090` CAS 与显式 `import / use` 交接 |
 | `ConcurrentCooperation` | `RequiresActive` / `SharedSpatialReference`、`GET /v1/missions/{id}/shared-view`、`relation_fences` 与 `/reconcile` | 共享状态按 receive-time TTL 分类；本地避障由 Local EAIOS 自持 |
-| `TightlyCoupledCooperation` | Runtime 仅管理双端 `PeerChannel`（`Planned -> Ready -> Fenced -> Closed`） | 高频相对控制与断链齐刹直连边缘节点，Controller 零经过数据面流量 |
+| `TightlyCoupledCooperation` | Runtime 仅管理双端 `PeerChannel`（`Planned -> Ready -> Fenced -> Closed`） | 高频相对控制和本地安全由 Local EAIOS 实现，点对点数据面绕过 Controller。实机效果需要部署验收 |
 
 ## 下一步
 
