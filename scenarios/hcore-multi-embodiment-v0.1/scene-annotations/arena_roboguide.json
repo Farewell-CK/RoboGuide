@@ -168,6 +168,18 @@
         ]
       ],
       "theta": null
+    },
+    {
+      "annotation_id": "goal_c2",
+      "kind": "poi",
+      "name": "目标点 C",
+      "points": [
+        [
+          -1.2,
+          0.5
+        ]
+      ],
+      "theta": null
     }
   ]
 }
