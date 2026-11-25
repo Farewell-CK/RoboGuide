@@ -627,6 +627,89 @@ class Acceptance(unittest.TestCase):
                     child.kill()
                 child.communicate(timeout=5)
 
+    def test_task_context_carries_structured_rg_dispatch_authority(self):
+        """Normal delegated tasks carry structured dispatch authority; aborts omit it."""
+        from robonix_task.protocol import task as build_task
+
+        record = {
+            "request": {
+                "attempt_id": "attempt-auth-1",
+                "budget_ms": 3000,
+                "invocation": {
+                    "execution_id": "rg-attempt-auth-1",
+                    "intent": {
+                        "mission_id": "mission-auth-1",
+                        "operation": {"namespace": "task", "name": "delegate", "version": "v1"},
+                        "objective": "navigate to office doorway",
+                        "parameters": {"profile": "local-task-v1"},
+                    },
+                },
+            },
+            "task_id": "task-uuid-1",
+            "abort_id": "abort-uuid-1",
+            "session_id": "session-uuid-1",
+            "created_ns": 1_795_570_488_000_000_000,
+        }
+        normal = build_task(record, "local:rg")
+        normal_ctx = json.loads(normal.context_json)
+        self.assertEqual(
+            normal_ctx["rg_dispatch"],
+            {
+                "operation": "task.delegate@v1",
+                "mission_id": "mission-auth-1",
+                "authority": "controller-admitted-delegate",
+                "local_motion_permit_required": False,
+            },
+        )
+        abort_msg = build_task(record, "local:rg", abort=True)
+        abort_ctx = json.loads(abort_msg.context_json)
+        self.assertTrue(abort_ctx["abort_turn"])
+        self.assertNotIn("rg_dispatch", abort_ctx)
+
+    def test_pilot_soul_template_and_delegate_catalogs_stay_clean(self):
+        """RG Pilot SOUL template and canonical catalogs keep delegation boundary robot-agnostic."""
+        repo_root = Path(__file__).resolve().parents[3]
+        soul_path = (
+            repo_root
+            / "integrations"
+            / "robonix-task"
+            / "deploy"
+            / "pilot-soul.rg-delegate.template.md"
+        )
+        soul_text = soul_path.read_text(encoding="utf-8")
+        self.assertIn("RG intent", soul_text)
+        self.assertIn("task.delegate@v1", soul_text)
+        self.assertIn("local physical safety or readiness checks", soul_text)
+        for forbidden in ("context_json", "ROS2 /info", "lite3_chassis", "unlock_auto.py"):
+            self.assertNotIn(forbidden, soul_text)
+
+        catalog_paths = (
+            repo_root / "scenarios" / "local-task-delegation" / "capability-catalog.json",
+            repo_root
+            / "integrations"
+            / "robonix-task"
+            / "deploy"
+            / "origin-capability-catalog.json",
+            repo_root
+            / "integrations"
+            / "robonix-task"
+            / "deploy"
+            / "posture-capability-catalog.json",
+        )
+        for path in catalog_paths:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            delegate_ops = [
+                op
+                for op in doc["operations"]
+                if op["operation"] == {"namespace": "task", "name": "delegate", "version": "v1"}
+            ]
+            self.assertEqual(len(delegate_ops), 1, str(path))
+            desc = delegate_ops[0]["description"]
+            self.assertIn("motion dispatch authorization", desc)
+            self.assertIn("verify a separate pre-existing local motion permit", desc)
+            for robot_quirk in ("ROS2 /info", "lite3_chassis", "explore", "INACTIVE"):
+                self.assertNotIn(robot_quirk, desc)
+
 
 def fixture_worker(directory, endpoint, marker):
     """Run only a fake loopback peer, allowing parent tests to kill the actual HTTP process."""

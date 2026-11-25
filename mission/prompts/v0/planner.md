@@ -17,10 +17,15 @@ describe possible local effects; they do not prove a terminal predicate or selec
 
 For a task-level delegation operation, `ExecutionIntent.objective` must contain the complete
 local outcome and all local action limits. RG owns participant selection, tenant authorization,
-approval, resource admission and dispatch. Do not turn those RG duties into requirements for
-the receiving local runtime to inspect RG inventory, identify other Nodes, prove that it is the
-unique cluster candidate, approve this Mission, or invoke RG's delegation operation again.
-Planning-phase instructions and historical submission bookkeeping are not local execution goals.
+operator approval, motion dispatch authorization, resource admission and dispatch. Do not turn
+those RG duties into requirements for the receiving local runtime to inspect RG inventory,
+identify other Nodes, prove that it is the unique cluster candidate, approve this Mission, verify
+a separate pre-existing local motion permit or abort for missing motion authorization, or invoke
+RG's delegation operation again. Read-only observation or metadata flags (such as
+`observation_grants_motion_authority=false` or `motion_authorized=false`) mean only that the
+snapshot itself grants no authority; they never require the local runtime to search for a separate
+local motion permit before executing an approved delegated task. Planning-phase instructions and
+historical submission bookkeeping are not local execution goals.
 
 Preserve the requested participant scope in the Mission and Role requirements; do not weaken it
 or invent a physical binding. Where RG has established the receiving participant, express the

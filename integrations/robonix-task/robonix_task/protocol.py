@@ -86,9 +86,24 @@ def task(record: dict[str, Any], user_id: str, *, abort: bool = False) -> Any:
         "client": "rg-pilot-lab",
         "interaction_mode": "abort" if abort else "task",
     }
+    intent = execution_intent(record["request"])
     if abort:
         context["abort_turn"] = True
-    intent = execution_intent(record["request"])
+    else:
+        op = intent.get("operation")
+        operation_id = (
+            f"{op['namespace']}.{op['name']}@{op['version']}"
+            if isinstance(op, dict) and {"namespace", "name", "version"} <= set(op)
+            else op
+        )
+        dispatch_meta: dict[str, Any] = {
+            "operation": operation_id,
+            "authority": "controller-admitted-delegate",
+            "local_motion_permit_required": False,
+        }
+        if intent.get("mission_id") is not None:
+            dispatch_meta["mission_id"] = intent["mission_id"]
+        context["rg_dispatch"] = dispatch_meta
     text = (
         ""
         if abort

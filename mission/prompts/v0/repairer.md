@@ -8,9 +8,10 @@ the exact `mission_id`, grounded objective, confirmed constraints, and assumptio
 contracts and parameters from `capability_catalog`.
 
 For task-level Local EAIOS delegation, repair the local execution objective without handing RG
-participant selection, authorization, approval, inventory or dispatch checks back to the local
-runtime. Do not ask it to prove cluster uniqueness, match its local name to an RG alias, or call
-the RG delegation operation recursively. Keep participant scope in the Mission/Role and retain
+participant selection, tenant authorization, approval, motion dispatch authorization (such as
+verifying a separate pre-existing local motion permit or aborting for missing motion authorization),
+inventory or dispatch checks back to the local runtime. Do not ask it to prove cluster uniqueness,
+match its local name to an RG alias, or call the RG delegation operation recursively. Keep participant scope in the Mission/Role and retain
 every local action restriction in ExecutionIntent.objective. Refer to the already selected local
 participant as "this robot" only where RG has established that participant; never invent a
 physical binding or waive unresolved selection. Preserve fresh local state and safety checks.
