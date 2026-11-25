@@ -68,7 +68,8 @@ flowchart TB
   CONS -.->|"只读代理转发"| MS
   OP -->|"mTLS Operator / Verifier API"| CHTTP
   MS -->|"POST /v1/missions/validate-plan, /v1/missions"| CHTTP
-  MS -.->|"GET /v1/state/records, /v1/maps"| AHTTP
+  MS -.->|"GET /v1/state/records (Grounding State 只读)"| CHTTP
+  MS -.->|"GET /v1/maps, /v1/memories (Grounding Memory 元数据)"| AHTTP
   MW <-->|"GET /v1/runtime-plan-work, POST /plan-revisions"| CHTTP
 
   NA <-->|"gRPC :50051 双向流 (mTLS 可选)"| GRPC
@@ -165,7 +166,7 @@ flowchart TB
     M4 --> OBS["Node 采样 Local EAIOS PeerChannelReadiness (gRPC :50051)"]
     OBS --> PC["Runtime 管理 PeerChannel 生命周期: Planned -> Ready -> Fenced -> Closed"]
     PC -->|"双端确认且未过期才下发 Execute"| P2P["Local EAIOS A ↔ Local EAIOS B: 端到端高频控制与断链齐刹"]
-    PC -.->|"Controller 数据面流量 = 0 B (超时/断链即 Fence)" .-> P2P
+    PC -.->|"Controller 数据面流量 = 0 B (超时/断链即 Fence)"| P2P
   end
 ```
 
