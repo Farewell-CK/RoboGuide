@@ -1,0 +1,24 @@
+{
+  "schema": "roboguide.physical-entity-registry/v0.1",
+  "registry_id": "hcore-multi-embodiment-v0.1-arena",
+  "revision": 1,
+  "routing_profile": "one-routable-entity-per-node",
+  "entities": [
+    {
+      "entity_id": "dog",
+      "node_id": "hcore-quadruped"
+    },
+    {
+      "entity_id": "rover",
+      "node_id": "hcore-rover"
+    },
+    {
+      "entity_id": "ptz",
+      "node_id": "hcore-ptz"
+    },
+    {
+      "entity_id": "arm",
+      "node_id": "hcore-arm"
+    }
+  ]
+}

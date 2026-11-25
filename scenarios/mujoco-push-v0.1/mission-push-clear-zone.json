@@ -1,0 +1,42 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.3",
+  "mission": {
+    "id": "mission-mujoco-push",
+    "objective": "把 obs2 从 (0.60,1.40) 的目标点之外推入目标点，验证抓箱推挤全链路"
+  },
+  "contexts": [
+    {
+      "id": "context-mujoco-push",
+      "roles": [{ "id": "rover", "actor": "mujoco-rover" }],
+      "relations": []
+    }
+  ],
+  "tasks": [
+    {
+      "id": "push-obs2-to-goal",
+      "description": "rover 把 obs2 推进目标点 (0.60,1.40)，允许越过 keep-out zone 边缘",
+      "context_id": "context-mujoco-push",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "push-role",
+          "actor": "mujoco-rover",
+          "capability": "transport",
+          "contract": { "namespace": "object", "name": "relocate", "version": "v1" },
+          "resource_kind": "compute",
+          "context_role": "rover",
+          "resource_scope": "task",
+          "execution": {
+            "capability_contract": { "namespace": "object", "name": "relocate", "version": "v1" },
+            "parameters": {
+              "clear_keep_out_zone": true,
+              "keep_out_zone_entity": "obs2",
+              "destination": "goal_region",
+              "max_distance": 1.2
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,185 @@
+{
+  "map_id": "arena_roboguide",
+  "annotations": [
+    {
+      "annotation_id": "goal_a",
+      "kind": "poi",
+      "name": "目标点A",
+      "points": [
+        [
+          0.6,
+          1.4
+        ]
+      ],
+      "theta": null
+    },
+    {
+      "annotation_id": "goal_b",
+      "kind": "poi",
+      "name": "目标点B",
+      "points": [
+        [
+          0.9,
+          -0.7
+        ]
+      ],
+      "theta": null
+    },
+    {
+      "annotation_id": "rover_start",
+      "kind": "poi",
+      "name": "小车起点",
+      "points": [
+        [
+          -0.9,
+          1.3
+        ]
+      ],
+      "theta": null
+    },
+    {
+      "annotation_id": "east_corridor",
+      "kind": "region",
+      "name": "东侧走廊",
+      "points": [
+        [
+          0.3,
+          0.8
+        ],
+        [
+          1.4,
+          0.8
+        ],
+        [
+          1.4,
+          1.9
+        ],
+        [
+          0.3,
+          1.9
+        ]
+      ],
+      "theta": null
+    },
+    {
+      "annotation_id": "goal_a2",
+      "kind": "poi",
+      "name": "目标点 A",
+      "points": [
+        [
+          0.6,
+          1.4
+        ]
+      ],
+      "theta": null
+    },
+    {
+      "annotation_id": "goal_a3",
+      "kind": "poi",
+      "name": "goal_a",
+      "points": [
+        [
+          0.6,
+          1.4
+        ]
+      ],
+      "theta": null
+    },
+    {
+      "annotation_id": "goal_a4",
+      "kind": "poi",
+      "name": "goal a",
+      "points": [
+        [
+          0.6,
+          1.4
+        ]
+      ],
+      "theta": null
+    },
+    {
+      "annotation_id": "goal_a5",
+      "kind": "poi",
+      "name": "Goal A",
+      "points": [
+        [
+          0.6,
+          1.4
+        ]
+      ],
+      "theta": null
+    },
+    {
+      "annotation_id": "goal_b2",
+      "kind": "poi",
+      "name": "目标点 B",
+      "points": [
+        [
+          0.9,
+          -0.7
+        ]
+      ],
+      "theta": null
+    },
+    {
+      "annotation_id": "goal_b3",
+      "kind": "poi",
+      "name": "goal_b",
+      "points": [
+        [
+          0.9,
+          -0.7
+        ]
+      ],
+      "theta": null
+    },
+    {
+      "annotation_id": "goal_c",
+      "kind": "poi",
+      "name": "目标点C",
+      "points": [
+        [
+          -1.2,
+          0.5
+        ]
+      ],
+      "theta": null
+    },
+    {
+      "annotation_id": "goal_d",
+      "kind": "poi",
+      "name": "目标点D",
+      "points": [
+        [
+          -0.97,
+          0.47
+        ]
+      ],
+      "theta": null
+    },
+    {
+      "annotation_id": "goal_e",
+      "kind": "poi",
+      "name": "目标点E",
+      "points": [
+        [
+          -0.8,
+          0.16
+        ]
+      ],
+      "theta": null
+    },
+    {
+      "annotation_id": "goal_c2",
+      "kind": "poi",
+      "name": "目标点 C",
+      "points": [
+        [
+          -1.2,
+          0.5
+        ]
+      ],
+      "theta": null
+    }
+  ]
+}

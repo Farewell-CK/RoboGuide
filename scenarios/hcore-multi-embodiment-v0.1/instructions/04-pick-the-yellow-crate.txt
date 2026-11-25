@@ -1,0 +1,1 @@
+Get the yellow crate that is standing on the arena floor onto the manipulator's drop point.

@@ -1,0 +1,299 @@
+--- /tmp/base.txt	2026-11-24 14:52:54.780111415 +0800
++++ robonix-src/examples/mujoco/facade/robonix_facade.py	2026-11-24 13:17:12.291639619 +0800
+@@ -282,6 +282,166 @@
+     return None
+ 
+ 
++# 物体口语名 -> 共享世界 body 名。**规划侧必须原样保留用户说法**
++# (interpreter 的硬约束: 不得自行发明物理身份), 所以"箱子 -> obs2"这层映射
++# 只能落在执行侧 —— 这一层恰好是唯一知道世界里有哪几个 body 的地方。
++OBJECT_ALIASES: dict[str, str] = {
++    "箱子": "obs2", "纸箱": "obs2", "纸箱子": "obs2", "目标箱": "obs2",
++    "目标箱子": "obs2", "那个箱子": "obs2", "box": "obs2",
++    "木箱": "crate1", "木箱子": "crate1", "crate": "crate1",
++    "小车": "rover", "底盘": "rover", "车": "rover",
++    "机器狗": "dog", "狗": "dog",
++}
++
++
++_OBJECT_ALIAS_CACHE: dict[str, Any] = {"stamp": None, "table": None, "bodies": None}
++
++
++def _object_alias_table() -> tuple[dict[str, str], dict[str, str]]:
++    """读**场景资产**里的别名表 (``object-aliases.json``), 缺文件时退回内置表。
++
++    为什么放资产里: 别名与场景同代(换场地只换文件, 不改代码), 也让"这张表
++    有多长"变成部署问题而不是代码问题。路径: ``RBNX_OBJECT_ALIASES``,
++    或 ``RBNX_ARENA_MAP`` 同目录下的 ``object-aliases.json``。
++    """
++    arena = os.environ.get("RBNX_ARENA_MAP", "")
++    path = os.environ.get("RBNX_OBJECT_ALIASES") or (
++        os.path.join(os.path.dirname(arena), "object-aliases.json") if arena else "")
++    stamp = None
++    if path:
++        try:
++            stamp = (path, os.path.getmtime(path))
++        except OSError:
++            stamp = (path, None)
++    if _OBJECT_ALIAS_CACHE["stamp"] == stamp and _OBJECT_ALIAS_CACHE["table"] is not None:
++        return _OBJECT_ALIAS_CACHE["table"], _OBJECT_ALIAS_CACHE["bodies"]
++    aliases = {k.replace(" ", "").lower(): v for k, v in OBJECT_ALIASES.items()}
++    bodies: dict[str, str] = {}
++    if path and stamp and stamp[1] is not None:
++        try:
++            with open(path, encoding="utf-8") as _fh:
++                doc = json.load(_fh)
++            for body, meta in (doc.get("bodies") or {}).items():
++                bodies[str(body)] = str(meta.get("label") or body)
++                aliases[str(body).replace(" ", "").lower()] = str(body)
++                for alias in (meta.get("aliases") or []):
++                    aliases[str(alias).replace(" ", "").lower()] = str(body)
++        except (OSError, ValueError, KeyError, AttributeError, TypeError):
++            bodies = {}
++    _OBJECT_ALIAS_CACHE.update({"stamp": stamp, "table": aliases, "bodies": bodies})
++    return aliases, bodies
++
++
++# 描述词 -> 形状。用于"不靠别名表"的匹配: 用户说"那个方块/圆柱"也能筛。
++_SHAPE_WORDS: dict[str, str] = {
++    "方块": "box", "方形": "box", "方盒": "box", "盒子": "box", "箱": "box",
++    "cube": "box", "block": "box",
++    "圆柱": "cylinder", "柱子": "cylinder", "圆筒": "cylinder", "cylinder": "cylinder",
++    "球": "sphere", "圆球": "sphere", "球形": "sphere", "sphere": "sphere",
++}
++# colour_hist 的 12 个色相桶 -> 中文色名(粗粒度, 只用于筛"那个绿色的东西")
++_HUE_NAMES = ("红", "橙", "黄", "黄绿", "绿", "青绿",
++              "青", "天蓝", "蓝", "紫", "洋红", "玫红")
++_COLOUR_WORDS = {name: idx for idx, name in enumerate(_HUE_NAMES)}
++
++
++def _object_descriptors(body: str, meta: dict) -> dict[str, Any]:
++    """一个物体的"可描述特征": 形状 / 颜色 / 是否可搬 / 说明文字。"""
++    hist = meta.get("colour_hist") or []
++    colour = ""
++    if isinstance(hist, list) and hist:
++        try:
++            idx = max(range(len(hist)), key=lambda i: float(hist[i]))
++            if float(hist[idx]) >= 0.25 and idx < len(_HUE_NAMES):
++                colour = _HUE_NAMES[idx]
++        except (TypeError, ValueError):
++            colour = ""
++    return {
++        "shape": str(meta.get("geom") or ""),
++        "colour": colour,
++        "movable": bool(meta.get("movable")),
++        "note": str(meta.get("note") or ""),
++    }
++
++
++def _match_objects_by_description(text: str) -> list[tuple[str, str]]:
++    """按"描述"筛可搬物体, **不依赖别名表**。
++
++    规则刻意保守: 只对 ``movable=True`` 的实体做筛选; 用户提到的每个特征
++    (形状词/颜色词)都必须与候选一致, 否则该候选被排除。
++    返回 ``[(body, label), ...]``; 长度为 1 才算"确定", 否则调用方应当反问。
++    """
++    raw = (text or "").strip().lower()
++    if not raw:
++        return []
++    wanted_shape = next((v for k, v in _SHAPE_WORDS.items() if k in raw), "")
++    wanted_colour = next((k for k in _COLOUR_WORDS if k in raw), "")
++    if not wanted_shape and not wanted_colour:
++        return []
++    scene = _scene() or {}
++    _aliases, labels = _object_alias_table()
++    out: list[tuple[str, str]] = []
++    for name, meta in scene.items():
++        if not isinstance(meta, dict):
++            continue
++        desc = _object_descriptors(str(name), meta)
++        if not desc["movable"]:
++            continue
++        if wanted_shape and desc["shape"] != wanted_shape:
++            continue
++        if wanted_colour and desc["colour"] != wanted_colour:
++            continue
++        out.append((str(name), labels.get(str(name), str(name))))
++    return out
++
++
++def _object_choices() -> str:
++    """可搬物体的"选择题"文本, 用于认不出时回给上游。"""
++    _aliases, bodies = _object_alias_table()
++    if not bodies:
++        return "、".join(sorted(set(OBJECT_ALIASES.values())))
++    return "、".join(f"{body}({label})" for body, label in bodies.items())
++
++
++def _resolve_object_name(obj: str, world: Any = None) -> tuple[str, str, bool]:
++    """把用户口语化的物体名归一成共享世界 body 名。
++
++    返回 ``(body_name, note, known)``:
++      · ``note`` 非空表示发生过归一(会打日志);
++      · ``known=False`` 表示既不是别名、也不是场景里的实体 —— 调用方应当
++        **带着候选列表拒绝**, 而不是把口语原样丢给 provider。
++    """
++    raw = (obj or "").strip()
++    if not raw:
++        return raw, "", False
++    key = raw.replace(" ", "").lower()
++    aliases, _bodies = _object_alias_table()
++    hit = aliases.get(key)
++    if hit is not None:
++        return hit, ("" if hit == raw else f"{raw}→{hit}"), True
++    if raw in _bodies:
++        return raw, "", True
++    try:
++        # `_scene_entity` 对未知名字返回 **空 dict**（不是 None），
++        # 之前用 `is not None` 判断 → 永远 True → "认不出"分支永远走不到（实测）。
++        _entry = _scene_entity(raw) or {}
++        if _entry and ("pos" in _entry or "kind" in _entry):
++            return raw, "", True
++    except Exception:  # noqa: BLE001
++        pass
++    # **描述式匹配**(不靠别名表): 用户说"那个方块/绿色的东西"时,
++    # 用场景里已有的 geom / colour / movable 特征筛; **只有唯一命中才敢用**,
++    # 多个或零个都交给调用方反问候选。
++    try:
++        matched = _match_objects_by_description(raw)
++    except Exception:  # noqa: BLE001
++        matched = []
++    if len(matched) == 1:
++        body, label = matched[0]
++        return body, f"{raw}≈>{body}(按描述匹配: {label})", True
++    return raw, "", False
++
++
+ def _axis_targets(p: dict[str, Any]) -> dict[str, float] | None:
+     """把参数读成"轴名 -> 数值"; 只要有一个值不是数就返回 None。
+ 
+@@ -302,6 +462,9 @@
+     固定计划的 MissionPlan 自带专家点 (destination 写 "x,y"), 这类请求不该再去问
+     scene —— 场景注解里已经没有那个名字了, 问也问不到。
+     """
++    # **先剥掉括号与多余空格**: 规划侧实测会写 "(0.60, 1.40)" / "（0.60，1.40）",
++    # 不剥的话会被当成地名去问 scene, 于是报"没有这个注解"。
++    text = str(text).strip().strip("()[]{}（）【】").replace(" ", "")
+     parts = [q for q in text.replace("，", ",").split(",") if q.strip()]
+     if len(parts) not in (2, 3):
+         return None
+@@ -436,6 +599,61 @@
+             float(out.get("y", 0.0)), str(out.get("reason", "")))
+ 
+ 
++def _destination_candidates(dest: str) -> list[str]:
++    """把模型可能写出的各种写法列成候选名, 逐个去问 scene。
++
++    实测规划侧写过: "目标点 A"(插空格) / "target point E"(翻译成英文) /
++    "goal_a" / "Goal A"。名字是自由文本, 但**注解是一份固定词表** ——
++    与其在提示词里赌模型一字不差, 不如在边界处把这几种写法都试一遍。
++    """
++    base = " ".join(str(dest).split())
++    out: list[str] = []
++
++    def _add(value: str) -> None:
++        value = value.strip()
++        if value and value not in out:
++            out.append(value)
++
++    _add(base)
++    _add(base.replace(" ", ""))
++    _add(base.replace(" ", "_").lower())
++
++    m = re.fullmatch(r"(?:target[\s_\-]*point|goal)[\s_\-]*([A-Za-z0-9]+)", base, re.I)
++    if m:
++        tag = m.group(1)
++        _add(f"goal_{tag.lower()}")
++        _add(f"目标点{tag.upper()}")
++        _add(f"目标点 {tag.upper()}")
++    m2 = re.fullmatch(r"目标点[\s_\-]*([A-Za-z0-9]+)", base)
++    if m2:
++        tag = m2.group(1)
++        _add(f"goal_{tag.lower()}")
++        _add(f"target point {tag.upper()}")
++        _add(f"Goal {tag.upper()}")
++    return out
++
++
++def _resolve_scene_destination(endpoint: str, dest: str) -> tuple[bool, float, float, str, str]:
++    """把地名解析成坐标: 先按原样问 scene, 不吃再按候选写法逐个试。
++
++    返回 ``(reachable, x, y, reason, used_name)``; ``used_name`` 便于日志说明
++    "最后是按哪个写法认出来的"。
++    """
++    last_reason = ""
++    tried: list[str] = []
++    for cand in _destination_candidates(dest):
++        tried.append(cand)
++        try:
++            reachable, x, y, reason = _scene_goal_region(endpoint, cand)
++        except Exception as exc:  # noqa: BLE001
++            last_reason = f"{type(exc).__name__}: {exc}"
++            continue
++        if reachable:
++            return True, x, y, "", cand
++        last_reason = reason or last_reason
++    return False, 0.0, 0.0, (last_reason or f"试过 {tried} 都不在注解里"), dest
++
++
+ def _segment_point_distance(a: tuple[float, float], b: tuple[float, float],
+                             p: tuple[float, float]) -> float:
+     """点 p 到线段 ab 的最短距离(用来判断"开过去会不会蹭到目标物")。"""
+@@ -10710,12 +10928,12 @@
+             if not scene_url:
+                 return False, (f"没有 {SCENE_GOAL_CONTRACT} 的 provider —— "
+                                "没人知道这个地名对应哪个坐标")
+-            try:
+-                reachable, x, y, reason = _scene_goal_region(scene_url, dest)
+-            except Exception as e:  # noqa: BLE001
+-                return False, f"问 scene 解析 {dest!r} 失败: {e}"
++            reachable, x, y, reason, used = _resolve_scene_destination(scene_url, dest)
+             if not reachable:
+-                return False, f"地名 {dest!r} 解析不出来: {reason or '未说明原因'}"
++                return False, f"地名 {dest!r} 解析不出来: {reason}"
++            if used != dest:
++                print(f"[facade/{self.role}] 地名归一: {dest!r} -> {used!r}",
++                      flush=True)
+ 
+         nav_url = _mcp_endpoint(NAV_NAVIGATE_CONTRACT, "RBNX_NAV_MCP_URL",
+                                 provider_id=nav_provider, role=self.role)
+@@ -10765,6 +10983,21 @@
+         传下去的是坐标而不是地名: provider 不接 Atlas, 也不该为了一个地名去接。
+         """
+         obj = _relocate_object(p)
++        if obj is not None:
++            _body, _note, _known = _resolve_object_name(obj)
++            if _note:
++                print(f"[facade/{self.role}] 物体名归一: {_note}", flush=True)
++                obj = _body
++                p = dict(p)
++                for _key in RELOCATE_OBJECT_KEYS:
++                    if isinstance(p.get(_key), str) and p[_key].strip():
++                        p[_key] = _body
++            if not _known:
++                # **认不出就别猜**: 把"选择题"回给上游, 而不是让 provider 报一句
++                # "不在部署地图里"(那句话既不告诉你是谁, 也没法自纠)。
++                return False, (f"无法把物体 {obj!r} 对应到场景里的可搬物体; "
++                               f"可搬的只有: {_object_choices()}. "
++                               "请用其中一个名字, 或说明更明确的特征")
+         if obj is None:
+             axes = _axis_targets(p)
+             if axes is None:
+@@ -10794,12 +11027,12 @@
+                                      role=self.role)
+             if endpoint is None:
+                 return False, f"接不到 scene 服务, 地名 {dest!r} 解析不了"
+-            try:
+-                reachable, x, y, reason = _scene_goal_region(endpoint, dest)
+-            except RuntimeError as exc:
+-                return False, f"scene 解析 {dest!r} 失败: {exc}"
++            reachable, x, y, reason, used = _resolve_scene_destination(endpoint, dest)
+             if not reachable:
+-                return False, f"地名 {dest!r} 不可达: {reason or 'scene 没给理由'}"
++                return False, f"地名 {dest!r} 不可达: {reason}"
++            if used != dest:
++                print(f"[facade/{self.role}] 地名归一: {dest!r} -> {used!r}",
++                      flush=True)
+             dest = f"{x},{y}"
+ 
+         endpoint = _mcp_endpoint(RELOCATE_CONTRACT, "RBNX_RELOCATE_MCP_URL",

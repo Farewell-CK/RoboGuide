@@ -1,0 +1,106 @@
+--- /tmp/base.txt	2026-11-24 14:52:54.816111879 +0800
++++ robonix-src/examples/mujoco/primitives/mujoco_arm/arm_driver/driver.py	2026-11-24 12:32:21.937378548 +0800
+@@ -417,13 +417,17 @@
+         shapes = {item["entity_id"]: item["half_extents_m"]
+                   for item in geometry["platforms"]}
+         for entity in arena["entities"]:
+-            half = shapes.get(entity["entity_id"], [0.22, 0.22])
++            # **兜底必须是三维**: 默认写成 [0.22, 0.22] 时, 任何"没有机器人几何"的
++            # 实体(标志桩/墙面)会让下面的 half[2] 抛 IndexError —— 而 except 只捕
++            # (OSError, ValueError, KeyError), 异常直接冒到 MCP 层, 表现为
++            # "Error executing tool relocate: list index out of range"(实测)。
++            half = shapes.get(entity["entity_id"], [0.22, 0.22, 0.22])
+             entities[str(entity["entity_id"])] = {
+                 "xy": (float(entity["reset_xy"][0]), float(entity["reset_xy"][1])),
+                 "half": (float(half[0]), float(half[1]), float(half[2])),
+                 "yaw": float(entity.get("reset_yaw", 0.0)),
+             }
+-    except (OSError, ValueError, KeyError) as exc:
++    except (OSError, ValueError, KeyError, IndexError) as exc:
+         print(f"[arm] 地图先验读不出来 ({exc}); 遮挡只能报 unidentified",
+               file=sys.stderr, flush=True)
+         entities = {}
+@@ -512,6 +516,24 @@
+         pass
+ 
+ 
++def _remember_drop(entity_id: str) -> tuple[float, float, float] | None:
++    """松手后记下"物体丢在我夹爪当时的位置"。
++
++    **只读自己臂的末端位姿, 不读物体真值** —— 与 ``_remember`` 的约定一致:
++    记忆里写的是"我把它放在这儿了", 不是从仿真器抄回来的坐标。
++    返回落点 (x, y, z); 读不到末端位姿时返回 None。
++    """
++    world = _state.get("world")
++    if world is None:
++        return None
++    try:
++        tip = world.site_xyz(GRIPPER_SITE)
++    except Exception:  # noqa: BLE001
++        return None
++    _remember(entity_id, float(tip[0]), float(tip[1]), 0.0, "arm-drop")
++    return float(tip[0]), float(tip[1]), float(tip[2])
++
++
+ def _mapped_entity(name: str) -> dict | None:
+     """部署地图里这个实体的条目 (初始位/尺寸/观测高度); 没有就 None。"""
+     arena_path = os.environ.get("RBNX_ARENA_MAP", "")
+@@ -588,6 +610,19 @@
+     return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+ 
+ 
++def _carried_envelope_r() -> float:
++    """持物时"手里那件东西"的包络半径 (末端到基座 + 余量)。"""
++    world = _state.get("world")
++    if world is None:
++        return 0.0
++    try:
++        tip = world.site_xyz(GRIPPER_SITE)
++        bx, by = _base_xy()
++    except Exception:  # noqa: BLE001
++        return 0.0
++    return math.hypot(tip[0] - bx, tip[1] - by) + ARM_CARRY_MARGIN_M + 0.02
++
++
+ def _sector_blocker(now, delta, sweep_r, skip=""):
+     """`now -> now+delta` 扇区内**观测到**的第一个遮挡; 无则返回 None。
+ 
+@@ -615,6 +650,14 @@
+     hits = [(angle, float(distance))
+             for angle, distance in zip(angles, observed.get("ranges") or [])
+             if ARM_INNER_R_M < float(distance) <= sweep_r]
++    if skip and hits:
++        # **持物回转时, 手里那件物体本身就在扇区里**: 它已经离开部署地图的位置,
++        # 按名认身份必然认不出来 → 每一侧都判"被 unidentified 挡住"(实测 θ=0/15/30/60/75°
++        # 全部失败, 阻挡距离恒为 0.25~0.31 m 正好等于夹爪末端半径)。
++        # 因此把"末端包络以内"的命中一律当作自己手里那件, 不参与阻挡判定。
++        _env = _carried_envelope_r()
++        if _env > 0.0:
++            hits = [(angle, distance) for angle, distance in hits if distance > _env]
+     if not hits:
+         return None
+ 
+@@ -810,16 +853,21 @@
+         ok, why = _turn_to(_bearing_to(dest_xy), pin=obj, skip=obj)
+         if not ok:
+             _fingers(ARM_FINGER_OPEN)
++            _drop = _remember_drop(obj)
++            _where = (f"({_drop[0]:.2f},{_drop[1]:.2f})" if _drop else "位置未知")
+             return Relocate_Response(
+                 ok=False,
+-                message=(f"搬往目的地时回转柱没到位, 已把物体放回当下位置; {why}"))
++                message=(f"搬往目的地时回转柱没到位; 已在夹爪当时的位置 {_where} 松手, "
++                         f"**物体不在原位**; {why}"))
+         place_point = (dest_xy[0], dest_xy[1], start[2] + ARM_GRIP_LIFT_M)
+         if _reach(place_point, pin=obj) is None:
+             _fingers(ARM_FINGER_OPEN)
++            _drop = _remember_drop(obj)
++            _where = (f"({_drop[0]:.2f},{_drop[1]:.2f})" if _drop else "位置未知")
+             return Relocate_Response(
+                 ok=False,
+                 message=(f"目的地 ({dest_xy[0]:.3f},{dest_xy[1]:.3f}) 超出臂展, 放不下; "
+-                         "已把物体放回当下位置"))
++                         f"已在夹爪当时的位置 {_where} 松手, **物体不在原位**"))
+         _fingers(ARM_FINGER_OPEN)
+         _stow()
+         _remember(obj, dest_xy[0], dest_xy[1], 0.0, "arm-release")

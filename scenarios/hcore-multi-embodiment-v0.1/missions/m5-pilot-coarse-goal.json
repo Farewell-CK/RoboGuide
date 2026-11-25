@@ -1,0 +1,85 @@
+{
+  "schema_version": "roboguide.mission-plan/v0.7",
+  "mission": {
+    "id": "mission-rover-pilot-coarse-goal",
+    "objective": "阶段 2a 验证: 上层只下发一个**粗目标** (一句人话, 不含坐标、不含步骤), 由 rover 的子智能体 pilot 现场规划 Local How 并驱动本体。与 M0-M4 的区别不是场景, 而是**谁来翻译**: 那五条由 facade 的写死翻译层把 destination 翻成坐标再交给 nav; 这一条把整句话原样交给 pilot, 它自己看 Atlas 上的能力清单决定分几步、每步调什么。",
+    "actors": [
+      {
+        "id": "actor-rover"
+      }
+    ]
+  },
+  "contexts": [
+    {
+      "id": "ctx-pilot",
+      "roles": [
+        {
+          "id": "ctx-role-rover",
+          "actor": "actor-rover"
+        }
+      ],
+      "relations": [],
+      "coupling_mode": "sequential-handoff"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-pilot-drive-east",
+      "description": "把车开到北区东侧并停住。参数里只有一句 instruction, 没有任何地名解析结果、没有底盘增量、也没有中间步骤 —— 怎么走、要不要先查场景、要不要分两段, 都是 pilot 自己决定的。终点 (1.6, 1.6) 与 rover 初始位 (-0.90, 1.30) 相距约 2.5 m, 且远离机械臂回转环带 (基座 -1.20,-0.40), 因此位移是可测的、也不依赖 M1-M4 的清场。",
+      "context_id": "ctx-pilot",
+      "depends_on": [],
+      "roles": [
+        {
+          "id": "role-pilot-drive-east",
+          "context_role": "ctx-role-rover",
+          "requirements": {
+            "capabilities": [
+              {
+                "contract": {
+                  "namespace": "mobility",
+                  "name": "navigate",
+                  "version": "v1"
+                },
+                "constraints": [
+                  {
+                    "attribute": "push-capable",
+                    "operator": "equals",
+                    "value": true
+                  }
+                ]
+              }
+            ],
+            "resources": [
+              {
+                "kind": "space",
+                "units": 1
+              }
+            ]
+          },
+          "execution_intent": {
+            "operation": {
+              "namespace": "mobility",
+              "name": "navigate",
+              "version": "v1"
+            },
+            "objective": "开到北区东侧。",
+            "parameters": {
+              "instruction": "Drive the rover east across the arena and park it at (1.6, 1.6) in the northern zone."
+            }
+          },
+          "resource_scope": "task"
+        }
+      ],
+      "timing": {
+        "earliest_start_offset_ms": 0,
+        "latest_start_offset_ms": null,
+        "completion_deadline_offset_ms": null
+      },
+      "satisfaction": {
+        "expected_effect": "rover 停在 (1.6, 1.6) 附近; 终态依据来自 pilot 那一轮的能力调用结果, 不是上层自报。",
+        "basis": "execution-report",
+        "verifier": null
+      }
+    }
+  ]
+}

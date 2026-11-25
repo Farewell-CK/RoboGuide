@@ -1,0 +1,226 @@
+{
+  "schema_version": "roboguide.capability-catalog/v0.3",
+  "capabilities": [
+    {
+      "contract": {
+        "namespace": "mobility",
+        "name": "navigate",
+        "version": "v1"
+      },
+      "description": "Drive an embodied platform to a semantic destination inside the shared arena.",
+      "attributes": [
+        {
+          "name": "push-capable",
+          "type": "boolean",
+          "description": "Whether this platform can deliberately shove a movable obstacle with physical contact instead of only driving around it."
+        },
+        {
+          "name": "supports-floor-transition",
+          "type": "boolean",
+          "description": "Whether this deployment supports navigation between floors; the arena is single-floor."
+        }
+      ]
+    },
+    {
+      "contract": {
+        "namespace": "observation",
+        "name": "verify",
+        "version": "v1"
+      },
+      "description": "Observe whether a named semantic condition holds, using this platform's own recognition channel.",
+      "attributes": []
+    },
+    {
+      "contract": {
+        "namespace": "observation",
+        "name": "survey",
+        "version": "v1"
+      },
+      "description": "Sweep a pan/tilt camera over the arena and capture one still image per bearing.",
+      "attributes": []
+    },
+    {
+      "contract": {
+        "namespace": "object",
+        "name": "relocate",
+        "version": "v1"
+      },
+      "description": "Relocate one semantic object with the fixed-base manipulator as a single integrated goal.",
+      "attributes": [
+        {
+          "name": "max-payload-grams",
+          "type": "integer",
+          "description": "Maximum object payload supported by the manipulator."
+        }
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "operation": {
+        "namespace": "mobility",
+        "name": "navigate",
+        "version": "v1"
+      },
+      "description": "Navigate one ground platform of this arena to a semantic destination while retaining Local How. The arena's ground platforms are rover (carries the pushing bumper) and dog (legged, no pushing bumper). This is the only operation that changes where a ground platform stands, so it is also the operation that moves a ground platform whose zone_occupancy the planning world evidence reports as overlapping the manipulator's keep-out zone. A push may additionally be required to clear the manipulator's keep-out zone of a movable obstacle; use clear_keep_out_zone for that, not the displacement gate alone. Express the goal exactly one way: `destination` for a single place to stand, or `instruction` for a self-contained, already-resolved goal sentence when the Local How needs more than a point-to-point drive.",
+      "parameters": [
+        {
+          "name": "destination",
+          "type": "string",
+          "required": false,
+          "description": "Semantic destination reference. Either a name from the arena vocabulary, or a literal coordinate \"x,y\" in metres. Arena vocabulary: zone_south, zone_mid, zone_north (general arena zones), arm_pick_spot (crate1's pickup spot behind the manipulator) and arm_home_drop (the manipulator's drop point in front of it). Every name in this vocabulary is a place a platform may legitimately be sent to. Each entry states what the place is for; what a place is designated for is exactly why a repositioning Task may select it. None of them states current occupancy: whether a body actually blocks the manipulator now, or still blocks it after a push, comes from the planning world evidence (its position region and its separate zone_occupancy axis) and is finally confirmed at execution by the manipulator's own local sweep, never by this vocabulary. Where a platform should stand in order to clear the manipulator's keep-out zone is NOT something you choose: you have no sensor and no exact pose, so do not submit a point for that goal. Use `leave_keep_out_zone` instead and let the platform resolve its own stand-off. Supply exactly one expression of intent per Task."
+        },
+        {
+          "name": "instruction",
+          "type": "string",
+          "required": false,
+          "description": "ONE self-contained, already-resolved goal sentence handed to the executing platform, used instead of `destination` when the goal needs more than a single point-to-point drive. Supply this OR `destination`, never both. The sentence must be clear and achievable on its own: name the exact target (a vocabulary name or a literal \"x,y\" in metres), name the exact object when one is involved, and state the exact end condition. It must NOT delegate a Mission choice to the platform: no 'somewhere', 'nearby', 'a suitable place', 'as needed', 'clear the band somehow', and never ask the platform to decide where it should stand or which part of the work it should take. It must not ask for anything the platform's declared capabilities cannot do. An ambiguous instruction is not a delegation — the platform will resolve the ambiguity itself, and the plan then no longer describes what will happen."
+        },
+        {
+          "name": "leave_keep_out_zone",
+          "type": "boolean",
+          "required": false,
+          "description": "Set true when this platform must END the execution no longer overlapping the manipulator's keep-out zone. This is a state condition, not a place: do not supply `destination` or `instruction` together with it. The platform measures its own pose, knows its own extent, and resolves where it has to stand; it reports back the measured radial clearance it actually achieved. Use this instead of inventing a coordinate or naming an arbitrary region, which is what a planner without sensors cannot honestly promise. Do NOT schedule this for a platform the world evidence already reports as `clear` — nothing would change, and the execution refuses to report a no-op as success. Every body that the world evidence reports as `overlaps`, other than the object being relocated, needs its own clearing Task: clearing one of them does not establish that the manipulator can rotate."
+        },
+        {
+          "name": "keep_out_zone_entity",
+          "type": "string",
+          "required": false,
+          "description": "Qualifies `leave_keep_out_zone`: which entity has to be the one that leaves the band, named exactly as in the world evidence (for example `dog`). The executing platform compares it with its own identity and refuses the task when it is not that entity, so a misrouted task fails loudly instead of silently succeeding. Supply it whenever the evidence names exactly which body overlaps; then a platform that is already clear may legitimately report `no-op` instead of failing."
+        },
+        {
+          "name": "push_target",
+          "type": "string",
+          "required": false,
+          "description": "Movable obstacle that this navigation is meant to shove, for example obs2 (the movable obstacle). Supply it only when the goal is a deliberate push; it tells the executor that the obstacle may be driven into, and only a push-capable platform can do it."
+        },
+        {
+          "name": "min_push_m",
+          "type": "number",
+          "required": false,
+          "description": "Minimum measured displacement of push_target, in metres, that counts as a successful push; the executor measures the displacement with its own recognition and ranging. This arena only reports a push as successful once the payload has moved at least 0.50 m, so supply at least 0.50 together with push_target; a value of 0 would accept a push that never moved the obstacle. This displacement is a lower gate only: on its own it never establishes that the obstacle's own extent has stopped overlapping the manipulator's keep-out zone, and a plan must not treat it as evidence that the annulus is clear. When the push is meant to clear the annulus, say so with clear_keep_out_zone."
+        },
+        {
+          "name": "clear_keep_out_zone",
+          "type": "boolean",
+          "required": false,
+          "description": "Set true when this navigation is meant to clear the manipulator's keep-out zone rather than merely shove an obstacle. The push is then accepted only if the pushed obstacle's own measured extent no longer overlaps the manipulator's keep-out zone: min_push_m stays a lower gate on displacement, but meeting it is not sufficient by itself. The executing platform keeps pushing past that gate and, if it still cannot clear the annulus after a bounded further distance, fails locally with local-keep-out-zone-blocked instead of reporting the displacement as success. Requires push_target."
+        },
+        {
+          "name": "push_destination",
+          "type": "string",
+          "required": false,
+          "description": "Where the pushed obstacle should end up: either \"x,y\" in the arena frame or a region id from the deployment map. When present, the executing platform only has to move push_target to that point — it does not decide *why* that point is right (that is the caller's policy: clearing a keep-out zone, opening a corridor, moving it away from another robot). Without it, the platform falls back to this deployment's own keep-out-zone rule."
+        }
+      ],
+      "one_of": [
+        [
+          "destination"
+        ],
+        [
+          "instruction"
+        ],
+        [
+          "leave_keep_out_zone"
+        ],
+        [
+          "clear_keep_out_zone"
+        ]
+      ],
+      "required_capabilities": [
+        {
+          "namespace": "mobility",
+          "name": "navigate",
+          "version": "v1"
+        }
+      ]
+    },
+    {
+      "operation": {
+        "namespace": "observation",
+        "name": "verify",
+        "version": "v1"
+      },
+      "description": "Observe whether a named semantic condition holds.",
+      "parameters": [
+        {
+          "name": "expected",
+          "type": "string",
+          "required": true,
+          "description": "Expected semantic condition, written as <target>.<predicate>. Arena vocabulary: marker6.exists, marker7.exists, qr6.detected, teddy.exists."
+        }
+      ],
+      "required_capabilities": [
+        {
+          "namespace": "observation",
+          "name": "verify",
+          "version": "v1"
+        }
+      ]
+    },
+    {
+      "operation": {
+        "namespace": "observation",
+        "name": "survey",
+        "version": "v1"
+      },
+      "description": "Sweep the pan/tilt camera over the arena and capture one image per bearing.",
+      "parameters": [
+        {
+          "name": "target",
+          "type": "string",
+          "required": true,
+          "description": "Semantic object (for example crate1) whose reachability from the manipulator the survey must establish."
+        },
+        {
+          "name": "views",
+          "type": "integer",
+          "required": false,
+          "description": "Number of bearings to sweep, from 1 through 4 (default 4)."
+        }
+      ],
+      "required_capabilities": [
+        {
+          "namespace": "observation",
+          "name": "survey",
+          "version": "v1"
+        }
+      ]
+    },
+    {
+      "operation": {
+        "namespace": "object",
+        "name": "relocate",
+        "version": "v1"
+      },
+      "description": "Relocate one semantic object with the arena's fixed-base swing manipulator. The arena's movable object is crate1 (the yellow crate). Hardware reality of this manipulator: it can pick an object only while the planning world evidence places that object's position region inside the manipulator's reach ring, and it can only swing while no entity other than the object it is currently carrying has a zone_occupancy of overlaps in that same evidence. The frozen planning snapshot never asserts that the keep-out zone is currently clear; whether it is clear at execution time — including after another platform has shoved a movable obstacle — is decided by the manipulator's own local sweep, which fails locally with local-workspace-blocked instead of rotating. It handles one object at a time and never clears obstacles out of its own way. Reachability is not carried by the planning-world evidence and must not be inferred from a region name: this arena establishes it with observation.survey on the same object, so a relocate Task must be preceded by that observation.",
+      "parameters": [
+        {
+          "name": "object",
+          "type": "string",
+          "required": true,
+          "description": "Semantic object reference. Arena vocabulary: crate1 (the movable yellow crate standing on the floor, 0.26 m cube), teddy (a decorative toy with no movable degree of freedom)."
+        },
+        {
+          "name": "destination",
+          "type": "string",
+          "required": true,
+          "description": "Semantic destination reference. Arena vocabulary: see mobility.navigate; the manipulator drop point is arm_home_drop."
+        },
+        {
+          "name": "complete_after",
+          "type": "string",
+          "required": false,
+          "description": "Completion condition: grasp (default; lifting the object counts as success) or place (the object must be released at destination)."
+        }
+      ],
+      "required_capabilities": [
+        {
+          "namespace": "object",
+          "name": "relocate",
+          "version": "v1"
+        }
+      ]
+    }
+  ]
+}
