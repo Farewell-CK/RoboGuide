@@ -23,10 +23,12 @@ retain their original paths and content. Rewritten sources have exact pre-refres
 
 ## API-generated architecture figures
 
-The current atlas has eight topics in Chinese and English. `diagram-assets.json` binds each actual
-PNG to its prompt, requested model, reviewed code, dimensions and digest. The imagegen skill CLI calls
-`/v1/images/generations` using the explicitly selected latest model. The installed CLI is not copied
-or modified. Resolve credentials in the calling process only; never put them in publication inputs.
+The current atlas has one framework and seven flow topics in Chinese and English. `diagram-assets.json`
+binds each PNG to its prompt, requested model, reviewed code, dimensions and digest. The imagegen skill
+CLI uses `/v1/images/generations` and `/v1/images/edits` with the explicitly selected model; the final
+set uses reference-based edits in the original repository V2 illustration style. The generation records
+bind actual prompts, retained reference images and intermediate output digests. The installed CLI is not
+copied or modified. Resolve credentials in the calling process only; never put them in publication inputs.
 
 Generation briefs, prompts and actual outcomes live beside the PNGs under the dated architecture
 asset directory. Check labels, every required edge and authority boundary visually before marking
@@ -41,7 +43,7 @@ uvx --from mkdocs --with-requirements website/requirements.txt mkdocs build --st
 python website/check_site.py --text-preview
 ```
 
-This preview has `publication_ready=false`, displays no substitute drawings and cannot pass normal
+This preview has `publication_ready=false`, displays only reviewed images or pending notices and cannot pass normal
 publication checks. A model-list entry is not a successful image generation. Historical Mermaid
 sources remain original evidence and are displayed as literal source text; the site uses no diagram
 renderer. Current figures remain visible and open at full size with JavaScript disabled.

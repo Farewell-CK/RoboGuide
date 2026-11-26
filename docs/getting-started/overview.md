@@ -10,7 +10,7 @@ RoboGuide 是面向异构具身智能体的分布式操作系统框架。它把�
 ## 从目标到经过验证的结果
 
 <!-- diagram:overview:zh -->
-![RoboGuide 系统总览](../images/architecture/2026-11-26/overview.zh.png)
+![RoboGuide 总体框架](../images/architecture/2026-11-26/overview.zh.png)
 
 **Mission Intelligence** 形成计划；**Orchestration** 推进任务并判定满足；**Control** 决定绑定与资源承诺；**Runtime** 管理执行尝试。Node Service 把已授权操作接入 Local EAIOS，State 和 Memory 提供有来源的状态与内容。
 

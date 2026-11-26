@@ -5,7 +5,7 @@ Code reviewed: 2026-11-26 · `main@3c7136d6`. Figures describe implemented respo
 RoboGuide coordinates heterogeneous bodies, compute nodes and interaction devices around a shared Mission: planning, scheduling, execution, state and recovery. It jointly considers Capability, Compute, Space and Time while Local EAIOS retains local execution and immediate safety. The Controller is currently a modular monolith; a responsibility box does not imply a separate microservice.
 
 <!-- diagram:overview:en -->
-![RoboGuide system overview](../../images/architecture/2026-11-26/overview.en.png)
+![RoboGuide system framework](../../images/architecture/2026-11-26/overview.en.png)
 
 
 ## Follow one unit of work
@@ -20,7 +20,7 @@ RoboGuide coordinates heterogeneous bodies, compute nodes and interaction device
 
 | Question | Topic |
 | --- | --- |
-| RoboGuide system overview | [Atlas](current-architecture.en.md) · [Flows](system-dataflows.en.md) |
+| RoboGuide system framework | [Atlas](current-architecture.en.md) · [Flows](system-dataflows.en.md) |
 | From conversation to a reviewed plan | [Atlas](current-architecture.en.md) · [Flows](system-dataflows.en.md) |
 | From candidates to durable execution | [Atlas](current-architecture.en.md) · [Flows](system-dataflows.en.md) |
 | Satisfaction and resource release | [Atlas](current-architecture.en.md) · [Flows](system-dataflows.en.md) |

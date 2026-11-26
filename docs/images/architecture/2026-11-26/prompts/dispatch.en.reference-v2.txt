@@ -1,0 +1,15 @@
+Create the ENGLISH edition of the supplied finalized Chinese topic diagram. Translate every Chinese label, paragraph, invariant, exception and legend accurately into natural technical English. Preserve all geometry, every arrow direction and endpoint, scope boundaries, icons, colors, node numbers and conditional gates. Keep the dense original-repository V2 engineering illustration style. Do not add new claims, capabilities, loops or steps. Keep text legible by modestly adjusting wrapping and font size. Output 1536x1024 PNG without cropping.
+Exact English topic title: From candidates to durable execution
+Required technical identifiers / module labels:
+Ready Task
+Match / CandidateSet
+Bounded Scheduler
+Proposal
+Control Commit / Bind
+SQL · Checkpoint + Outbox
+Send Execute
+Node Journal
+Local Workflow
+Durable ACK / Execution facts
+Semantic reference (do not add text not present in the source):
+Left-to-right numbered main chain of all nodes: Ready Task -> Match -> Bounded Scheduler -> Proposal -> Control Commit/Bind -> SQL Checkpoint+Outbox -> Send Execute -> Node Journal -> Local Workflow. Use two rows for readability. Put Commit/Bind and SQL inside a single Controller writer transaction boundary. Send Execute must be outside and after committed SQL. From Node Journal return Durable ACK to Controller; Local Workflow returns execution facts through Node Journal to Controller. Add two concise callouts: Proposal does not reserve; Journal before local effects. Do not conflate ACK and successful physical execution.

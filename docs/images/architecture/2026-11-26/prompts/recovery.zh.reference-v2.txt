@@ -1,0 +1,24 @@
+Use the supplied original RoboGuide V2 repository architecture diagram as a STYLE REFERENCE ONLY. Redraw the topic specified below in the same detailed engineering-publication style: white canvas, thin rounded blue/violet/green plane outlines, pale color washes, small meaningful engineering pictograms, compact labels, close alignment and concise technical annotation panels. This is a topic-specific diagram, not a copy of the reference content. Output 1536x1024 PNG. Fill the canvas coherently without large unused zones. Title around 38px; module headings around 25px; body around 20px. Use two or three tightly fitted responsibility lanes and a compact invariant/exception sidebar where appropriate. Use line icons, exact labels and short factual notes to balance density. Do not make a dashboard, giant empty rectangles or a huge title. The meaning and direction of every arrow and all process boundaries must follow the requirements. Do not copy old unsupported facts or device examples from the reference.
+
+Title (exact): 未知、停止与分级恢复
+Language: Simplified Chinese, retaining technical identifiers.
+Exact module labels:
+1. 断线 / 执行失败
+2. Unknown / Hold
+3. 保留原所有权
+4. 原 Cancel / Revoke 意图
+5. 停止证据 + 原终态
+6. 门禁核对
+7. Role Recovery
+8. Match / Commit / Rebind
+9. 经 Review 的 Plan Revision
+10. 新 Group / 正常准入
+11. Manual Escalation
+
+Required topology:
+Top chain Disconnect/Failure -> Unknown/Hold -> Retain original ownership -> Original Cancel/Revoke intent -> Stop evidence + Original terminal -> Gate checks. After gate checks show TWO distinct authorized paths: Role Recovery -> Match/Commit/Rebind, and Reviewed Plan Revision -> New Group/Normal admission. If evidence, authorization or original budget is unavailable, Gate checks -> Manual Escalation, with ownership retained. No arrow from Unknown straight to Execute. Add a small separate bottom bar: Local EAIOS owns immediate safety. Show command receipt and stop observation as separate evidence, not the same step.
+
+Critical boundaries and exceptions:
+Gate checks has distinct authorized Role Recovery and Reviewed Plan Revision branches, plus an unavailable-evidence/authorization/original-budget branch to Manual Escalation. The Unknown path always retains ownership; no arrow from Unknown directly to Execute.
+
+No new services, credentials, deployment addresses, actual-device acceptance claims or invented model output.

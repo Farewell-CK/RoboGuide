@@ -1,0 +1,16 @@
+Create the ENGLISH edition of the supplied finalized Chinese topic diagram. Translate every Chinese label, paragraph, invariant, exception and legend accurately into natural technical English. Preserve all geometry, every arrow direction and endpoint, scope boundaries, icons, colors, node numbers and conditional gates. Keep the dense original-repository V2 engineering illustration style. Do not add new claims, capabilities, loops or steps. Keep text legible by modestly adjusting wrapping and font size. Output 1536x1024 PNG without cropping.
+Exact English topic title: Processes, storage and failure domains
+Required technical identifiers / module labels:
+Mission Service
+Request SQL
+Controller
+Controller SQL / Checkpoint
+Artifact CAS
+Node Service
+Node Journal
+Local EAIOS / Providers
+Optional Replica Quorum
+Optional other Controller domain
+Quiescent Recovery Tool
+Semantic reference (do not add text not present in the source):
+Draw software process containers and their OWN distinct storage. Mission Service -> Controller using HTTP; Mission Service attaches Request SQL. Controller attaches Controller SQL/Checkpoint and Artifact CAS. Controller <-> Node Service via gRPC using two directional labeled arrows; Node Service owns Node Journal and connects to Local EAIOS/Providers. Dashed optional area Replica Quorum connects to Controller metadata/content durability, not to robot execution. Another dashed optional Controller domain connects via Federation. Quiescent Recovery Tool reads declared closed storage/content into a separate backup/restore box represented by the label itself, never connects to actuators. Short note: Process != Host != Node != PhysicalEntity. No concrete IPs, credentials, physical failover claims or claim that storage v3 and replication are automatically combined.

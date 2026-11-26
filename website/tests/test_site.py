@@ -53,8 +53,36 @@ class PublicationTests(unittest.TestCase):
         manifest: dict[str, object] = {
             "schema": "roboguide.generated-diagrams/v1",
             "code_commit": "a" * 40,
+            "generation_records": "generation-records.json",
             "diagrams": entries,
         }
+        (root / "generation-records.json").write_text(
+            json.dumps(
+                {
+                    "schema": "roboguide.image-generation-records/v1",
+                    "code_commit": "a" * 40,
+                    "completed": [
+                        {
+                            "figure": f"overview:{locale}",
+                            "image": "image.png",
+                            "image_sha256": diagram_assets.digest(image),
+                            "requested_model": "gpt-image-2.6-sunburst",
+                            "steps": [
+                                {
+                                    "endpoint": "/v1/images/generations",
+                                    "prompt": "prompt.txt",
+                                    "prompt_sha256": diagram_assets.digest(b"exact prompt"),
+                                    "inputs": [],
+                                    "output_sha256": diagram_assets.digest(image),
+                                }
+                            ],
+                        }
+                        for locale in ("zh", "en")
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
         (root / "website/diagram-assets.json").write_text(json.dumps(manifest))
         return manifest
 
@@ -79,6 +107,10 @@ class PublicationTests(unittest.TestCase):
             assert isinstance(entries, list)
             entries[0]["status"] = "blocked-api"
             (root / "website/diagram-assets.json").write_text(json.dumps(manifest))
+            path = root / "generation-records.json"
+            records = json.loads(path.read_text(encoding="utf-8"))
+            records["completed"] = records["completed"][1:]
+            path.write_text(json.dumps(records), encoding="utf-8")
             with patch.object(diagram_assets, "ROOT", root):
                 with self.assertRaisesRegex(SystemExit, "not generated and reviewed"):
                     diagram_assets.diagram_registry()
@@ -88,6 +120,27 @@ class PublicationTests(unittest.TestCase):
                 )
                 self.assertIn("rg-pending-image", rendered)
                 self.assertNotIn("<img", rendered)
+
+    def test_changed_reference_image_refuses_publication(self) -> None:
+        """Reference-based edits bind the actual source bytes and selected edit history."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._image_fixture(root)
+            reference = root / "reference.png"
+            reference.write_bytes(b"reference bytes")
+            path = root / "generation-records.json"
+            records = json.loads(path.read_text(encoding="utf-8"))
+            first_step = records["completed"][0]["steps"][0]
+            first_step["endpoint"] = "/v1/images/edits"
+            first_step["inputs"] = [
+                {"path": "reference.png", "sha256": diagram_assets.digest(b"reference bytes")}
+            ]
+            path.write_text(json.dumps(records), encoding="utf-8")
+            with patch.object(diagram_assets, "ROOT", root):
+                self.assertEqual(len(diagram_assets.diagram_registry()), 2)
+                reference.write_bytes(b"changed")
+                with self.assertRaisesRegex(SystemExit, "reference image changed"):
+                    diagram_assets.diagram_registry()
 
     def test_missing_image_translation_refuses_publication(self) -> None:
         """English/Chinese figure pairs cannot silently drift to one available language."""
@@ -121,6 +174,12 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(
             diagram_assets.published_asset("docs/images/prompts/overview.en.txt", "en"),
             "/en/docs/images/prompts/overview.txt",
+        )
+        self.assertEqual(
+            diagram_assets.published_asset(
+                "docs/images/prompts/framework.en.reference-v2.txt", "en"
+            ),
+            "/docs/images/prompts/framework.en.reference-v2.txt",
         )
 
     def test_archived_site_guide_keeps_generated_reference_link(self) -> None:

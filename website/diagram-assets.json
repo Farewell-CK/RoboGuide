@@ -5,82 +5,164 @@
     {
       "name": "overview",
       "locale": "zh",
-      "title": "RoboGuide 系统总览",
+      "title": "RoboGuide 总体框架",
       "nodes": [
-        "用户 / Operator",
         "Mission Intelligence",
+        "Grounding",
+        "Planner",
+        "Reviewer & Repair",
+        "Request",
         "Controller",
         "Orchestration",
-        "Control · Commit / Bind",
-        "Runtime · Attempt / Intent",
-        "Integration · Node Protocol",
-        "State / Memory Catalog",
+        "Control",
+        "Match",
+        "Joint Scheduler",
+        "Commit & Bind",
+        "Group Manager",
+        "Execution Group",
+        "Runtime",
+        "Integration",
+        "State & Memory",
+        "State",
+        "Memory Catalog",
         "Artifact CAS",
+        "Preparation & Use",
         "Node Service",
         "Local EAIOS",
-        "Memory / Spatial / Sync Providers"
+        "Interaction device",
+        "Edge Compute",
+        "Providers",
+        "Physical World"
       ],
-      "topology": "Top: user -> MI -> Orchestration. Controller container encloses Orchestration, Control, Runtime, Integration, State/Memory Catalog, Artifact CAS. Main command chain Orchestration -> Control -> Runtime -> Integration -> Node Service -> Local EAIOS. Node Service is outside Controller. Providers connect locally to Node Service. Facts flow back Node Service -> Integration -> State/Memory Catalog; State/Memory Catalog supplies read-only evidence to Control. Content flows Artifact CAS <-> Node Service with two clearly labeled directional arrows. Do not put Local EAIOS inside Controller. Providers do not directly allocate resources.",
+      "topology": "Reference-style framework: all internal Controller responsibilities enclosed; Execution Group inside Control; Node/Local EAIOS outside; source-bound State/Memory, explicit optional deployment, local safety.",
       "evidence": [
+        "mission/src/mission/request_engine.py",
+        "mission/src/roboguide_workbench/task_tools.py",
         "apps/integration-server/src/main.rs",
         "core/orchestration/src/lib.rs",
         "core/control/src/lib.rs",
-        "core/node-service/src/service/mod.rs"
+        "core/runtime/src/lib.rs",
+        "core/integration/src/lib.rs",
+        "core/state/src/state_record.rs",
+        "core/domain/src/memory.rs",
+        "core/node-service/src/service/mod.rs",
+        "core/controller-replication/src/lib.rs",
+        "integrations/sync-provider/roboguide_sync/sync_engine.py"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/overview.zh.txt",
-      "prompt_sha256": "a640ef0670197aada2c7745757d166bb3f6e14f71f40b6ec33ae28a4e64fdab0",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/framework.zh.reference-v2.fix-01.txt",
+      "prompt_sha256": "0aa65d4769bd44f54204e5c73f0e0b4fbecff8fafa75aa703ebcf86fe7e59eee",
       "image": "docs/images/architecture/2026-11-26/overview.zh.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "a69f2765452d9e939758c4bae8c20188852962975c99444c8cde19e26e2f909e",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
+        "mission/src/mission/request_engine.py": "5f8174061dbab1dc2cc551deaa0cf961da032a9e24c0f7e1fa1b518df3635eaf",
+        "mission/src/roboguide_workbench/task_tools.py": "ba2829742295ed7e78f9c5dd3c2e533ead22173fa7d0cf75b372a0d3e7e5cbb5",
         "apps/integration-server/src/main.rs": "7d456365ea702482c85caca7cffd93becea1f08e4bc85b4aefa399846a1d3feb",
         "core/orchestration/src/lib.rs": "ace8d6ce61d172e8bfb11d7a8989a9ff551bb177e43f969da3f9983c99c233e8",
         "core/control/src/lib.rs": "c64705c2f72b9dd5f64dc9ec7a6ff1137ff5e620b506ef687118bf920da98305",
-        "core/node-service/src/service/mod.rs": "b71641fa7384b47ff08f52eeb7546a9fe8910901af1816bad9438678f8ae5588"
-      }
+        "core/runtime/src/lib.rs": "39143c0bf055e93f68767dd89724106e66016d3b6d7ed21eb536f84947426ae2",
+        "core/integration/src/lib.rs": "2235bd15650360b7d9630c2effdc0063c24bfa589779b0f42b529bd7b6cb62ef",
+        "core/state/src/state_record.rs": "fa4b432befc29021ea6475273a629d458411ecec58c872e5d43b663aeac70946",
+        "core/domain/src/memory.rs": "45d7a3a309e9a92af121e5b39762313fd9f0e960343506c9ffa629f6fc790997",
+        "core/node-service/src/service/mod.rs": "b71641fa7384b47ff08f52eeb7546a9fe8910901af1816bad9438678f8ae5588",
+        "core/controller-replication/src/lib.rs": "1f759e8a0334067390a3a2b779d7b3ca72d009842327f7da39b0dd6ccc9b17fe",
+        "integrations/sync-provider/roboguide_sync/sync_engine.py": "cfbdbb8cb8e0fd69e1d333c91024dd6f5b69c7e7a21a2304cf2ecd32314e9638"
+      },
+      "kind": "framework",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        },
+        {
+          "path": "docs/images/distributed-embodied-ai-os-architecture-v1.1.png",
+          "sha256": "269a33daccb79f336b43ec346e97f078a5b3e9a1d2d2d8f7a1b9f2f7d5cac960"
+        }
+      ],
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/framework.zh.reference-v2.txt"
     },
     {
       "name": "overview",
       "locale": "en",
-      "title": "RoboGuide system overview",
+      "title": "RoboGuide system framework",
       "nodes": [
-        "User / Operator",
         "Mission Intelligence",
+        "Grounding",
+        "Planner",
+        "Reviewer & Repair",
+        "Request",
         "Controller",
         "Orchestration",
-        "Control · Commit / Bind",
-        "Runtime · Attempt / Intent",
-        "Integration · Node Protocol",
-        "State / Memory Catalog",
+        "Control",
+        "Match",
+        "Joint Scheduler",
+        "Commit & Bind",
+        "Group Manager",
+        "Execution Group",
+        "Runtime",
+        "Integration",
+        "State & Memory",
+        "State",
+        "Memory Catalog",
         "Artifact CAS",
+        "Preparation & Use",
         "Node Service",
         "Local EAIOS",
-        "Memory / Spatial / Sync Providers"
+        "Interaction device",
+        "Edge Compute",
+        "Providers",
+        "Physical World"
       ],
-      "topology": "Top: user -> MI -> Orchestration. Controller container encloses Orchestration, Control, Runtime, Integration, State/Memory Catalog, Artifact CAS. Main command chain Orchestration -> Control -> Runtime -> Integration -> Node Service -> Local EAIOS. Node Service is outside Controller. Providers connect locally to Node Service. Facts flow back Node Service -> Integration -> State/Memory Catalog; State/Memory Catalog supplies read-only evidence to Control. Content flows Artifact CAS <-> Node Service with two clearly labeled directional arrows. Do not put Local EAIOS inside Controller. Providers do not directly allocate resources.",
+      "topology": "Reference-style framework: all internal Controller responsibilities enclosed; Execution Group inside Control; Node/Local EAIOS outside; source-bound State/Memory, explicit optional deployment, local safety.",
       "evidence": [
+        "mission/src/mission/request_engine.py",
+        "mission/src/roboguide_workbench/task_tools.py",
         "apps/integration-server/src/main.rs",
         "core/orchestration/src/lib.rs",
         "core/control/src/lib.rs",
-        "core/node-service/src/service/mod.rs"
+        "core/runtime/src/lib.rs",
+        "core/integration/src/lib.rs",
+        "core/state/src/state_record.rs",
+        "core/domain/src/memory.rs",
+        "core/node-service/src/service/mod.rs",
+        "core/controller-replication/src/lib.rs",
+        "integrations/sync-provider/roboguide_sync/sync_engine.py"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/overview.en.txt",
-      "prompt_sha256": "32fec9fffd5f3672d630f9433f3d250563ee7159174fcaa15c9cd5bc80ae54d4",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/framework.en.reference-v2.txt",
+      "prompt_sha256": "12320562bb6b6dc6fd6f876bf5a7c025ff74385e10565a06fa77ecdfc4b64cd0",
       "image": "docs/images/architecture/2026-11-26/overview.en.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "7cec6f646696b0d5a89e58997878d8fdb13ccdd1464e08bce451ee1e059ee5fa",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
+        "mission/src/mission/request_engine.py": "5f8174061dbab1dc2cc551deaa0cf961da032a9e24c0f7e1fa1b518df3635eaf",
+        "mission/src/roboguide_workbench/task_tools.py": "ba2829742295ed7e78f9c5dd3c2e533ead22173fa7d0cf75b372a0d3e7e5cbb5",
         "apps/integration-server/src/main.rs": "7d456365ea702482c85caca7cffd93becea1f08e4bc85b4aefa399846a1d3feb",
         "core/orchestration/src/lib.rs": "ace8d6ce61d172e8bfb11d7a8989a9ff551bb177e43f969da3f9983c99c233e8",
         "core/control/src/lib.rs": "c64705c2f72b9dd5f64dc9ec7a6ff1137ff5e620b506ef687118bf920da98305",
-        "core/node-service/src/service/mod.rs": "b71641fa7384b47ff08f52eeb7546a9fe8910901af1816bad9438678f8ae5588"
-      }
+        "core/runtime/src/lib.rs": "39143c0bf055e93f68767dd89724106e66016d3b6d7ed21eb536f84947426ae2",
+        "core/integration/src/lib.rs": "2235bd15650360b7d9630c2effdc0063c24bfa589779b0f42b529bd7b6cb62ef",
+        "core/state/src/state_record.rs": "fa4b432befc29021ea6475273a629d458411ecec58c872e5d43b663aeac70946",
+        "core/domain/src/memory.rs": "45d7a3a309e9a92af121e5b39762313fd9f0e960343506c9ffa629f6fc790997",
+        "core/node-service/src/service/mod.rs": "b71641fa7384b47ff08f52eeb7546a9fe8910901af1816bad9438678f8ae5588",
+        "core/controller-replication/src/lib.rs": "1f759e8a0334067390a3a2b779d7b3ca72d009842327f7da39b0dd6ccc9b17fe",
+        "integrations/sync-provider/roboguide_sync/sync_engine.py": "cfbdbb8cb8e0fd69e1d333c91024dd6f5b69c7e7a21a2304cf2ecd32314e9638"
+      },
+      "kind": "framework",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/architecture/2026-11-26/overview.zh.png",
+          "sha256": "a69f2765452d9e939758c4bae8c20188852962975c99444c8cde19e26e2f909e"
+        }
+      ],
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/framework.en.reference-v2.txt"
     },
     {
       "name": "mission-planning",
@@ -98,25 +180,34 @@
         "执行授权 / 风险审批",
         "Controller 准入"
       ],
-      "topology": "Number the main path 1 to 8: Chat -> Mission Request -> Grounding -> Interpreter -> Planner -> Reviewer -> Read-only preflight -> Execute grant/Risk approval -> Controller admission. Reviewer -> Bounded Repair -> Reviewer is an explicit bounded loop. Interpreter clarification returns to Chat. Label preflight as read-only; it reserves no resources. Exact displayed plan revision/digest binds authorization. Show Request and Controller Mission as distinct boundaries, not one identity. No direct model-to-device arrow.",
+      "topology": "Request lifecycle and Controller Mission separated; clarify return, conditional bounded repair, read-only preflight, exact draft grant binding and independent admission.",
       "evidence": [
         "mission/src/mission/request_engine.py",
         "mission/src/roboguide_workbench/task_tools.py",
         "apps/integration-server/src/application/plan_validation.rs"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.zh.txt",
-      "prompt_sha256": "05cbbda6e9d02b77001c5f5c1623b65fd8965c7eb1d873e4bb453b20685e57e2",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.zh.reference-v2.fix-02.txt",
+      "prompt_sha256": "a8af1b366d067ffc8df124aff69db6e6dfb74b9ea91ba82b93a61131f3c59801",
       "image": "docs/images/architecture/2026-11-26/mission-planning.zh.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "893efb5a89e7e961102f06a7b02b4a19b962c7e5d4f198b21ecceaa9f9538787",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
         "mission/src/mission/request_engine.py": "5f8174061dbab1dc2cc551deaa0cf961da032a9e24c0f7e1fa1b518df3635eaf",
         "mission/src/roboguide_workbench/task_tools.py": "ba2829742295ed7e78f9c5dd3c2e533ead22173fa7d0cf75b372a0d3e7e5cbb5",
         "apps/integration-server/src/application/plan_validation.rs": "f83d7e534ad684d5b6a54345acc8eef23b52237f5a641a18077ab8cb5d3fc55a"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
     },
     {
       "name": "mission-planning",
@@ -134,25 +225,34 @@
         "Execute grant / Risk approval",
         "Controller admission"
       ],
-      "topology": "Number the main path 1 to 8: Chat -> Mission Request -> Grounding -> Interpreter -> Planner -> Reviewer -> Read-only preflight -> Execute grant/Risk approval -> Controller admission. Reviewer -> Bounded Repair -> Reviewer is an explicit bounded loop. Interpreter clarification returns to Chat. Label preflight as read-only; it reserves no resources. Exact displayed plan revision/digest binds authorization. Show Request and Controller Mission as distinct boundaries, not one identity. No direct model-to-device arrow.",
+      "topology": "Request lifecycle and Controller Mission separated; clarify return, conditional bounded repair, read-only preflight, exact draft grant binding and independent admission.",
       "evidence": [
         "mission/src/mission/request_engine.py",
         "mission/src/roboguide_workbench/task_tools.py",
         "apps/integration-server/src/application/plan_validation.rs"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.en.txt",
-      "prompt_sha256": "0e6483e98498e27378ae210c824835cae1a17a4064a5c8679ff821d6d0dfa822",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.en.reference-v2.txt",
+      "prompt_sha256": "bff822f6eed80f941c052a75e844c73dfbf4e8310340d6f16d80aa642f2bf037",
       "image": "docs/images/architecture/2026-11-26/mission-planning.en.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "5c422756169f4ab34c1d39ebfdddbb67b00ac8f0005c606abad1ae4405a36c7d",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
         "mission/src/mission/request_engine.py": "5f8174061dbab1dc2cc551deaa0cf961da032a9e24c0f7e1fa1b518df3635eaf",
         "mission/src/roboguide_workbench/task_tools.py": "ba2829742295ed7e78f9c5dd3c2e533ead22173fa7d0cf75b372a0d3e7e5cbb5",
         "apps/integration-server/src/application/plan_validation.rs": "f83d7e534ad684d5b6a54345acc8eef23b52237f5a641a18077ab8cb5d3fc55a"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/architecture/2026-11-26/mission-planning.zh.png",
+          "sha256": "893efb5a89e7e961102f06a7b02b4a19b962c7e5d4f198b21ecceaa9f9538787"
+        }
+      ]
     },
     {
       "name": "dispatch",
@@ -170,19 +270,19 @@
         "Local Workflow",
         "持久 ACK / 执行事实"
       ],
-      "topology": "Left-to-right numbered main chain of all nodes: Ready Task -> Match -> Bounded Scheduler -> Proposal -> Control Commit/Bind -> SQL Checkpoint+Outbox -> Send Execute -> Node Journal -> Local Workflow. Use two rows for readability. Put Commit/Bind and SQL inside a single Controller writer transaction boundary. Send Execute must be outside and after committed SQL. From Node Journal return Durable ACK to Controller; Local Workflow returns execution facts through Node Journal to Controller. Add two concise callouts: Proposal does not reserve; Journal before local effects. Do not conflate ACK and successful physical execution.",
+      "topology": "Proposal does not reserve; Commit/Bind and persistence inside writer transaction; Execute afterward; Journal before local effects; receipt and execution facts return through the journal.",
       "evidence": [
         "core/orchestration/src/mission/scheduling.rs",
         "core/control/src/coordination.rs",
         "apps/integration-server/src/application/write_gate.rs",
         "core/node-service/src/engine/admission.rs"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.zh.txt",
-      "prompt_sha256": "711daa1714aa647620cc28843dcb3a8787a899bef6bacb913bb549fae44265db",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.zh.reference-v2.fix-02.txt",
+      "prompt_sha256": "5c35bcce2dcb5c9e5da75e3a5e00390e11c4783c42a6152d46bfbb08baa4296f",
       "image": "docs/images/architecture/2026-11-26/dispatch.zh.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "23eb605d31f1189817fab921a53b5aa40aad3dda7e13ee6b3c54cb241e33d01b",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
@@ -190,7 +290,16 @@
         "core/control/src/coordination.rs": "3ea2256f88d51791847b659ed675dd580ca7ecc34eb7408ed8c4ff39e6f61683",
         "apps/integration-server/src/application/write_gate.rs": "98ab31b6533e22cca8517e656c624f5620b3f5775f50f2bf3e5f0cce786813e4",
         "core/node-service/src/engine/admission.rs": "af8472ae851a6a07d08d1efff5beff144866529ff0b4d76e6e71e9018f39bad7"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
     },
     {
       "name": "dispatch",
@@ -208,19 +317,19 @@
         "Local Workflow",
         "Durable ACK / Execution facts"
       ],
-      "topology": "Left-to-right numbered main chain of all nodes: Ready Task -> Match -> Bounded Scheduler -> Proposal -> Control Commit/Bind -> SQL Checkpoint+Outbox -> Send Execute -> Node Journal -> Local Workflow. Use two rows for readability. Put Commit/Bind and SQL inside a single Controller writer transaction boundary. Send Execute must be outside and after committed SQL. From Node Journal return Durable ACK to Controller; Local Workflow returns execution facts through Node Journal to Controller. Add two concise callouts: Proposal does not reserve; Journal before local effects. Do not conflate ACK and successful physical execution.",
+      "topology": "Proposal does not reserve; Commit/Bind and persistence inside writer transaction; Execute afterward; Journal before local effects; receipt and execution facts return through the journal.",
       "evidence": [
         "core/orchestration/src/mission/scheduling.rs",
         "core/control/src/coordination.rs",
         "apps/integration-server/src/application/write_gate.rs",
         "core/node-service/src/engine/admission.rs"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.en.txt",
-      "prompt_sha256": "901699e0a40c1aba8a3edc346a8c85b24a97156229c8d844d0f47f8fabf7d1ca",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.en.reference-v2.fix-02.txt",
+      "prompt_sha256": "5c507f5c0183c5b1c8f2600fc64355975c5ef414cdde0aacddd4eace717a6d0a",
       "image": "docs/images/architecture/2026-11-26/dispatch.en.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "11abd0592b84cf8d91bc1f40470896bc6e9aaedabe75e2641d4b40771ccb9bbe",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
@@ -228,7 +337,11 @@
         "core/control/src/coordination.rs": "3ea2256f88d51791847b659ed675dd580ca7ecc34eb7408ed8c4ff39e6f61683",
         "apps/integration-server/src/application/write_gate.rs": "98ab31b6533e22cca8517e656c624f5620b3f5775f50f2bf3e5f0cce786813e4",
         "core/node-service/src/engine/admission.rs": "af8472ae851a6a07d08d1efff5beff144866529ff0b4d76e6e71e9018f39bad7"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": []
     },
     {
       "name": "completion",
@@ -246,25 +359,34 @@
         "推进后继 Task",
         "Mission 原目标 / 整组收尾"
       ],
-      "topology": "A clear branching and joining flow: Local Completed -> AwaitingSatisfaction -> Plan-declared Basis; branch to execution-report OR independent verifier evidence (only the declared basis is accepted). Both branches lead toward TaskSatisfied but a separate Memory revoke gate is a mandatory conditional gate when Memory is used, drawn joining before TaskSatisfied. TaskSatisfied -> Control releases Task resources -> Advance successor Task -> Original Mission goal/Group closure. A concise bottom note: missing or negative evidence retains ownership. Do not claim local Completed alone proves the goal. Mission closure also needs all tasks and any configured original-goal gate.",
+      "topology": "Plan-declared alternatives, applicable Memory revoke gate, TaskSatisfied before release and successors, separate original-goal/group closure.",
       "evidence": [
         "core/orchestration/src/mission/lifecycle.rs",
         "apps/integration-server/src/application/outcomes.rs",
         "apps/integration-server/src/application/memory_use.rs"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/completion.zh.txt",
-      "prompt_sha256": "86fab51ab9546cba77bae5313938a23e8461ccd954bce40ca277449576da041b",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/completion.zh.reference-v2.fix-01.txt",
+      "prompt_sha256": "357cc443d46decf5faad5c9757f3ed4c712f3172e88e8cc00f926862168b3611",
       "image": "docs/images/architecture/2026-11-26/completion.zh.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "b30d03bada22d016caf4fa34497d19f4083dfc69686ac1eafadbf83dfd142e66",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
         "core/orchestration/src/mission/lifecycle.rs": "bc5a30babd164c6add499d09dea71c23e0862dc22c28724c62b2a51a559c4e73",
         "apps/integration-server/src/application/outcomes.rs": "46ef38173c70045d55495c3303528c64e16623cd57d0cfca64d2c8fef58a4e1d",
         "apps/integration-server/src/application/memory_use.rs": "0c8903b704672f2ed611a00f5d9d67fe0756c4234e00de4d1fa22743931f3d31"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/completion.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
     },
     {
       "name": "completion",
@@ -282,25 +404,34 @@
         "Advance successor Task",
         "Original Mission goal / Group closure"
       ],
-      "topology": "A clear branching and joining flow: Local Completed -> AwaitingSatisfaction -> Plan-declared Basis; branch to execution-report OR independent verifier evidence (only the declared basis is accepted). Both branches lead toward TaskSatisfied but a separate Memory revoke gate is a mandatory conditional gate when Memory is used, drawn joining before TaskSatisfied. TaskSatisfied -> Control releases Task resources -> Advance successor Task -> Original Mission goal/Group closure. A concise bottom note: missing or negative evidence retains ownership. Do not claim local Completed alone proves the goal. Mission closure also needs all tasks and any configured original-goal gate.",
+      "topology": "Plan-declared alternatives, applicable Memory revoke gate, TaskSatisfied before release and successors, separate original-goal/group closure.",
       "evidence": [
         "core/orchestration/src/mission/lifecycle.rs",
         "apps/integration-server/src/application/outcomes.rs",
         "apps/integration-server/src/application/memory_use.rs"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/completion.en.txt",
-      "prompt_sha256": "999446b9c223b4b71535a61a291e1d270ee2e868f9953f5fcb8cdd3c9528c23c",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/completion.en.reference-v2.fix-01.txt",
+      "prompt_sha256": "1dae8268a557166a916aa74d3c79e97d19b9614363ed23ea31e78e7134ddad44",
       "image": "docs/images/architecture/2026-11-26/completion.en.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "d46cb4bab1882532f7ca68dcc93acf7db60c49ceb59681a50a7d1fea98108754",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
         "core/orchestration/src/mission/lifecycle.rs": "bc5a30babd164c6add499d09dea71c23e0862dc22c28724c62b2a51a559c4e73",
         "apps/integration-server/src/application/outcomes.rs": "46ef38173c70045d55495c3303528c64e16623cd57d0cfca64d2c8fef58a4e1d",
         "apps/integration-server/src/application/memory_use.rs": "0c8903b704672f2ed611a00f5d9d67fe0756c4234e00de4d1fa22743931f3d31"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/completion.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/architecture/2026-11-26/completion.zh.png",
+          "sha256": "b30d03bada22d016caf4fa34497d19f4083dfc69686ac1eafadbf83dfd142e66"
+        }
+      ]
     },
     {
       "name": "state-memory",
@@ -318,19 +449,19 @@
         "Prepare / Import",
         "当前 Use / Revoke"
       ],
-      "topology": "Use two clearly separated lanes. Evidence lane: Node observations -> State Source/TTL -> Live view/Protected evidence. Content lane: Memory Catalog references Scope/Visibility/Placement metadata and Artifact CAS opaque bytes. Artifact CAS -> Spatial fusion Provider -> Artifact CAS produces a NEW immutable revision; distinguish input and output arrows. Artifact CAS -> Consumer Node/Provider -> Prepare/Import -> Current Use/Revoke. Memory Catalog supplies selection metadata to Prepare/Import. Do not draw a raw bytes path through Runtime or put bytes inside State. Include short note: Reference != Import != Current use. Catalog metadata never grants content authorization.",
+      "topology": "Evidence and content lanes separate; original freshness preserved; Catalog metadata versus immutable bytes; new spatial revision; import and current use/revoke distinguished.",
       "evidence": [
         "core/state/src/state_record.rs",
         "core/domain/src/memory.rs",
         "apps/integration-server/src/application/memory_preparation.rs",
         "integrations/spatial-provider/roboguide_spatial_provider/shared_map_job.py"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.zh.txt",
-      "prompt_sha256": "25c6d9d714b64efedad5fb0abe359a07ff414bd0a3e902fb02af8826afc7ca1c",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.zh.reference-v2.fix-01.txt",
+      "prompt_sha256": "f013a776dd37194fa55f6283225a94105252c49055a6314ad3853ac517f86ade",
       "image": "docs/images/architecture/2026-11-26/state-memory.zh.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "9825964ccf0de9dc16cf0fad9a06bbe2a5044c23d1a783a3777010364c3f494e",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
@@ -338,7 +469,16 @@
         "core/domain/src/memory.rs": "45d7a3a309e9a92af121e5b39762313fd9f0e960343506c9ffa629f6fc790997",
         "apps/integration-server/src/application/memory_preparation.rs": "5b96f5e9c7c135b444c0a9505abe085d80bf92a55f317d1e3724543c70c58852",
         "integrations/spatial-provider/roboguide_spatial_provider/shared_map_job.py": "8f8e77fd8a1b12ec30c249a4fee1082c365eda34b8ec5aed1015d942d3c60741"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
     },
     {
       "name": "state-memory",
@@ -356,19 +496,19 @@
         "Prepare / Import",
         "Current Use / Revoke"
       ],
-      "topology": "Use two clearly separated lanes. Evidence lane: Node observations -> State Source/TTL -> Live view/Protected evidence. Content lane: Memory Catalog references Scope/Visibility/Placement metadata and Artifact CAS opaque bytes. Artifact CAS -> Spatial fusion Provider -> Artifact CAS produces a NEW immutable revision; distinguish input and output arrows. Artifact CAS -> Consumer Node/Provider -> Prepare/Import -> Current Use/Revoke. Memory Catalog supplies selection metadata to Prepare/Import. Do not draw a raw bytes path through Runtime or put bytes inside State. Include short note: Reference != Import != Current use. Catalog metadata never grants content authorization.",
+      "topology": "Evidence and content lanes separate; original freshness preserved; Catalog metadata versus immutable bytes; new spatial revision; import and current use/revoke distinguished.",
       "evidence": [
         "core/state/src/state_record.rs",
         "core/domain/src/memory.rs",
         "apps/integration-server/src/application/memory_preparation.rs",
         "integrations/spatial-provider/roboguide_spatial_provider/shared_map_job.py"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.en.txt",
-      "prompt_sha256": "af2da3e3d881c60914b7866e0214f4f5e43119f67c098f861640d2c2fa6a20ea",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.en.reference-v2.fix-01.txt",
+      "prompt_sha256": "b64fa3e78f97ca0ca327d6963a41353b14af2037472deac93b62921e7c0ff7cd",
       "image": "docs/images/architecture/2026-11-26/state-memory.en.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "cc734c0b4d770d12380f317f070e1c32d3c1e2efb1c2fe6fcdd0803f3bec7ecf",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
@@ -376,7 +516,16 @@
         "core/domain/src/memory.rs": "45d7a3a309e9a92af121e5b39762313fd9f0e960343506c9ffa629f6fc790997",
         "apps/integration-server/src/application/memory_preparation.rs": "5b96f5e9c7c135b444c0a9505abe085d80bf92a55f317d1e3724543c70c58852",
         "integrations/spatial-provider/roboguide_spatial_provider/shared_map_job.py": "8f8e77fd8a1b12ec30c249a4fee1082c365eda34b8ec5aed1015d942d3c60741"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/architecture/2026-11-26/state-memory.zh.png",
+          "sha256": "9825964ccf0de9dc16cf0fad9a06bbe2a5044c23d1a783a3777010364c3f494e"
+        }
+      ]
     },
     {
       "name": "recovery",
@@ -395,25 +544,34 @@
         "新 Group / 正常准入",
         "Manual Escalation"
       ],
-      "topology": "Top chain Disconnect/Failure -> Unknown/Hold -> Retain original ownership -> Original Cancel/Revoke intent -> Stop evidence + Original terminal -> Gate checks. After gate checks show TWO distinct authorized paths: Role Recovery -> Match/Commit/Rebind, and Reviewed Plan Revision -> New Group/Normal admission. If evidence, authorization or original budget is unavailable, Gate checks -> Manual Escalation, with ownership retained. No arrow from Unknown straight to Execute. Add a small separate bottom bar: Local EAIOS owns immediate safety. Show command receipt and stop observation as separate evidence, not the same step.",
+      "topology": "Ambiguous effects retain ownership and block new dispatch; original stop/revoke; distinct evidence; gated role/plan recovery versus manual escalation; original budgets retained.",
       "evidence": [
         "apps/integration-server/src/application/safety_stop.rs",
         "apps/integration-server/src/application/recovery.rs",
         "apps/integration-server/src/application/plan_revision/switching.rs"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/recovery.zh.txt",
-      "prompt_sha256": "a61806329bc08c5151a2a15df9790fe4cc45b746428848c635a1a21294d74b71",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/recovery.zh.reference-v2.fix-03.txt",
+      "prompt_sha256": "ca12f4adbd36ffa873d2a1b765fa69e9645bf24a314ea2b11170773e11fb7236",
       "image": "docs/images/architecture/2026-11-26/recovery.zh.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "14e47cc77c77bf6aa749a42f44098496fcf5c70f5ca9f5071e83f0d4ddf53651",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
         "apps/integration-server/src/application/safety_stop.rs": "e2efd67fb7dc5a2e31f5d3f148002d773d110381403f0f3cce3bda16b224d9d7",
         "apps/integration-server/src/application/recovery.rs": "4a15b9d15879427c49a03a46d031447f8a7448b461ad0ae560dc734ebd4605d9",
         "apps/integration-server/src/application/plan_revision/switching.rs": "8b2816383e5976644c2c65ab863da1a269e817ba5bba328f65b5d727d42ae652"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/recovery.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
     },
     {
       "name": "recovery",
@@ -432,25 +590,29 @@
         "New Group / Normal admission",
         "Manual Escalation"
       ],
-      "topology": "Top chain Disconnect/Failure -> Unknown/Hold -> Retain original ownership -> Original Cancel/Revoke intent -> Stop evidence + Original terminal -> Gate checks. After gate checks show TWO distinct authorized paths: Role Recovery -> Match/Commit/Rebind, and Reviewed Plan Revision -> New Group/Normal admission. If evidence, authorization or original budget is unavailable, Gate checks -> Manual Escalation, with ownership retained. No arrow from Unknown straight to Execute. Add a small separate bottom bar: Local EAIOS owns immediate safety. Show command receipt and stop observation as separate evidence, not the same step.",
+      "topology": "Ambiguous effects retain ownership and block new dispatch; original stop/revoke; distinct evidence; gated role/plan recovery versus manual escalation; original budgets retained.",
       "evidence": [
         "apps/integration-server/src/application/safety_stop.rs",
         "apps/integration-server/src/application/recovery.rs",
         "apps/integration-server/src/application/plan_revision/switching.rs"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/recovery.en.txt",
-      "prompt_sha256": "9c71281536a141939bfa01848f80d8d62c94234b54ffea978ce66ec39b0c3c2c",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/recovery.en.reference-v2.fix-01.txt",
+      "prompt_sha256": "b5202afffc2fbaa106be3069d1238d6468e49142efc0bce6d29ab86ce67169cf",
       "image": "docs/images/architecture/2026-11-26/recovery.en.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "d7d3f5e948778b41d85806e5f67ae3a0438793a0b1704c1aa40972544c187a39",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
         "apps/integration-server/src/application/safety_stop.rs": "e2efd67fb7dc5a2e31f5d3f148002d773d110381403f0f3cce3bda16b224d9d7",
         "apps/integration-server/src/application/recovery.rs": "4a15b9d15879427c49a03a46d031447f8a7448b461ad0ae560dc734ebd4605d9",
         "apps/integration-server/src/application/plan_revision/switching.rs": "8b2816383e5976644c2c65ab863da1a269e817ba5bba328f65b5d727d42ae652"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/recovery.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": []
     },
     {
       "name": "cooperation",
@@ -468,19 +630,19 @@
         "边缘 UDP 同步控制",
         "共同 UTC 编排 · 独立 Mission"
       ],
-      "topology": "Four equal numbered panels, each mode heading connects only to its own mechanism. Mode1 -> independent tasks/normal DAG. Mode2 -> TaskSatisfied+Memory handoff. Mode3 -> Shared view/Relation fences. Mode4 -> PeerChannel readiness gate -> Edge UDP sync control. Show Controller and Edge separation inside Mode4: the readiness gate is Control-side, UDP control is Local/provider-side; high-rate motion packets bypass Controller. Separate bottom strip Shared UTC playback/Separate Missions belongs to Independent mode, NOT a fifth mode and not Mode4. Include short note that per-performer Missions provide fleet fault isolation; same-Mission failure retains Mission-wide stop behavior.",
+      "topology": "Four explicit modes; sequential handoff; relation fences; high-rate UDP stays local; independent UTC playback and same-Mission failure boundary distinguished.",
       "evidence": [
         "core/runtime/src/relation/manager.rs",
         "apps/integration-server/src/controller_http/server.rs",
         "integrations/sync-provider/roboguide_sync/sync_engine.py",
         "integrations/sync-provider/roboguide_sync/choreography_engine.py"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/cooperation.zh.txt",
-      "prompt_sha256": "699edc25a0a1b64ee2d9cc93c74cd83cce01a7103d0fe445735155a12906d4fd",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/cooperation.zh.reference-v2.fix-01.txt",
+      "prompt_sha256": "36b7b9d274edfc62dbd657f4e82c6e6befbe66d91cf19f65476244195842e651",
       "image": "docs/images/architecture/2026-11-26/cooperation.zh.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "71d3ae9df6f499edf6d311fd777430dd2df5c7d9843f7143fd9ccc780e4a8b4c",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
@@ -488,7 +650,16 @@
         "apps/integration-server/src/controller_http/server.rs": "bc6e41028cdac353e07df92b88baf320de07a23ee0b2d6189d9a3aef15e261a1",
         "integrations/sync-provider/roboguide_sync/sync_engine.py": "cfbdbb8cb8e0fd69e1d333c91024dd6f5b69c7e7a21a2304cf2ecd32314e9638",
         "integrations/sync-provider/roboguide_sync/choreography_engine.py": "dfb203c6575b540b9e8b9f37f31329ee5e13ddcb79c31070e4d8125e8fc26682"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/cooperation.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
     },
     {
       "name": "cooperation",
@@ -506,19 +677,19 @@
         "Edge UDP sync control",
         "Shared UTC playback · Separate Missions"
       ],
-      "topology": "Four equal numbered panels, each mode heading connects only to its own mechanism. Mode1 -> independent tasks/normal DAG. Mode2 -> TaskSatisfied+Memory handoff. Mode3 -> Shared view/Relation fences. Mode4 -> PeerChannel readiness gate -> Edge UDP sync control. Show Controller and Edge separation inside Mode4: the readiness gate is Control-side, UDP control is Local/provider-side; high-rate motion packets bypass Controller. Separate bottom strip Shared UTC playback/Separate Missions belongs to Independent mode, NOT a fifth mode and not Mode4. Include short note that per-performer Missions provide fleet fault isolation; same-Mission failure retains Mission-wide stop behavior.",
+      "topology": "Four explicit modes; sequential handoff; relation fences; high-rate UDP stays local; independent UTC playback and same-Mission failure boundary distinguished.",
       "evidence": [
         "core/runtime/src/relation/manager.rs",
         "apps/integration-server/src/controller_http/server.rs",
         "integrations/sync-provider/roboguide_sync/sync_engine.py",
         "integrations/sync-provider/roboguide_sync/choreography_engine.py"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/cooperation.en.txt",
-      "prompt_sha256": "aeec69f31b450d4bd8ca590f9ab0a8a3e6cbf1c55222b549e6ff161f27664219",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/cooperation.en.reference-v2.txt",
+      "prompt_sha256": "cc55c7c70bf0dcbc9d334e25b30c07f44c60ab9f6b889ef6e1144d7943b92c7f",
       "image": "docs/images/architecture/2026-11-26/cooperation.en.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "dd44fe9af6d52e0933432cca0f77352fd3c870109d4c22a483949164a8454666",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
@@ -526,7 +697,16 @@
         "apps/integration-server/src/controller_http/server.rs": "bc6e41028cdac353e07df92b88baf320de07a23ee0b2d6189d9a3aef15e261a1",
         "integrations/sync-provider/roboguide_sync/sync_engine.py": "cfbdbb8cb8e0fd69e1d333c91024dd6f5b69c7e7a21a2304cf2ecd32314e9638",
         "integrations/sync-provider/roboguide_sync/choreography_engine.py": "dfb203c6575b540b9e8b9f37f31329ee5e13ddcb79c31070e4d8125e8fc26682"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/cooperation.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/architecture/2026-11-26/cooperation.zh.png",
+          "sha256": "71d3ae9df6f499edf6d311fd777430dd2df5c7d9843f7143fd9ccc780e4a8b4c"
+        }
+      ]
     },
     {
       "name": "deployment",
@@ -545,19 +725,19 @@
         "可选其他 Controller 域",
         "静止 Recovery Tool"
       ],
-      "topology": "Draw software process containers and their OWN distinct storage. Mission Service -> Controller using HTTP; Mission Service attaches Request SQL. Controller attaches Controller SQL/Checkpoint and Artifact CAS. Controller <-> Node Service via gRPC using two directional labeled arrows; Node Service owns Node Journal and connects to Local EAIOS/Providers. Dashed optional area Replica Quorum connects to Controller metadata/content durability, not to robot execution. Another dashed optional Controller domain connects via Federation. Quiescent Recovery Tool reads declared closed storage/content into a separate backup/restore box represented by the label itself, never connects to actuators. Short note: Process != Host != Node != PhysicalEntity. No concrete IPs, credentials, physical failover claims or claim that storage v3 and replication are automatically combined.",
+      "topology": "Separate Mission/Controller/Node processes and storage; Local EAIOS external; optional Replica/Federation and quiescent recovery without device authority.",
       "evidence": [
         "apps/integration-server/src/main.rs",
         "core/controller-replication/src/lib.rs",
         "apps/controller-replica/src/main.rs",
         "apps/recovery-tool/roboguide_recovery/__main__.py"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/deployment.zh.txt",
-      "prompt_sha256": "bc3e34969dcfe739be909d3ca879df769e0341ebd6aecd7a79f19b91804b9d91",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/deployment.zh.reference-v2.txt",
+      "prompt_sha256": "593fc826155db78912d5877ddfbab89b3385fea33cb88156890b66127e74aba3",
       "image": "docs/images/architecture/2026-11-26/deployment.zh.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "52355db7c50651ad516b79eaa5be29bd5ec68d5a81fc02a32012f84eeca57f6b",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
@@ -565,7 +745,16 @@
         "core/controller-replication/src/lib.rs": "1f759e8a0334067390a3a2b779d7b3ca72d009842327f7da39b0dd6ccc9b17fe",
         "apps/controller-replica/src/main.rs": "86e61ff2ff4353dec79819ca9e880f49640cecbcba147ecc40c9d613308f6af4",
         "apps/recovery-tool/roboguide_recovery/__main__.py": "11e2d48b9b47fe1f3afa49fc2a50695178df23f5b6767b0e1a98d6a3d32094bc"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/deployment.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
     },
     {
       "name": "deployment",
@@ -584,19 +773,19 @@
         "Optional other Controller domain",
         "Quiescent Recovery Tool"
       ],
-      "topology": "Draw software process containers and their OWN distinct storage. Mission Service -> Controller using HTTP; Mission Service attaches Request SQL. Controller attaches Controller SQL/Checkpoint and Artifact CAS. Controller <-> Node Service via gRPC using two directional labeled arrows; Node Service owns Node Journal and connects to Local EAIOS/Providers. Dashed optional area Replica Quorum connects to Controller metadata/content durability, not to robot execution. Another dashed optional Controller domain connects via Federation. Quiescent Recovery Tool reads declared closed storage/content into a separate backup/restore box represented by the label itself, never connects to actuators. Short note: Process != Host != Node != PhysicalEntity. No concrete IPs, credentials, physical failover claims or claim that storage v3 and replication are automatically combined.",
+      "topology": "Separate Mission/Controller/Node processes and storage; Local EAIOS external; optional Replica/Federation and quiescent recovery without device authority.",
       "evidence": [
         "apps/integration-server/src/main.rs",
         "core/controller-replication/src/lib.rs",
         "apps/controller-replica/src/main.rs",
         "apps/recovery-tool/roboguide_recovery/__main__.py"
       ],
-      "prompt": "docs/images/architecture/2026-11-26/prompts/deployment.en.txt",
-      "prompt_sha256": "53e8f2ea79c8ca3a3ed076f46f116f454484f67f8c200c4b952a742676f781b3",
+      "prompt": "docs/images/architecture/2026-11-26/prompts/deployment.en.reference-v2.txt",
+      "prompt_sha256": "0af5ee1d9ad9ac02890659299d0e68501cb5a36750fefdc7f06b7ed1c52f178c",
       "image": "docs/images/architecture/2026-11-26/deployment.en.png",
-      "status": "blocked-api",
+      "status": "reviewed",
       "requested_model": "gpt-image-2.6-sunburst",
-      "image_sha256": null,
+      "image_sha256": "990d82ccf8914eaf3248c1b61cde7b247a678fd5a95b2ded1981812a398754cd",
       "width": 1536,
       "height": 1024,
       "evidence_sha256": {
@@ -604,7 +793,17 @@
         "core/controller-replication/src/lib.rs": "1f759e8a0334067390a3a2b779d7b3ca72d009842327f7da39b0dd6ccc9b17fe",
         "apps/controller-replica/src/main.rs": "86e61ff2ff4353dec79819ca9e880f49640cecbcba147ecc40c9d613308f6af4",
         "apps/recovery-tool/roboguide_recovery/__main__.py": "11e2d48b9b47fe1f3afa49fc2a50695178df23f5b6767b0e1a98d6a3d32094bc"
-      }
+      },
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/deployment.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/architecture/2026-11-26/deployment.zh.png",
+          "sha256": "52355db7c50651ad516b79eaa5be29bd5ec68d5a81fc02a32012f84eeca57f6b"
+        }
+      ]
     }
-  ]
+  ],
+  "generation_records": "docs/images/architecture/2026-11-26/generation-records.json"
 }

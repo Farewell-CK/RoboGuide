@@ -8,7 +8,7 @@ import json
 import re
 import struct
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import NotRequired, TypedDict, cast
 
 ROOT = Path(__file__).resolve().parent.parent
 FENCE = re.compile(r"^\x60\x60\x60mermaid\n([\s\S]*?)\n\x60\x60\x60", re.MULTILINE)
@@ -33,6 +33,33 @@ class Diagram(TypedDict):
     evidence_sha256: dict[str, str]
 
 
+class ImageInput(TypedDict):
+    """Describe an original image or an intermediate API output by digest."""
+
+    sha256: str
+    path: NotRequired[str]
+
+
+class GenerationStep(TypedDict):
+    """Record a successful API operation and its exact input provenance."""
+
+    endpoint: str
+    prompt: str
+    prompt_sha256: str
+    inputs: list[ImageInput]
+    output_sha256: str
+
+
+class CompletedImage(TypedDict):
+    """Bind the final reviewed picture to its generation and editing history."""
+
+    figure: str
+    image: str
+    image_sha256: str
+    requested_model: str
+    steps: list[GenerationStep]
+
+
 def digest(value: bytes) -> str:
     """Hash exact bytes without assuming generation is deterministic."""
     return hashlib.sha256(value).hexdigest()
@@ -44,6 +71,58 @@ def asset_path(name: str) -> Path:
     if not path.is_relative_to(ROOT.resolve()):
         raise SystemExit(f"architecture asset escapes repository: {name}")
     return path
+
+
+def verify_generation_records(
+    records_path: str, code_commit: str, registry: dict[str, Diagram]
+) -> None:
+    """Check selected API prompt chains and retained original image references."""
+    records = json.loads(asset_path(records_path).read_text(encoding="utf-8"))
+    if (
+        records.get("schema") != "roboguide.image-generation-records/v1"
+        or records.get("code_commit") != code_commit
+    ):
+        raise SystemExit("architecture generation record baseline differs")
+    completed = cast(list[CompletedImage], records["completed"])
+    by_key = {row["figure"]: row for row in completed}
+    reviewed = {key for key, item in registry.items() if item["status"] == "reviewed"}
+    if set(by_key) != reviewed or len(by_key) != len(completed):
+        raise SystemExit("architecture generation records differ from reviewed figures")
+    outputs = {step["output_sha256"] for row in completed for step in row["steps"]}
+    for key, row in by_key.items():
+        item = registry[key]
+        steps = row["steps"]
+        if (
+            not steps
+            or row["image"] != item["image"]
+            or row["image_sha256"] != item["image_sha256"]
+            or row["requested_model"] != item["requested_model"]
+            or steps[-1]["output_sha256"] != item["image_sha256"]
+            or steps[-1]["prompt"] != item["prompt"]
+            or steps[-1]["prompt_sha256"] != item["prompt_sha256"]
+        ):
+            raise SystemExit(f"architecture generation output differs: {key}")
+        previous: str | None = None
+        for step in steps:
+            prompt = asset_path(step["prompt"])
+            if not prompt.is_file() or digest(prompt.read_bytes()) != step["prompt_sha256"]:
+                raise SystemExit(f"architecture generation prompt changed: {step['prompt']}")
+            endpoint = step["endpoint"]
+            inputs = step["inputs"]
+            if endpoint not in {"/v1/images/generations", "/v1/images/edits"} or bool(inputs) != (
+                endpoint == "/v1/images/edits"
+            ):
+                raise SystemExit(f"architecture generation operation differs: {key}")
+            if previous and previous not in {source["sha256"] for source in inputs}:
+                raise SystemExit(f"architecture generation edit chain differs: {key}")
+            for source in inputs:
+                if "path" in source:
+                    path = asset_path(source["path"])
+                    if not path.is_file() or digest(path.read_bytes()) != source["sha256"]:
+                        raise SystemExit(f"architecture reference image changed: {source['path']}")
+                elif source["sha256"] not in outputs:
+                    raise SystemExit(f"architecture generation intermediate missing: {key}")
+            previous = step["output_sha256"]
 
 
 def diagram_registry(*, allow_pending: bool = False) -> dict[str, Diagram]:
@@ -87,6 +166,7 @@ def diagram_registry(*, allow_pending: bool = False) -> dict[str, Diagram]:
         other = "en" if item["locale"] == "zh" else "zh"
         if f"{item['name']}:{other}" not in registry:
             raise SystemExit(f"missing bilingual architecture image: {key}")
+    verify_generation_records(manifest["generation_records"], manifest["code_commit"], registry)
     return registry
 
 
@@ -108,9 +188,9 @@ def render_figures(text: str, registry: dict[str, Diagram]) -> str:
         )
         if item["status"] != "reviewed":
             message = (
-                "Text preview only: image generation is blocked by API permissions."
+                "Text preview only: this figure is awaiting generation or review."
                 if item["locale"] == "en"
-                else "仅文字预览：生图接口权限尚未开通，当前没有生成图片。"
+                else "仅文字预览：本图尚待生成或核对。"
             )
             return (
                 f'<figure class="rg-architecture-figure rg-pending-image" data-diagram="{key}">'
@@ -136,4 +216,4 @@ def published_asset(name: str, locale: str) -> str:
     path = Path(name)
     stem = path.stem.removesuffix("." + locale)
     localized = path.with_name(stem + path.suffix).as_posix()
-    return ("/en/" if locale == "en" else "/") + localized
+    return ("/en/" if locale == "en" and stem != path.stem else "/") + localized

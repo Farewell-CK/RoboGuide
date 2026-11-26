@@ -1,0 +1,15 @@
+Create the ENGLISH edition of the supplied finalized Chinese topic diagram. Translate every Chinese label, paragraph, invariant, exception and legend accurately into natural technical English. Preserve all geometry, every arrow direction and endpoint, scope boundaries, icons, colors, node numbers and conditional gates. Keep the dense original-repository V2 engineering illustration style. Do not add new claims, capabilities, loops or steps. Keep text legible by modestly adjusting wrapping and font size. Output 1536x1024 PNG without cropping.
+Exact English topic title: Four cooperation modes
+Required technical identifiers / module labels:
+1 · Independent
+Independent tasks / Normal DAG
+2 · SequentialHandoff
+TaskSatisfied + Memory handoff
+3 · ConcurrentCooperation
+Shared view / Relation fences
+4 · TightlyCoupledCooperation
+PeerChannel readiness gate
+Edge UDP sync control
+Shared UTC playback · Separate Missions
+Semantic reference (do not add text not present in the source):
+Four equal numbered panels, each mode heading connects only to its own mechanism. Mode1 -> independent tasks/normal DAG. Mode2 -> TaskSatisfied+Memory handoff. Mode3 -> Shared view/Relation fences. Mode4 -> PeerChannel readiness gate -> Edge UDP sync control. Show Controller and Edge separation inside Mode4: the readiness gate is Control-side, UDP control is Local/provider-side; high-rate motion packets bypass Controller. Separate bottom strip Shared UTC playback/Separate Missions belongs to Independent mode, NOT a fifth mode and not Mode4. Include short note that per-performer Missions provide fleet fault isolation; same-Mission failure retains Mission-wide stop behavior.

@@ -4,7 +4,7 @@
 
 [Current atlas](../architecture/v2/current-architecture.md) · [Prompts and generation records](architecture/2026-11-26/README.md)
 
-原始 V2 PNG 最后修改于 2026-08-17，旧 current-architecture Mermaid 源码最后修改于 2026-10-26。原 PNG、MMD 和 SVG 均作为历史资源保留，不能当作本次图片的生成来源或现行实现证明。
+原始 V2 PNG 最后修改于 2026-08-17，旧 current-architecture Mermaid 源码最后修改于 2026-10-26。原 PNG、MMD 和 SVG 均保留原字节。V2 与 V1.1 PNG 用作本次图片编辑接口的视觉参考，现行语义来自代码核对。
 
 - [Original V2 PNG](roboguide-v2-overall-architecture.png)
 - [Original V1.1 PNG](distributed-embodied-ai-os-architecture-v1.1.png)

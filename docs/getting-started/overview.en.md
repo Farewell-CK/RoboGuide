@@ -10,7 +10,7 @@ RoboGuide is a distributed operating-system framework for heterogeneous embodied
 ## From an objective to a verified result
 
 <!-- diagram:overview:en -->
-![RoboGuide system overview](../images/architecture/2026-11-26/overview.en.png)
+![RoboGuide system framework](../images/architecture/2026-11-26/overview.en.png)
 
 **Mission Intelligence** produces plans; **Orchestration** advances Tasks and evaluates satisfaction; **Control** owns bindings and resource commitments; **Runtime** manages execution attempts. Node Service connects authorized operations to Local EAIOS. State and Memory supply attributed observations and content.
 

@@ -9,7 +9,7 @@ RoboGuide 围绕长期 Mission 联合调度 **Capability · Compute · Space · 
 代码核对：**2026-11-26，`main@3c7136d6`**。文档构建提交与代码核对基线分别记录。
 
 <!-- diagram:overview:zh -->
-![RoboGuide 系统总览](docs/images/architecture/2026-11-26/overview.zh.png)
+![RoboGuide 总体框架](docs/images/architecture/2026-11-26/overview.zh.png)
 
 ## 一项任务如何经过系统
 
@@ -66,4 +66,4 @@ cargo run --locked -p roboguide-node -- --validate scenarios/extension-conforman
 
 当前主线包含多机异构计划执行、来源 State、Memory/CAS、空间融合、协作关系、运行期修订与显式恢复。PR #42 增加部署侧同步行进与定时编排 Provider。能力实现、软件验证、设备效果、跨主机连续性和长期 SLO 必须分别核对；具体范围见[实现状态](docs/reference/implementation-status.md)。
 
-现行图须经生图 API 生成并按源码核对后才能发布，提示词和实际生成状态见[图片来源](docs/images/architecture/2026-11-26/README.md)。历史 V2 PNG、原始 DOCX、ADR 与验收记录保留原时点，见[档案](docs/archive/README.md)。
+现行总体框架与七个专题的中英文 PNG 通过生图 API 参考旧 V2 图的风格重新生成，提示词、来源与代码核对见[图片来源](docs/images/architecture/2026-11-26/README.md)。历史 V2 PNG、原始 DOCX、ADR 与验收记录保留原时点，见[档案](docs/archive/README.md)。
