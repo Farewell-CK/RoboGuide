@@ -240,11 +240,20 @@ def render_mission(raw: JSONObject, mission_id: str) -> str:
         # 这不是超时能解的 —— 需要管理员身份的显式对账(operator 会被 403)。
         lines.append("")
         lines.append("取消未完成的可能原因：该 Mission 有一条未确认的安全停机（safety-stop）。")
-        lines.append("  解除条件：需要管理员身份的显式对账；operator 角色会被拒绝（403 operator role does not authorize）。")
+        lines.append(
+            "  解除条件：需要管理员身份的显式对账；"
+            "operator 角色会被拒绝（403 operator role does not authorize）。"
+        )
         lines.append("  查看记录：GET /v1/executions/<execution_id>/safety-stop")
         lines.append("  提交对账：POST /v1/executions/<execution_id>/safety-stop/reconcile")
-        lines.append("            body 需含 schema_version/command_id/expected_record_digest/execution_generation/")
-        lines.append("            confirmed=true/disposition(no-effects|stopped)/attestation(>=16 字)/evidence(非空对象)")
+        lines.append(
+            "            body 需含 schema_version/command_id/"
+            "expected_record_digest/execution_generation/"
+        )
+        lines.append(
+            "            confirmed=true/disposition(no-effects|stopped)/"
+            "attestation(>=16 字)/evidence(非空对象)"
+        )
     lines.append("AwaitingSatisfaction 表示等待目标验证；本地完成与 Mission 完成分别判定。")
     lines.append("这里展示已记录状态；未提供的失败原因保持未知。")
     return "\n".join(lines)

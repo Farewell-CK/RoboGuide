@@ -17,8 +17,8 @@ from collections.abc import Callable, Iterator
 
 import pytest
 from mission.models import JSONObject
-from roboguide_workbench import client
 from roboguide_workbench import agent_loop as agent_loop
+from roboguide_workbench import client
 from roboguide_workbench.evidence import ReadResult
 
 
