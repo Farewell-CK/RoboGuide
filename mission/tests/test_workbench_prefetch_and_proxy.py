@@ -36,6 +36,7 @@ def _reader(
     """Return a fake read callable that records what was asked for."""
 
     def read(name: str, arguments: JSONObject, remaining: float) -> ReadResult:
+        """Record the read request and answer with the canned text."""
         assert remaining > 0
         calls.append((name, dict(arguments)))
         return ReadResult(text)
@@ -86,6 +87,7 @@ def test_prefetch_skips_injection_when_reads_fail() -> None:
     """Unreadable inventory must yield an empty block, never a fabricated one."""
 
     def read(name: str, arguments: JSONObject, remaining: float) -> ReadResult:
+        """Fail every read, as an unreachable controller would."""
         raise RuntimeError("controller unreachable")
 
     block = agent_loop._prefetch_block(read, time.monotonic() + 10, ("ctl", 1, "/repo"))
@@ -103,6 +105,7 @@ def stalled_proxy() -> Iterator[int]:
     stop = threading.Event()
 
     def serve() -> None:
+        """Accept connections and deliberately never answer the CONNECT."""
         while not stop.is_set():
             try:
                 conn, _ = server.accept()
