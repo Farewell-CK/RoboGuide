@@ -590,6 +590,26 @@ fn competing_missions_get_resources_in_round_order() {
     );
 }
 
+/// The bounded production timer gives the first worker to the same-priority deadline Task.
+#[test]
+fn earlier_deadline_gets_first_control_binding() {
+    let mut b: serde_json::Value = serde_json::from_str(&plan_body("b", 1)).unwrap();
+    b["tasks"][0]["timing"]["completion_deadline_offset_ms"] = 25.into();
+    let fixture = Fixture::with_plans(
+        decode_mission_plan(&plan_body("a", 1)).unwrap(),
+        decode_mission_plan(&b.to_string()).unwrap(),
+    );
+    fixture.tick().unwrap();
+    let live = fixture.controller.lock().unwrap();
+    let attempts = live.bridge.attempt_history();
+    assert_eq!(attempts.len(), 2);
+    let first_worker = attempts
+        .iter()
+        .find(|attempt| attempt.command().node_id().as_str() == "worker-0")
+        .unwrap();
+    assert_eq!(first_worker.command().mission_id().as_str(), "b");
+}
+
 /// Per-input work is bounded and later turns preserve both original bindings and unserved queue history.
 #[test]
 fn many_roots_are_bounded_per_timer_and_do_not_duplicate_attempts() {

@@ -9,7 +9,9 @@ Orchestration 增加 logical Ready-Task dispatch policy，持久保存每个 Mis
 last service ordinal 和每个 Ready Task 的首次排队 ordinal。ordinal 由已保存的最大 service
 ordinal 推进，不使用 Node 时钟、不在 restore 后刷新等待年龄。priority 为 0..255，
 默认 128；等待每 8 次 logical service 增加一级、最多增加 512。同等有效 priority
-使用旧 service ordinal、稳定 Mission/plan 顺序打破平局。每轮一个 Mission 最多选择
+下，普通候选按绝对完成截止期由早到晚排序（原 Mission 接受时间加 Task 的完成期 offset），
+没有完成期的候选排在有完成期的候选之后。截止期相同时继续使用 waiting/service ordinal
+和稳定 Mission/plan 顺序。每轮一个 Mission 最多选择
 一个 Task，轮内其他 Mission 获得机会后才开启下一轮；每个 input/timer 最多 32 次
 logical Task progression，每个 Task 在该 transition 内最多尝试一次。
 失败的资源尝试保留原 waiting ordinal；只有新的 Control binding 或 Runtime preparation

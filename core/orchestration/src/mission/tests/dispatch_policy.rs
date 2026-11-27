@@ -4,6 +4,12 @@ use super::*;
 
 /// Builds independent normalized roots with exact resource contracts and logical Actors.
 pub(crate) fn plan(mission: &str, count: usize) -> MissionPlan {
+    plan_with_deadlines(mission, &vec![None; count])
+}
+
+/// Builds independent roots with their accepted completion offsets in declaration order.
+fn plan_with_deadlines(mission: &str, deadlines: &[Option<u64>]) -> MissionPlan {
+    let count = deadlines.len();
     let operation = serde_json::json!({"namespace":"compute","name":"work","version":"v1"});
     decode_mission_plan(&serde_json::json!({
         "schema_version":"roboguide.mission-plan/v0.7",
@@ -12,15 +18,70 @@ pub(crate) fn plan(mission: &str, count: usize) -> MissionPlan {
         "contexts":[{"id":"context","roles":(0..count).map(|index|
             serde_json::json!({"id":format!("participant-{index}"),"actor":format!("actor-{index}")})).collect::<Vec<_>>(),
             "relations":[],"coupling_mode":"independent"}],
-        "tasks":(0..count).map(|index|serde_json::json!({
+        "tasks":deadlines.iter().enumerate().map(|(index, deadline)|serde_json::json!({
             "id":format!("task-{index}"),"description":"work complete","context_id":"context","depends_on":[],
-            "timing":{"earliest_start_offset_ms":0,"latest_start_offset_ms":null,"completion_deadline_offset_ms":null},
+            "timing":{"earliest_start_offset_ms":0,"latest_start_offset_ms":null,"completion_deadline_offset_ms":deadline},
             "satisfaction":{"expected_effect":"work complete","basis":"execution-report","verifier":null},
             "roles":[{"id":"worker","context_role":format!("participant-{index}"),"resource_scope":"task",
                 "requirements":{"capabilities":[{"contract":operation,"constraints":[]}],"resources":[{"kind":"compute","units":1}]},
                 "execution_intent":{"operation":operation,"objective":"independent work","parameters":{}}}]
         })).collect::<Vec<_>>(),
     }).to_string()).unwrap()
+}
+
+/// Earlier absolute deadlines take one equal-priority turn before no-deadline work.
+#[test]
+fn deadlines_use_mission_acceptance_and_preserve_priority_and_rounds() {
+    let mut orchestrator = MissionOrchestrator::new();
+    let mut control = ControlPlane::new();
+    let mut events = InMemoryEventLog::new();
+    let correlation = CorrelationId::new("deadline-order").unwrap();
+    for (name, accepted_at, deadlines) in [
+        ("b", 10, [None, Some(100), Some(100)]),
+        ("a", 90, [None, Some(30), Some(40)]),
+    ] {
+        orchestrator
+            .submit(
+                plan_with_deadlines(name, &deadlines),
+                ExecutionGroupId::new(format!("group-{name}")).unwrap(),
+                &mut control,
+                TimestampMs::new(accepted_at),
+                &correlation,
+                &mut events,
+            )
+            .unwrap();
+    }
+
+    let now = TimestampMs::new(95);
+    let first = orchestrator
+        .next_dispatch_task(&control, now, &BTreeSet::new(), &BTreeSet::new())
+        .unwrap()
+        .unwrap();
+    // B's offset is larger, but its absolute deadline is earlier (110 before 120).
+    assert_eq!(first.mission_id().as_str(), "b");
+    assert_eq!(first.task_id().as_str(), "task-1");
+
+    let next = orchestrator
+        .next_dispatch_task(
+            &control,
+            now,
+            &BTreeSet::from([first.clone()]),
+            &BTreeSet::from([first.mission_id().clone()]),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.mission_id().as_str(), "a");
+    assert_eq!(next.task_id().as_str(), "task-1");
+
+    orchestrator
+        .set_mission_priority(next.mission_id(), 129, now, &correlation, &mut events)
+        .unwrap();
+    assert_eq!(
+        orchestrator
+            .next_dispatch_task(&control, now, &BTreeSet::new(), &BTreeSet::new())
+            .unwrap(),
+        Some(next)
+    );
 }
 
 /// Accepts exact plans through normal Group creation with no fabricated execution or resource claim.
