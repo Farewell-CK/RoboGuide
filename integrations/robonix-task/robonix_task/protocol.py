@@ -22,6 +22,8 @@ from google.protobuf import (
 
 SUBMIT_CONTRACT = "robonix/system/liaison/submit"
 SUBMIT_ROUTE = "/robonix.contracts.RobonixSystemLiaisonSubmit/SubmitTask"
+DELEGATION_OPERATION = "task.delegate@v1"
+DELEGATION_AUTHORITY = "controller-admitted-delegate"
 EVENT_NAMES = (
     "text_chunk",
     "plan",
@@ -78,8 +80,57 @@ def execution_intent(request: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], intent)
 
 
-def task(record: dict[str, Any], user_id: str, *, abort: bool = False) -> Any:
-    """Build an API Task using persisted identities, never generating IDs at send time."""
+def canonical_operation(intent: dict[str, Any]) -> str:
+    """Return the canonical namespace.name@version operation identifier from an intent."""
+    op = intent.get("operation")
+    if isinstance(op, str) and op:
+        return op
+    if (
+        isinstance(op, dict)
+        and set(op) == {"namespace", "name", "version"}
+        and all(isinstance(op[key], str) and op[key] for key in ("namespace", "name", "version"))
+    ):
+        return f"{op['namespace']}.{op['name']}@{op['version']}"
+    raise ValueError("canonical operation required")
+
+
+def has_delegation_authority(task_message: Any) -> bool:
+    """Return True only when trusted API task context carries Controller delegation authority."""
+    if getattr(task_message, "source", None) != 2:
+        return False
+    raw_context = getattr(task_message, "context_json", "")
+    if not isinstance(raw_context, str) or not raw_context.strip():
+        return False
+    try:
+        context = json.loads(raw_context)
+    except ValueError:
+        return False
+    if not isinstance(context, dict):
+        return False
+    if (
+        context.get("modality") != "api"
+        or context.get("interaction_mode") != "task"
+        or context.get("abort_turn")
+    ):
+        return False
+    dispatch = context.get("rg_dispatch")
+    if not isinstance(dispatch, dict):
+        return False
+    return (
+        dispatch.get("operation") == DELEGATION_OPERATION
+        and dispatch.get("authority") == DELEGATION_AUTHORITY
+        and dispatch.get("local_motion_permit_required") is False
+    )
+
+
+def task(
+    record: dict[str, Any],
+    user_id: str,
+    *,
+    abort: bool = False,
+    delegation_admitted: bool = False,
+) -> Any:
+    """Build an API Task using persisted identities, gating delegation authority explicitly."""
     context: dict[str, Any] = {
         "user_id": user_id,
         "modality": "api",
@@ -89,16 +140,15 @@ def task(record: dict[str, Any], user_id: str, *, abort: bool = False) -> Any:
     intent = execution_intent(record["request"])
     if abort:
         context["abort_turn"] = True
-    else:
-        op = intent.get("operation")
-        operation_id = (
-            f"{op['namespace']}.{op['name']}@{op['version']}"
-            if isinstance(op, dict) and {"namespace", "name", "version"} <= set(op)
-            else op
-        )
+    elif delegation_admitted:
+        operation_id = canonical_operation(intent)
+        if operation_id != DELEGATION_OPERATION:
+            raise ValueError(
+                f"delegation authority is restricted to {DELEGATION_OPERATION}, got {operation_id}"
+            )
         dispatch_meta: dict[str, Any] = {
             "operation": operation_id,
-            "authority": "controller-admitted-delegate",
+            "authority": DELEGATION_AUTHORITY,
             "local_motion_permit_required": False,
         }
         if intent.get("mission_id") is not None:

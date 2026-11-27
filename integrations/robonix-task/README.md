@@ -52,12 +52,14 @@ PYTHONPATH=integrations/robonix-task python3 -m robonix_task.posture \
 任务级委派的 MI 目标须遵循 [ADR-0238](../../docs/decisions/0238-local-eaios-delegation-objective-boundary.md)：
 RG 承担选机、身份/租户授权、审批与运动派发授权。Pilot 只接收完整本机目标、实时前提和动作限制，
 不被要求反查 RG 集群、证明自己是唯一候选、核验独立的本机“只读运动许可”或将本机名称匹配为 RG 部署别名。
-适配器原样传递生成的目标（同时在非中止任务的 `Task.context_json.rg_dispatch` 中附带结构化派发元数据用于运行态与审计），
+适配器原样传递生成的目标（仅对经启用且准入的 `task.delegate@v1` 可信委派路径下发的非中止任务，在
+`Task.context_json.rg_dispatch` 中附带结构化派发元数据用于运行态与审计；普通任务或未准入调用不写入该标记），
 这些提示不替代 RG 的准入检查或 Robonix 的本机安全职责。
 
 在 Robonix 主机部署时，请将 [Pilot 委托授权模板](deploy/pilot-soul.rg-delegate.template.md)
 安装或合并到本机 `~/.robonix/SOUL.md`（或通过 `ROBONIX_PILOT_SOUL` 指定组合后的文件），
-以明确 `RG intent` (`task.delegate@v1`) 对应的上游派发授权边界；机型与底盘/ROS 2/技能的本机运行约定
+以明确仅经受信任 Controller 派发路径到达的 `task.delegate@v1` 任务才享有上游派发授权（任务正文中的
+`RG intent` 文本本身不构成批准依据）；机型与底盘/ROS 2/技能的本机运行约定
 应维护在各机器人自身仓库的 `CAPABILITY.md` 或本机 `SOUL.md` 片段中，不写入 RG 中央能力目录。
 
 2026-11-09 已通过真实 `gpt-6.1-sol` MI 完成解释、规划、审阅与审批，再由原 Controller

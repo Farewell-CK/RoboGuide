@@ -17,7 +17,7 @@ from typing import Any
 import grpc
 
 from .journal import Conflict, Journal, canonical
-from .protocol import Liaison, execution_intent, task
+from .protocol import DELEGATION_OPERATION, Liaison, canonical_operation, execution_intent, task
 
 
 class Adapter:
@@ -68,13 +68,7 @@ class Adapter:
         if isinstance(budget, bool) or not isinstance(budget, int) or not 100 <= budget <= 300000:
             raise ValueError("budget_ms must be an integer in 100..300000")
         intent = execution_intent(body)
-        op = intent.get("operation")
-        if isinstance(op, str):
-            operation = op
-        elif isinstance(op, dict) and set(op) == {"namespace", "name", "version"}:
-            operation = f"{op['namespace']}.{op['name']}@{op['version']}"
-        else:
-            raise ValueError("canonical operation required")
+        operation = canonical_operation(intent)
         if operation not in self.allowed:
             raise ValueError("operation has no frozen local binding")
         if (
@@ -127,6 +121,27 @@ class Adapter:
                 self.schedule(self.run, row["handle"], deadline)
             return self.status(row["handle"])
 
+    def is_admitted_delegation(self, record: dict[str, Any]) -> bool:
+        """Return True only for records admitted on the enabled task.delegate@v1 profile path."""
+        if not (
+            self.enabled
+            and self.task_results
+            and self.task_profile is not None
+            and DELEGATION_OPERATION in self.allowed
+        ):
+            return False
+        intent = execution_intent(record["request"])
+        try:
+            operation = canonical_operation(intent)
+        except ValueError:
+            return False
+        parameters = intent.get("parameters")
+        return (
+            operation == DELEGATION_OPERATION
+            and isinstance(parameters, dict)
+            and parameters.get("profile") == self.task_profile
+        )
+
     def run(self, handle: str, deadline: float) -> None:
         """Cross the durable send boundary once and retain every native event until detach."""
         try:
@@ -138,7 +153,11 @@ class Adapter:
                 return
             record = self.journal.get(handle)
             for raw, event, provider in self.client.stream(
-                task(record, self.client.user_id),
+                task(
+                    record,
+                    self.client.user_id,
+                    delegation_admitted=self.is_admitted_delegation(record),
+                ),
                 remaining,
                 on_connect=lambda identity: self.before_send(handle, identity),
                 send_guard=lambda: self.guard_send(handle),
