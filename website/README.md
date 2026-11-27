@@ -20,6 +20,8 @@ content SHA/date and source-derived contract versions remain in `content-baselin
 `doc_inventory.py` verifies complete coverage of the original Git tree, exact preserved Git blobs,
 reading destinations and bilingual route mappings. Historical ADRs, acceptance and audit originals
 retain their original paths and content. Rewritten sources have exact pre-refresh snapshots.
+When the reviewed commit is missing from a checkout, synchronization fetches that exact SHA
+from the public upstream repository before running the same inventory checks.
 
 ## API-generated architecture figures
 
@@ -75,7 +77,9 @@ The production Worker must build `main` only. In Cloudflare Workers & Pages → 
 Settings → Builds → Branch control, set the production branch to `main`. Keep preview builds disabled
 until the preview deploy command has been checked to avoid promotion to the production Worker.
 Branch controls are a Cloudflare account setting; `wrangler.jsonc` does not select the production Git
-branch. A repository change alone cannot fix an older branch's deploy command.
+branch. With non-production builds enabled, set their Version command to
+`cd website && npx wrangler deploy --dry-run` for build verification without publishing.
+Reserve `cd website && npx wrangler deploy` for the production Deploy command.
 
 On 2026-10-22, the production build metadata changed from main's `495a6d2` to development commit
 `6c5a099`, and both new atlas routes returned 404. This was verified from actual `build-info.json` and

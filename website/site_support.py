@@ -171,7 +171,7 @@ def write_reference(destination: Path) -> None:
         "versions": versions,
     }
     (destination / "build-info.json").write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n"
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     for en in (False, True):
         heading = "Versions and build provenance" if en else "版本与构建来源"
@@ -231,7 +231,9 @@ def write_reference(destination: Path) -> None:
             "· [Archives](archives.md)",
             "",
         ]
-        (destination / ("reference.en.md" if en else "reference.md")).write_text("\n".join(lines))
+        (destination / ("reference.en.md" if en else "reference.md")).write_text(
+            "\n".join(lines), encoding="utf-8"
+        )
 
 
 def legacy_anchors(page: str) -> str:

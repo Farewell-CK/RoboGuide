@@ -26,6 +26,23 @@ def baseline_objects(commit: str) -> dict[str, str]:
     """Read exact original blob identities, including Unicode paths, without checking out files."""
     if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise SystemExit("documentation inventory needs a complete original commit")
+    if subprocess.run(
+        ["git", "cat-file", "-e", f"{commit}^{{tree}}"], cwd=ROOT, stderr=subprocess.DEVNULL
+    ).returncode:
+        # Workers Builds may check out only HEAD and omit the origin remote.
+        subprocess.run(
+            [
+                "git",
+                "fetch",
+                "--depth=1",
+                "--no-tags",
+                "--filter=blob:none",
+                "https://github.com/Farewell-CK/RoboGuide.git",
+                commit,
+            ],
+            cwd=ROOT,
+            check=True,
+        )
     raw = subprocess.check_output(
         ["git", "ls-tree", "-r", "-z", commit, "--", "docs", "README.md", "website/pages"], cwd=ROOT
     )
