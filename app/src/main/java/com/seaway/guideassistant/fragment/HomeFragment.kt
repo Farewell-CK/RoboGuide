@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -14,6 +15,8 @@ import com.seaway.guideassistant.auth.LoginActivity
 import com.seaway.guideassistant.base.BaseBindFragment
 import com.seaway.guideassistant.ble.GlassesManager
 import com.seaway.guideassistant.databinding.FragmentHomeBinding
+import com.seaway.guideassistant.ble.cane.CaneManager
+import com.seaway.guideassistant.cane.CaneAttitudeActivity
 import com.seaway.guideassistant.device.DeviceDetailSheet
 import com.seaway.guideassistant.mock.DeviceInfo
 import com.seaway.guideassistant.mock.MockDeviceRepository
@@ -33,6 +36,16 @@ class HomeFragment : BaseBindFragment<FragmentHomeBinding>() {
         bindActions()
         observeGlasses()
         observeRobotConnection()
+        observeCane()
+    }
+
+    /** 盲杖蓝牙连接/电量变化时刷新设备卡片 */
+    private fun observeCane() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                CaneManager.uiState.collect { buildDeviceCards() }
+            }
+        }
     }
 
     /** 与 DeviceDetailSheet/DevicesFragment 共享同一个 RobotConnectionManager 状态源，保持机器狗连接状态实时同步 */
@@ -168,7 +181,15 @@ class HomeFragment : BaseBindFragment<FragmentHomeBinding>() {
 
     private fun bindActions() {
         bind.actionNavigate.setOnClickListener { goToTab(1) }
-        bind.actionObstacle.setOnClickListener { goToTab(3) }
+        bind.actionObstacle.setOnClickListener {
+            if (CaneManager.isReady) {
+                goActivity(CaneAttitudeActivity::class.java)
+            } else {
+                val msg = getString(R.string.cane_not_connected_toast)
+                Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+                bind.root.announceA11y(msg)
+            }
+        }
         bind.actionAgent.setOnClickListener { goToTab(2) }
         bind.actionDevices.setOnClickListener { goToTab(4) }
         bind.btnLogout.setOnClickListener {

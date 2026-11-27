@@ -48,8 +48,33 @@
     <string name="cd_voice_fab">唤醒智能体，功能开发中</string>
     <string name="action_navigate_title">出行导航</string>
     <string name="action_navigate_desc">融合导航与避障，杖体震动指引</string>
-    <string name="action_obstacle_title">避障模式</string>
-    <string name="action_obstacle_desc">独立开启环境识别与避障反馈</string>
+    <string name="action_obstacle_title">盲杖模式</string>
+    <string name="action_obstacle_desc">实时查看盲杖姿态数据</string>
+    <string name="cane_not_connected_toast">盲杖未连接，请先在设备页连接盲杖</string>
+    <string name="cane_attitude_title">盲杖模式</string>
+    <string name="cane_attitude_waiting">已连接，等待盲杖数据…</string>
+    <string name="cane_attitude_disconnected">盲杖已断开连接</string>
+    <string name="cane_section_state">盲杖状态</string>
+    <string name="cane_stat_sector">摆动角</string>
+    <string name="cane_stat_reach">当前水平距离</string>
+    <string name="cane_stat_peak">碰撞强度</string>
+    <string name="cane_stat_state">运动状态</string>
+    <string name="cane_stat_facing">人体朝向</string>
+    <string-array name="cane_state_descs">
+        <item>没有摆动</item>
+        <item>正在左右摆（正常走路）</item>
+        <item>杖身接近水平（被抬起/横置），reach 无效</item>
+        <item>检测到撞击；优先级高于标定中，此时 peak &gt; 0</item>
+        <item>正在做磁标定；期间 orientation / body_facing 不可靠，但 tilt / reach / sector / peak 照常有效</item>
+        <item>杖尖突然下落（失重）随后被下方顶住。优先于标定中，低于碰撞中</item>
+    </string-array>
+    <string name="cane_peak_fmt">%1$d级 %2$s（%3$d）</string>
+    <string name="cane_radar_left">左</string>
+    <string name="cane_radar_front">前</string>
+    <string name="cane_radar_right">右</string>
+    <string name="cane_cd_radar_fmt">摆动角 %1$s，水平距离 %2$s 厘米</string>
+    <string name="cane_cd_compass_fmt">杖尖方位 %1$s</string>
+    <string name="cane_cd_tilt_fmt">盲杖与竖直方向夹角 %1$s</string>
     <string name="action_agent_title">智能体</string>
     <string name="action_agent_desc">语音助手，随时为您解答</string>
     <string name="action_devices_title">设备管理</string>
@@ -152,7 +177,21 @@
     <string name="sheet_label_sync">最近同步</string>
     <string name="sheet_label_features">功能特性</string>
     <string name="sheet_btn_disconnect">断开连接</string>
-    <string name="sheet_btn_test_vibration">测试震动</string>
+    <string name="cane_btn_connect">连接导盲杖</string>
+    <string name="cane_status_scanning">正在扫描导盲杖…</string>
+    <string name="cane_status_connecting">正在连接导盲杖…</string>
+    <string name="cane_section_vibration">震动（单路 300ms / 100%）</string>
+    <string name="cane_section_light_cal">灯 / 标定</string>
+    <string name="cane_dir_front">前</string>
+    <string name="cane_dir_right">右</string>
+    <string name="cane_dir_back">后</string>
+    <string name="cane_dir_left">左</string>
+    <string name="cane_vib_all">四路一起</string>
+    <string name="cane_vib_stop">全停</string>
+    <string name="cane_light_on">灯开</string>
+    <string name="cane_light_off">灯关</string>
+    <string name="cane_cal_start">磁标定开始</string>
+    <string name="cane_cal_abort">中止标定</string>
     <string name="sheet_btn_firmware_update">固件升级</string>
     <string name="sheet_btn_bind_dog">绑定机器狗</string>
     <string name="sheet_bind_dog_success">正在搜索机器狗设备… 发现一台导盲机器狗，正在配对绑定… 绑定成功！</string>

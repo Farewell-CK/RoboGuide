@@ -166,4 +166,16 @@
     <color name="color_warning">#D29922</color>
     <color name="color_danger">#F85149</color>
     <color name="color_accent">#79C0FF</color>
+    <!-- 盲杖姿态页（设计稿） -->
+    <color name="cane_bg">#001426</color>
+    <color name="cane_cyan">#00DBFA</color>
+    <color name="cane_cyan_light">#8BEAFF</color>
+    <color name="cane_card_stroke">#80D9F7FF</color>
+    <color name="cane_divider">#73D4EBFF</color>
+    <color name="cane_state_idle">#D5D5D5</color>
+    <color name="cane_state_swing">#00DFF9</color>
+    <color name="cane_state_collide">#FFC400</color>
+    <color name="cane_state_calib">#00C937</color>
+    <color name="cane_state_pit">#FF3036</color>
+    <color name="cane_dot_off">#68727A</color>
 </resources>

@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_cane_attitude"
+    android:fillViewport="true"
+    android:scrollbars="none">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="@dimen/dp_10"
+        android:paddingTop="?attr/actionBarSize"
+        android:paddingEnd="@dimen/dp_10"
+        android:paddingBottom="@dimen/dp_16">
+
+        <!-- 仪表卡片：左 = 摆动雷达 + 指南针，右 = 人与盲杖夹角（左右 500:301，与设计稿一致） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/dp_4"
+            android:background="@drawable/bg_cane_card"
+            android:orientation="horizontal"
+            android:paddingTop="@dimen/dp_12"
+            android:paddingBottom="@dimen/dp_10">
+
+            <androidx.constraintlayout.widget.ConstraintLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="500">
+
+                <androidx.constraintlayout.widget.Guideline
+                    android:id="@+id/guide_radar_start"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    app:layout_constraintGuide_percent="0.068" />
+
+                <androidx.constraintlayout.widget.Guideline
+                    android:id="@+id/guide_radar_end"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    app:layout_constraintGuide_percent="0.994" />
+
+                <androidx.constraintlayout.widget.Guideline
+                    android:id="@+id/guide_compass_end"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    app:layout_constraintGuide_percent="0.944" />
+
+                <com.seaway.guideassistant.cane.CaneRadarView
+                    android:id="@+id/radar"
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    app:layout_constraintDimensionRatio="463:429"
+                    app:layout_constraintEnd_toEndOf="@id/guide_radar_end"
+                    app:layout_constraintStart_toStartOf="@id/guide_radar_start"
+                    app:layout_constraintTop_toTopOf="parent" />
+
+                <com.seaway.guideassistant.cane.CaneCompassView
+                    android:id="@+id/compass"
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    app:layout_constraintDimensionRatio="1:1"
+                    app:layout_constraintEnd_toStartOf="@id/guide_compass_end"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:layout_constraintWidth_percent="0.19" />
+            </androidx.constraintlayout.widget.ConstraintLayout>
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="match_parent"
+                android:layout_marginTop="@dimen/dp_2"
+                android:layout_marginBottom="@dimen/dp_2"
+                android:background="@color/cane_divider" />
+
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="301"
+                android:paddingStart="@dimen/dp_8"
+                android:paddingEnd="@dimen/dp_8">
+
+                <com.seaway.guideassistant.cane.CaneTiltView
+                    android:id="@+id/tilt"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="bottom" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <!-- 数据概览：摆动角 | 当前水平距离 | 碰撞强度 | 运动状态 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/dp_12"
+            android:background="@drawable/bg_cane_card"
+            android:orientation="horizontal"
+            android:paddingTop="@dimen/dp_8"
+            android:paddingBottom="@dimen/dp_8">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="181"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/CaneOverviewLabel"
+                    android:text="@string/cane_stat_sector" />
+
+                <TextView
+                    android:id="@+id/tv_sector"
+                    style="@style/CaneOverviewValue" />
+            </LinearLayout>
+
+            <View style="@style/CaneOverviewDivider" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="220"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/CaneOverviewLabel"
+                    android:text="@string/cane_stat_reach" />
+
+                <TextView
+                    android:id="@+id/tv_reach"
+                    style="@style/CaneOverviewValue" />
+            </LinearLayout>
+
+            <View style="@style/CaneOverviewDivider" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="204"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/CaneOverviewLabel"
+                    android:text="@string/cane_stat_peak" />
+
+                <com.seaway.guideassistant.cane.CanePeakDotsView
+                    android:id="@+id/peak_dots"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/dp_8" />
+            </LinearLayout>
+
+            <View style="@style/CaneOverviewDivider" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="196"
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/CaneOverviewLabel"
+                    android:text="@string/cane_stat_state" />
+
+                <TextView
+                    android:id="@+id/tv_state"
+                    style="@style/CaneOverviewValue"
+                    android:layout_marginTop="@dimen/dp_4"
+                    android:background="@drawable/bg_cane_pill"
+                    android:paddingStart="@dimen/dp_10"
+                    android:paddingTop="@dimen/dp_3"
+                    android:paddingEnd="@dimen/dp_10"
+                    android:paddingBottom="@dimen/dp_3"
+                    android:textSize="@dimen/sp_14" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 盲杖状态表：高亮当前 state 所在行 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/dp_12"
+            android:background="@drawable/bg_cane_card"
+            android:orientation="vertical"
+            android:padding="@dimen/dp_9">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/dp_4"
+                android:layout_marginBottom="@dimen/dp_8"
+                android:text="@string/cane_section_state"
+                android:textColor="@color/white"
+                android:textSize="@dimen/sp_17"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:id="@+id/container_states"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_cane_table"
+                android:orientation="vertical" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tv_offline"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/dp_16"
+            android:gravity="center"
+            android:text="@string/cane_attitude_waiting"
+            android:textColor="@color/color_warning"
+            android:textSize="@dimen/sp_13" />
+    </LinearLayout>
+</ScrollView>

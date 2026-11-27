@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minHeight="@dimen/dp_32"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="121"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/dp_8"
+        android:paddingEnd="@dimen/dp_4">
+
+        <View
+            android:id="@+id/v_dot"
+            android:layout_width="@dimen/dp_14"
+            android:layout_height="@dimen/dp_14"
+            android:background="@drawable/bg_cane_row_dot" />
+
+        <TextView
+            android:id="@+id/tv_index"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:textColor="@color/white"
+            android:textSize="@dimen/sp_12" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="1dp"
+        android:layout_height="match_parent"
+        android:background="#7742677E" />
+
+    <TextView
+        android:id="@+id/tv_name"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="158"
+        android:paddingStart="@dimen/dp_8"
+        android:paddingEnd="@dimen/dp_4"
+        android:textColor="@color/white"
+        android:textSize="@dimen/sp_14"
+        android:textStyle="bold" />
+
+    <View
+        android:layout_width="1dp"
+        android:layout_height="match_parent"
+        android:background="#7742677E" />
+
+    <TextView
+        android:id="@+id/tv_desc"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="480"
+        android:paddingStart="@dimen/dp_8"
+        android:paddingTop="@dimen/dp_6"
+        android:paddingEnd="@dimen/dp_4"
+        android:paddingBottom="@dimen/dp_6"
+        android:textColor="@color/white"
+        android:textSize="@dimen/sp_11"
+        android:textStyle="bold" />
+</LinearLayout>

@@ -9,6 +9,7 @@ import com.orhanobut.logger.Logger
 import com.seaway.smallutils.SmallUtils
 import com.seaway.smallutils.TtsUtils
 import com.seaway.guideassistant.ble.GlassesManager
+import com.seaway.guideassistant.ble.cane.CaneManager
 import com.seaway.guideassistant.module.httpModule
 import com.seaway.guideassistant.module.robotModule
 import com.seaway.guideassistant.ws.DeviceWatchClient
@@ -58,6 +59,7 @@ class MyApplication : Application() {
         TtsUtils.init(this)
         //初始化眼镜SDK
         GlassesManager.init(this)
+        CaneManager.init(this)
         //初始化设备监控WebSocket（状态/画面/导航上报）
         DeviceWatchClient.connect()
     }

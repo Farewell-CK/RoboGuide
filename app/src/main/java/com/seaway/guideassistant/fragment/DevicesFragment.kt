@@ -12,6 +12,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.seaway.guideassistant.R
 import com.seaway.guideassistant.base.BaseBindFragment
 import com.seaway.guideassistant.databinding.FragmentDevicesBinding
+import com.seaway.guideassistant.ble.cane.CaneManager
 import com.seaway.guideassistant.device.DeviceDetailSheet
 import com.seaway.guideassistant.mock.DeviceInfo
 import com.seaway.guideassistant.mock.MockDeviceRepository
@@ -27,6 +28,16 @@ class DevicesFragment : BaseBindFragment<FragmentDevicesBinding>() {
         buildDeviceCards()
         bind.btnScan.setOnClickListener { startScan() }
         observeRobotConnection()
+        observeCane()
+    }
+
+    /** 盲杖蓝牙连接/电量变化时刷新设备卡片 */
+    private fun observeCane() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                CaneManager.uiState.collect { buildDeviceCards() }
+            }
+        }
     }
 
     /** 与 DeviceDetailSheet/HomeFragment 共享同一个 RobotConnectionManager 状态源，保持机器狗连接状态实时同步 */

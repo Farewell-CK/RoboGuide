@@ -7,6 +7,7 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -15,6 +16,9 @@ import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.chip.Chip
 import com.seaway.guideassistant.R
 import com.seaway.guideassistant.ble.GlassesManager
+import com.seaway.guideassistant.ble.cane.CaneBleClient
+import com.seaway.guideassistant.ble.cane.CaneManager
+import com.seaway.guideassistant.ble.cane.CaneProtocol
 import com.seaway.guideassistant.databinding.SheetDeviceDetailBinding
 import com.seaway.guideassistant.mock.DeviceInfo
 import com.seaway.guideassistant.mock.MockDeviceRepository
@@ -53,6 +57,22 @@ class DeviceDetailSheet : BottomSheetDialogFragment() {
         deviceId = arguments?.getString(ARG_DEVICE_ID) ?: ""
         bind.btnClose.setOnClickListener { dismiss() }
         renderDevice()
+        if (deviceId == "cane") observeCane()
+    }
+
+    /** 盲杖连接状态/电量变化时重绘；命令结果与错误以 Toast + 无障碍播报反馈 */
+    private fun observeCane() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch { CaneManager.uiState.collect { renderDevice() } }
+                launch {
+                    CaneManager.messages.collect { msg ->
+                        Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+                        view?.announceA11y(msg)
+                    }
+                }
+            }
+        }
     }
 
     private fun renderDevice() {
@@ -147,6 +167,7 @@ class DeviceDetailSheet : BottomSheetDialogFragment() {
             device.id == "dog" && !device.connected -> {
                 buildRobotConnectForm()
             }
+            device.id == "cane" -> buildCaneActions(device, ::makeButton)
             device.connected -> {
                 bind.containerActions.addView(makeButton(getString(R.string.sheet_btn_disconnect)) {
                     when (device.id) {
@@ -158,12 +179,94 @@ class DeviceDetailSheet : BottomSheetDialogFragment() {
                     }
                     dismiss()
                 })
-                val secondLabel = if (device.id == "cane") getString(R.string.sheet_btn_test_vibration) else getString(R.string.sheet_btn_firmware_update)
-                bind.containerActions.addView(makeButton(secondLabel) {
+                bind.containerActions.addView(makeButton(getString(R.string.sheet_btn_firmware_update)) {
                     view?.announceA11y(getString(R.string.common_coming_soon))
                 })
             }
         }
+    }
+
+    /** 导盲杖：未连接显示连接按钮；已连接显示断开 + 震动 / 灯·标定控制面板（同 WhiteCane demo） */
+    private fun buildCaneActions(device: DeviceInfo, makeButton: (String, () -> Unit) -> TextView) {
+        val container = bind.containerActions
+        if (!device.connected) {
+            val busy = CaneManager.connState == CaneBleClient.ConnState.SCANNING ||
+                CaneManager.connState == CaneBleClient.ConnState.CONNECTING
+            val label = when (CaneManager.connState) {
+                CaneBleClient.ConnState.SCANNING -> getString(R.string.cane_status_scanning)
+                CaneBleClient.ConnState.CONNECTING -> getString(R.string.cane_status_connecting)
+                else -> getString(R.string.cane_btn_connect)
+            }
+            container.addView(makeButton(label) {
+                if (!busy) CaneManager.requestPermissionsAndConnect(requireActivity())
+            }.apply { isEnabled = !busy })
+            return
+        }
+
+        container.addView(makeButton(getString(R.string.sheet_btn_disconnect)) {
+            CaneManager.disconnect()
+        })
+
+        addSectionTitle(getString(R.string.cane_section_vibration))
+        addButtonRow(
+            getString(R.string.cane_dir_front) to { CaneManager.buzz(CaneProtocol.MOTOR_FRONT, "前") },
+            getString(R.string.cane_dir_right) to { CaneManager.buzz(CaneProtocol.MOTOR_RIGHT, "右") },
+            getString(R.string.cane_dir_back) to { CaneManager.buzz(CaneProtocol.MOTOR_BACK, "后") },
+            getString(R.string.cane_dir_left) to { CaneManager.buzz(CaneProtocol.MOTOR_LEFT, "左") },
+        )
+        addButtonRow(
+            getString(R.string.cane_vib_all) to { CaneManager.buzz(CaneProtocol.MOTOR_ALL, "四路") },
+            getString(R.string.cane_vib_stop) to { CaneManager.stopVibration() },
+        )
+
+        addSectionTitle(getString(R.string.cane_section_light_cal))
+        addButtonRow(
+            getString(R.string.cane_light_on) to { CaneManager.setLight(true) },
+            getString(R.string.cane_light_off) to { CaneManager.setLight(false) },
+        )
+        addButtonRow(
+            getString(R.string.cane_cal_start) to { CaneManager.startCalibration() },
+            getString(R.string.cane_cal_abort) to { CaneManager.abortCalibration() },
+        )
+    }
+
+    private fun addSectionTitle(title: String) {
+        bind.containerActions.addView(TextView(requireContext()).apply {
+            text = title
+            setTextColor(ContextCompat.getColor(requireContext(), R.color.color_text_muted))
+            textSize = 13f
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = resources.getDimensionPixelSize(R.dimen.dp_16)
+            }
+        })
+    }
+
+    /** 等宽的一行按钮 */
+    private fun addButtonRow(vararg items: Pair<String, () -> Unit>) {
+        val minTouch = resources.getDimensionPixelSize(R.dimen.min_touch_target)
+        val gap = resources.getDimensionPixelSize(R.dimen.dp_8)
+        val row = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = gap
+            }
+        }
+        items.forEachIndexed { i, (text, onClick) ->
+            row.addView(TextView(requireContext()).apply {
+                this.text = text
+                gravity = android.view.Gravity.CENTER
+                isClickable = true
+                isFocusable = true
+                setTextColor(ContextCompat.getColor(requireContext(), R.color.color_text))
+                textSize = 15f
+                setBackgroundResource(R.drawable.bg_btn_outline)
+                layoutParams = LinearLayout.LayoutParams(0, minTouch, 1f).apply {
+                    if (i > 0) marginStart = gap
+                }
+                setOnClickListener { onClick() }
+            })
+        }
+        bind.containerActions.addView(row)
     }
 
     private fun buildRobotConnectForm() {

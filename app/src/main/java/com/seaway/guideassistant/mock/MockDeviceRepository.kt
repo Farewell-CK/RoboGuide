@@ -10,12 +10,12 @@ data class DeviceInfo(
     val sn: String,
     val connection: String,
     val signal: String,
-    val firmware: String,
+    var firmware: String,
     val features: List<String>,
     val lastSync: String,
     var connected: Boolean,
     var battery: Int,
-    val hasBattery: Boolean = true,
+    var hasBattery: Boolean = true,
 )
 
 object MockDeviceRepository {

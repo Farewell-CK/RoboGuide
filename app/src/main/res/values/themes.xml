@@ -63,4 +63,31 @@
         <!-- 模糊 -->
         <item name="android:textColorPrimaryInverse">@android:color/black</item>
     </style>
+
+    <!-- 盲杖姿态页：数据概览 -->
+    <style name="CaneOverviewLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/white</item>
+        <item name="android:textSize">@dimen/sp_13</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="CaneOverviewValue">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">@dimen/dp_2</item>
+        <item name="android:text">--</item>
+        <item name="android:textColor">@color/cane_cyan</item>
+        <item name="android:textSize">@dimen/sp_17</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="CaneOverviewDivider">
+        <item name="android:layout_width">1dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_marginTop">@dimen/dp_4</item>
+        <item name="android:layout_marginBottom">@dimen/dp_4</item>
+        <item name="android:background">#66D4EBFF</item>
+    </style>
 </resources>

@@ -80,6 +80,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name="com.seaway.guideassistant.cane.CaneAttitudeActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
         <activity android:name="com.seaway.guideassistant.archive.NavigationRecordsActivity"
             android:exported="false" />
         <activity
