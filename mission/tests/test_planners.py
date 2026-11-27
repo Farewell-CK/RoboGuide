@@ -1213,6 +1213,7 @@ def test_compact_grounding_for_llm_preserves_semantics_without_mutating_snapshot
     )
     phys_val: JSONObject = {
         "physical_entity_id": "entity-lite3-dog2",
+        "motion_authorized": False,
         "posture": {
             "availability": "reported_current",
             "reported_posture": "down",
@@ -1354,6 +1355,8 @@ def test_compact_grounding_for_llm_preserves_semantics_without_mutating_snapshot
     p_val = cast(JSONObject, states_by_type["robot-physical-observation"]["value"])
     assert p_val["battery"] == {"availability": "reported_current", "percent": 25.0}
     assert p_val["posture"] == {"availability": "reported_current", "reported_posture": "down"}
+    assert "motion_authorized" not in p_val
+    assert p_val["observation_grants_motion_authority"] is False
     assert "response_received_at_ns" not in cast(JSONObject, p_val["mapping"])
     s_val = cast(JSONObject, states_by_type["scene-targets"]["value"])
     assert "sample_started_at_ns" not in s_val
@@ -1364,6 +1367,10 @@ def test_compact_grounding_for_llm_preserves_semantics_without_mutating_snapshot
     assert "points" not in regions[0]
     mems = cast(list[JSONObject], projected["memory_evidence"])
     m_content = cast(JSONObject, mems[0]["content"])
+    assert "motion_authorized" not in m_content
+    assert m_content["observation_grants_motion_authority"] is False
+    raw_mem = cast(list[JSONObject], before_raw["memory_evidence"])[0]
+    assert cast(JSONObject, raw_mem["content"])["motion_authorized"] is False
     assert m_content["position"] == {
         "frame_basis": "local Mapping map; shared physical frame unverified",
         "map_id": "1101_visual_dog2",

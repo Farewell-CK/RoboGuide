@@ -22,6 +22,8 @@ from google.protobuf import (
 
 SUBMIT_CONTRACT = "robonix/system/liaison/submit"
 SUBMIT_ROUTE = "/robonix.contracts.RobonixSystemLiaisonSubmit/SubmitTask"
+DELEGATION_OPERATION = "task.delegate@v1"
+DELEGATION_AUTHORITY = "controller-admitted-delegate"
 EVENT_NAMES = (
     "text_chunk",
     "plan",
@@ -78,17 +80,51 @@ def execution_intent(request: dict[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], intent)
 
 
-def task(record: dict[str, Any], user_id: str, *, abort: bool = False) -> Any:
-    """Build an API Task using persisted identities, never generating IDs at send time."""
+def canonical_operation(intent: dict[str, Any]) -> str:
+    """Return the canonical namespace.name@version operation identifier from an intent."""
+    op = intent.get("operation")
+    if isinstance(op, str) and op:
+        return op
+    if (
+        isinstance(op, dict)
+        and set(op) == {"namespace", "name", "version"}
+        and all(isinstance(op[key], str) and op[key] for key in ("namespace", "name", "version"))
+    ):
+        return f"{op['namespace']}.{op['name']}@{op['version']}"
+    raise ValueError("canonical operation required")
+
+
+def task(
+    record: dict[str, Any],
+    user_id: str,
+    *,
+    abort: bool = False,
+    delegation_admitted: bool = False,
+) -> Any:
+    """Build an API Task using persisted identities, gating delegation authority explicitly."""
     context: dict[str, Any] = {
         "user_id": user_id,
         "modality": "api",
         "client": "rg-pilot-lab",
         "interaction_mode": "abort" if abort else "task",
     }
+    intent = execution_intent(record["request"])
     if abort:
         context["abort_turn"] = True
-    intent = execution_intent(record["request"])
+    elif delegation_admitted:
+        operation_id = canonical_operation(intent)
+        if operation_id != DELEGATION_OPERATION:
+            raise ValueError(
+                f"delegation authority is restricted to {DELEGATION_OPERATION}, got {operation_id}"
+            )
+        dispatch_meta: dict[str, Any] = {
+            "operation": operation_id,
+            "authority": DELEGATION_AUTHORITY,
+            "local_motion_permit_required": False,
+        }
+        if intent.get("mission_id") is not None:
+            dispatch_meta["mission_id"] = intent["mission_id"]
+        context["rg_dispatch"] = dispatch_meta
     text = (
         ""
         if abort

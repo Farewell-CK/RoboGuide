@@ -363,11 +363,12 @@ def _compact_reported_origin_content(content: JSONObject) -> JSONObject:
             "source_mission_id",
             "source_task_id",
             "localization_verified",
-            "motion_authorized",
             "pose_measurement_time",
         )
         if key in content
     }
+    if "motion_authorized" in content:
+        compact["observation_grants_motion_authority"] = content["motion_authorized"]
     position = content.get("position")
     if isinstance(position, dict):
         compact["position"] = {
@@ -465,12 +466,13 @@ def project_grounding_for_llm(grounding_context: GroundingContextSnapshot) -> JS
                         "damping_state",
                         "device_stop_verified",
                         "arrival_verified",
-                        "motion_authorized",
                         "remote_connection",
                         "shared_frame_verified",
                     )
                     if key in value
                 }
+                if "motion_authorized" in value:
+                    compact_val["observation_grants_motion_authority"] = value["motion_authorized"]
                 mapping = value.get("mapping")
                 if isinstance(mapping, dict):
                     compact_mapping: dict[str, JSONValue] = {
