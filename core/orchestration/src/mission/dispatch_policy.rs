@@ -1,7 +1,9 @@
 //! Durable logical service ordering and deployment admission bounds, independent of resource authority.
 
 use super::super::*;
+use super::timing::checked_plan_timestamp;
 use serde::{Deserialize, Serialize};
+use std::cmp::Reverse;
 
 /// Maximum logical Task progression attempts in one application input or timer.
 pub const DISPATCH_TURN_LIMIT: usize = 32;
@@ -175,7 +177,9 @@ impl MissionOrchestrator {
         Ok(())
     }
 
-    /// Selects one exact Ready logical Task using persistent waiting age, round fairness and due windows.
+    /// Selects one ready Task by due window, effective priority and completion deadline.
+    ///
+    /// Mission rounds and persisted waiting age retain their existing roles.
     pub fn next_dispatch_task(
         &mut self,
         control: &ControlPlane,
@@ -204,26 +208,25 @@ impl MissionOrchestrator {
             })
             .collect::<BTreeMap<_, _>>();
         for mission in self.mission_ids() {
-            let ready = self.dispatchable_tasks(&mission, control);
-            let policy = &mut self
-                .executions
-                .get_mut(&mission)
-                .expect("known Mission")
-                .dispatch_policy;
-            let ready_ids = ready
-                .iter()
-                .map(TaskRef::task_id)
-                .cloned()
+            let ready_ids = self
+                .dispatchable_tasks(&mission, control)
+                .into_iter()
+                .map(|task| task.task_id().clone())
                 .collect::<BTreeSet<_>>();
+            let execution = self.executions.get_mut(&mission).expect("known Mission");
+            let accepted_at = execution.accepted_at();
+            let policy = &mut execution.dispatch_policy;
             policy.waiting.retain(|task, _| ready_ids.contains(task));
-            for task in &ready {
-                policy
-                    .waiting
-                    .entry(task.task_id().clone())
-                    .or_insert(ordinal);
+            if ready_ids.is_empty() {
+                continue;
             }
-            for (plan_order, task) in ready.into_iter().enumerate() {
-                if attempted.contains(&task) {
+            for task_id in &ready_ids {
+                policy.waiting.entry(task_id.clone()).or_insert(ordinal);
+            }
+            for (plan_order, planned) in execution.plan.task_graph().tasks().iter().enumerate() {
+                let requirement = planned.requirement();
+                let task = requirement.task_ref();
+                if !ready_ids.contains(task.task_id()) || attempted.contains(task) {
                     continue;
                 }
                 let queued = policy.waiting[task.task_id()];
@@ -232,35 +235,33 @@ impl MissionOrchestrator {
                 })?;
                 let priority =
                     u64::from(policy.priority) + (age / AGING_QUANTUM).min(MAX_AGE_PRIORITY);
-                let due = due_tasks.get(&task).copied();
+                let due = due_tasks.get(task).copied();
                 if served_round.contains(&mission) && due.is_none() {
                     continue;
                 }
-                candidates.push((
-                    due,
-                    priority,
+                // Preserve due reservation ordering. EDF applies to tasks without a due interval.
+                let deadline = requirement
+                    .timing()
+                    .completion_deadline_offset_ms()
+                    .filter(|_| due.is_none())
+                    .map(|offset| checked_plan_timestamp(accepted_at, offset, task))
+                    .transpose()?;
+                let rank = (
+                    (due.is_none(), due),
+                    Reverse(priority),
+                    (deadline.is_none(), deadline),
                     queued,
                     policy.last_service,
                     mission.clone(),
                     plan_order,
-                    task,
-                ));
+                );
+                candidates.push((rank, task.clone()));
             }
         }
-        candidates.sort_by(|left, right| {
-            match (left.0, right.0) {
-                (Some(a), Some(b)) => a.cmp(&b),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => std::cmp::Ordering::Equal,
-            }
-            .then_with(|| right.1.cmp(&left.1))
-            .then_with(|| left.2.cmp(&right.2))
-            .then_with(|| left.3.cmp(&right.3))
-            .then_with(|| left.4.cmp(&right.4))
-            .then_with(|| left.5.cmp(&right.5))
-        });
-        Ok(candidates.into_iter().next().map(|candidate| candidate.6))
+        Ok(candidates
+            .into_iter()
+            .min_by(|(left, _), (right, _)| left.cmp(right))
+            .map(|(_, task)| task))
     }
 
     /// Consumes one logical service turn on the same private candidate as its Task progression.

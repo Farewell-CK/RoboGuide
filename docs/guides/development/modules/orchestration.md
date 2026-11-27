@@ -10,6 +10,8 @@ MissionOrchestrator、MissionExecution、IntegrationRuntimeBridge；桥接不是
 
 submit 创建 Group 与全部 Tasks → 推进 Ready → 调 Control/Runtime → local completion 后等 satisfaction → release gate → DAG。修订保留原目标与旧事实。
 
+到点的预约先进入派发。同等有效优先级的未到期预约和无预约 Ready 任务按完成截止期排序，截止期以各自 Mission 的接受时间为起点。没有截止期的任务排在同级有截止期的任务之后。等待老化与每轮的 Mission 公平规则继续适用。
+
 ## 代码入口
 
 - [主入口](https://github.com/Farewell-CK/RoboGuide/blob/main/core/orchestration/src/lib.rs)：`core/orchestration/src/lib.rs`。
