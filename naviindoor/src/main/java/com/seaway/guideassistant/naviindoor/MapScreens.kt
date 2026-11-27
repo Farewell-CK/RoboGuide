@@ -11,13 +11,23 @@ import java.io.ByteArrayOutputStream
 import java.time.Instant
 import java.util.UUID
 
-internal fun NativeIndoorActivity.showMaps() {
+internal fun NativeIndoorActivity.showMaps(forNavigation: Boolean = false) {
     val user = profile ?: return showHome()
-    screen("地图管理与导航") { showHome() }
+    screen(if (forNavigation) "选择导航地图" else "地图管理") { showHome() }
+    toolbarAction("刷新地图", R.drawable.ic_navi_refresh) { showMaps(forNavigation) }
+    toolbarAction("复制诊断记录", R.drawable.ic_navi_diagnostics) { copyDiagnostics() }
+    body.label(if (forNavigation) "选择地图，开始定位" else "已有地图", 22f)
+    body.label(if (forNavigation) "请选择所在楼层或区域的地图。" else "选择地图可查看地点、编辑节点与录制路线。", 15f)
     work("加载地图列表…", { api.maps(user) }) { maps ->
         if (maps.isEmpty()) body.label("暂无可访问的地图，请确认账号所属组织或由管理员上传。")
-        maps.forEach { map -> body.button(map.name) { showMap(map.id) } }
-        if (user.admin) body.button("上传新地图") {
+        maps.forEach { map ->
+            val card = body.card()
+            card.label(map.name, 20f)
+            card.label("室内地图 · 地点与路线", 14f).setTextColor(0xFF757575.toInt())
+            if (!forNavigation) card.button("地图详情 · 编辑节点与路线", NaviStyle.TEAL) { showMap(map.id) }
+            card.button("开始定位与导航", NaviStyle.GREEN, outlined = !forNavigation) { showMap(map.id, true) }
+        }
+        if (user.admin && !forNavigation) body.button("＋ 上传新地图", NaviStyle.GREEN) {
             ask("地图名称") { name ->
                 pick("image/*") { uri ->
                     work("读取并上传地图…", {
@@ -32,30 +42,34 @@ internal fun NativeIndoorActivity.showMaps() {
             }
         }
     }
-    body.button("刷新") { showMaps() }
-    body.button("复制诊断记录") { copyDiagnostics() }
 }
 
-internal fun NativeIndoorActivity.showMap(id: String) {
+internal fun NativeIndoorActivity.showMap(id: String, forNavigation: Boolean = false) {
     val user = profile ?: return showHome()
-    screen("地图详情") { showMaps() }
-    work("加载地图、点位和路线…", {
+    screen("地图详情", colour = NaviStyle.TEAL) { showMaps(forNavigation) }
+    toolbarAction("重新加载地图", R.drawable.ic_navi_refresh) { showMap(id, forNavigation) }
+    toolbarAction("复制诊断记录", R.drawable.ic_navi_diagnostics) { copyDiagnostics() }
+    var routes = emptyList<IndoorPath>()
+    work("加载地图与地点…", {
         val details = api.mapDetails(id)
         val bytes = api.image(details.first.imageUrl)
-        Triple(details, bytes, api.paths(details.second, user))
-    }) { (details, imageBytes, routes) ->
+        details to bytes
+    }) { (details, imageBytes) ->
         if (selectedMap?.id != id) currentNode = null
-        selectedMap = details.first; nodes = details.second; paths = routes
+        selectedMap = details.first; nodes = details.second; paths = emptyList()
         mapBitmap?.recycle()
         mapBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-        body.label(details.first.name, 25f)
+        toolbarTitle.text = details.first.name
+        body.label("双指缩放、拖动查看地图；地点与路线显示在地图上。", 14f).apply {
+            setTextColor(NaviStyle.TEAL)
+        }
         val mapView = IndoorMapView(this).apply { image = mapBitmap; nodes = this@showMap.nodes; currentId = currentNode?.id; contentDescription = "室内地图和点位" }
-        body.addView(mapView, LinearLayout.LayoutParams(-1, dp(310)))
-        body.label(nodes.size.toString() + " 个地点 · " + routes.size + " 条可用路线")
-        body.button("定位并开始导航") { showLocalization() }
+        body.addView(mapView, LinearLayout.LayoutParams(-1, dp(390)))
+        val summary = body.label(nodes.size.toString() + " 个地点 · 路线正在加载", 15f)
+        val navigate = body.button("定位并开始导航", NaviStyle.GREEN) { showLocalization() }.apply { isEnabled = false; alpha = .5f }
         currentNode?.let { origin -> body.button("从“" + origin.name + "”选择目的地") { showDestinations() } }
         if (user.admin) {
-            body.button("添加地点（在地图上点选）") {
+            body.button("添加地点（在地图上点选）", NaviStyle.BLUE) {
                 status.text = "请点击地图上的实际位置，填写地点名称。"
                 mapView.pick = { x, y ->
                     mapView.pick = null
@@ -70,12 +84,12 @@ internal fun NativeIndoorActivity.showMap(id: String) {
                     }
                 }
             }
-            body.button("录制新路线") { chooseRecording() }
-            body.button("本地路线草稿") { showDrafts() }
+            body.button("录制新路线", NaviStyle.ORANGE) { chooseRecording() }
+            body.button("本地路线草稿", NaviStyle.ORANGE, outlined = true) { showDrafts() }
         }
         body.label("地点", 21f)
         nodes.forEach { node ->
-            body.button(node.name) {
+            body.button("● " + node.name, NaviStyle.TEAL, outlined = true) {
                 if (!user.admin) { message("请先定位当前位置，再选择目的地。"); return@button }
                 AlertDialog.Builder(this).setTitle(node.name).setItems(arrayOf("采集定位参考", "修改名称", "手动设为起点（测试）", "删除地点")) { _, which ->
                     when (which) {
@@ -100,20 +114,37 @@ internal fun NativeIndoorActivity.showMap(id: String) {
             }
         }
         body.label("已录制路线", 21f)
-        routes.forEach { route ->
-            body.button(route.name + " · " + route.waypoints.size + "点") {
-                val text = route.waypoints.joinToString("\n") { "第" + (it.sequence + 1) + "点：" + it.turn.name + "，朝向 " + "%.0f°".format(it.heading) }
-                val dialog = AlertDialog.Builder(this).setTitle(route.name).setMessage(text).setPositiveButton("关闭", null)
-                if (user.admin) dialog.setNeutralButton("删除路线") { _, _ ->
-                    confirm("删除路线", "确认删除“" + route.name + "”？此操作不会删除地点或其他路线。") {
-                        work("删除路线…", { api.delete("path_waypoints", mapOf("path_id" to "eq." + route.id)); api.delete("navigation_paths", mapOf("id" to "eq." + route.id)) }) { showMap(id) }
+        val routeList = body.card()
+        routeList.label("正在加载路线…", 15f)
+        fun loadRoutes() {
+            work("加载本地图路线…", { api.paths(details.second, user) }, failed = {
+                routeList.removeAllViews(); routeList.label("路线加载失败，请点击下方按钮重试。", 15f)
+                summary.text = nodes.size.toString() + " 个地点 · 路线尚未加载"
+            }) { loaded ->
+                routes = loaded; paths = loaded; mapView.routes = loaded
+                summary.text = nodes.size.toString() + " 个地点 · " + loaded.size + " 条可用路线"
+                navigate.isEnabled = nodes.isNotEmpty(); navigate.alpha = if (navigate.isEnabled) 1f else .5f
+                routeList.removeAllViews()
+                if (loaded.isEmpty()) routeList.label("暂无可用路线。可先添加地点并录制路线。", 15f)
+                loaded.forEach { route ->
+                    routeList.button(route.name + " · " + route.waypoints.size + "点", NaviStyle.TEAL, outlined = true) {
+                        val text = route.waypoints.joinToString("\n") { "第" + (it.sequence + 1) + "点：" + it.turn.name + "，朝向 " + "%.0f°".format(it.heading) }
+                        val dialog = AlertDialog.Builder(this).setTitle(route.name).setMessage(text).setPositiveButton("关闭", null)
+                        if (user.admin) dialog.setNeutralButton("删除路线") { _, _ ->
+                            confirm("删除路线", "确认删除“" + route.name + "”？此操作不会删除地点或其他路线。") {
+                                work("删除路线…", { api.delete("path_waypoints", mapOf("path_id" to "eq." + route.id)); api.delete("navigation_paths", mapOf("id" to "eq." + route.id)) }) { showMap(id) }
+                            }
+                        }
+                        dialog.show()
                     }
                 }
-                dialog.show()
+                if (forNavigation && nodes.isNotEmpty()) showLocalization()
+                else if (forNavigation) status.text = "此地图尚未添加地点，请先在地图管理中添加地点并采集定位参考。"
             }
         }
+        body.button("重新加载路线", NaviStyle.TEAL, outlined = true) { loadRoutes() }
+        loadRoutes()
     }
-    body.button("重新加载") { showMap(id) }
 }
 
 internal fun NativeIndoorActivity.showNodeCapture(node: MapNode) {
