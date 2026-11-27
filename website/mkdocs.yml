@@ -72,6 +72,8 @@ plugins:
             Integration 与 Node Service: Integration and Node Service
             Eval Harness 与本地集成: Eval Harness and Integrations
             部署与运维: Deployment and Operations
+            对话工作台: Conversation Workbench
+            核心流程: Core System Flows
             状态与参考: Status and Reference
             版本与构建来源: Versions and Build Provenance
             ADR 主题索引: ADR Topics
@@ -95,14 +97,7 @@ markdown_extensions:
   - pymdownx.details
   - pymdownx.highlight
   - pymdownx.inlinehilite
-  - pymdownx.superfences:
-      custom_fences:
-        - name: mermaid
-          class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.superfences
 
 extra_css:
   - stylesheets/custom.css
-
-extra_javascript:
-  - javascripts/diagrams.js

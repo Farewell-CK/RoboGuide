@@ -3,3 +3,6 @@ website/custom_theme/javascripts/vendor/** text eol=lf
 docs/images/**/*.svg text eol=lf
 docs/images/**/*.mmd text eol=lf
 *.sh text eol=lf
+
+# Generation prompts are byte-bound publication evidence.
+docs/images/architecture/**/prompts/*.txt text eol=lf

@@ -123,7 +123,7 @@ def test_runbook_tools_are_local_and_show_verified_citations(
     output = io.StringIO()
     monkeypatch.setattr(sys, "stdout", output)
     doc = "runtime-reliability-fault-matrix"
-    path = Path(__file__).resolve().parents[2] / f"docs/development/{doc}.md"
+    path = Path(__file__).resolve().parents[2] / f"docs/operations/reference/{doc}.md"
     start = next(
         i for i, row in enumerate(path.read_text().splitlines(), 1) if "Node route or lease" in row
     )

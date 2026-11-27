@@ -1,0 +1,606 @@
+{
+  "schema": "roboguide.image-generation-records/v1",
+  "code_commit": "3c7136d67e7638d09bde54d32dac55ec87f94c3c",
+  "requested_model": "gpt-image-2.6-sunburst",
+  "interface": [
+    "/v1/images/generations",
+    "/v1/images/edits"
+  ],
+  "cli": "imagegen/scripts/image_gen.py",
+  "parameters": {
+    "quality": "high",
+    "size": "1536x1024",
+    "output_format": "png"
+  },
+  "attempts": [
+    {
+      "figure": "overview:zh",
+      "attempted_at": "2026-11-25T17:24:21.060199+00:00",
+      "outcome": "rejected",
+      "http_status": 403,
+      "reason": "Image generation is not enabled for this group"
+    }
+  ],
+  "completed": [
+    {
+      "figure": "overview:zh",
+      "image": "docs/images/architecture/2026-11-26/overview.zh.png",
+      "image_sha256": "a69f2765452d9e939758c4bae8c20188852962975c99444c8cde19e26e2f909e",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Reference-style framework: all internal Controller responsibilities enclosed; Execution Group inside Control; Node/Local EAIOS outside; source-bound State/Memory, explicit optional deployment, local safety.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/framework.zh.reference-v2.txt",
+          "prompt_sha256": "47e4a5d7bdf9e77a4dee9bb8b19056ca811823780161542cfc8b24db4a915902",
+          "inputs": [
+            {
+              "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3",
+              "path": "docs/images/roboguide-v2-overall-architecture.png"
+            },
+            {
+              "sha256": "269a33daccb79f336b43ec346e97f078a5b3e9a1d2d2d8f7a1b9f2f7d5cac960",
+              "path": "docs/images/distributed-embodied-ai-os-architecture-v1.1.png"
+            }
+          ],
+          "output_sha256": "6edab90cefa8a18ae86ac08463db0724a688cf5c85224ee482435ffa70bdcb98",
+          "output_written_at": "2026-11-26T02:05:05.736365+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/framework.zh.reference-v2.fix-01.txt",
+          "prompt_sha256": "0aa65d4769bd44f54204e5c73f0e0b4fbecff8fafa75aa703ebcf86fe7e59eee",
+          "inputs": [
+            {
+              "sha256": "6edab90cefa8a18ae86ac08463db0724a688cf5c85224ee482435ffa70bdcb98"
+            }
+          ],
+          "output_sha256": "a69f2765452d9e939758c4bae8c20188852962975c99444c8cde19e26e2f909e",
+          "output_written_at": "2026-11-26T02:28:26.394217+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "overview:en",
+      "image": "docs/images/architecture/2026-11-26/overview.en.png",
+      "image_sha256": "7cec6f646696b0d5a89e58997878d8fdb13ccdd1464e08bce451ee1e059ee5fa",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Reference-style framework: all internal Controller responsibilities enclosed; Execution Group inside Control; Node/Local EAIOS outside; source-bound State/Memory, explicit optional deployment, local safety.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/framework.en.reference-v2.txt",
+          "prompt_sha256": "12320562bb6b6dc6fd6f876bf5a7c025ff74385e10565a06fa77ecdfc4b64cd0",
+          "inputs": [
+            {
+              "sha256": "a69f2765452d9e939758c4bae8c20188852962975c99444c8cde19e26e2f909e",
+              "path": "docs/images/architecture/2026-11-26/overview.zh.png"
+            }
+          ],
+          "output_sha256": "7cec6f646696b0d5a89e58997878d8fdb13ccdd1464e08bce451ee1e059ee5fa",
+          "output_written_at": "2026-11-26T03:08:14.828426+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "mission-planning:zh",
+      "image": "docs/images/architecture/2026-11-26/mission-planning.zh.png",
+      "image_sha256": "893efb5a89e7e961102f06a7b02b4a19b962c7e5d4f198b21ecceaa9f9538787",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Request lifecycle and Controller Mission separated; clarify return, conditional bounded repair, read-only preflight, exact draft grant binding and independent admission.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.zh.reference-v2.txt",
+          "prompt_sha256": "d72a5d4215738355a4442423fce8341677d2994d4f458ea41469f951996fdba1",
+          "inputs": [
+            {
+              "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3",
+              "path": "docs/images/roboguide-v2-overall-architecture.png"
+            }
+          ],
+          "output_sha256": "1217e6abe8107e402556e68b90da26a89c3e9f146b55525fa91b826ea2c00d26",
+          "output_written_at": "2026-11-26T03:15:01.944069+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.zh.reference-v2.fix-01.txt",
+          "prompt_sha256": "13ff11ef80766001e962ee947efd82315ec13ec5955682a7d55c668f4694b28f",
+          "inputs": [
+            {
+              "sha256": "1217e6abe8107e402556e68b90da26a89c3e9f146b55525fa91b826ea2c00d26"
+            }
+          ],
+          "output_sha256": "0d5bc218cb2dc152a7060aa89c709e9228b23670e055dd6b64c86efb09e2144e",
+          "output_written_at": "2026-11-26T03:58:01.390166+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.zh.reference-v2.fix-02.txt",
+          "prompt_sha256": "a8af1b366d067ffc8df124aff69db6e6dfb74b9ea91ba82b93a61131f3c59801",
+          "inputs": [
+            {
+              "sha256": "0d5bc218cb2dc152a7060aa89c709e9228b23670e055dd6b64c86efb09e2144e"
+            }
+          ],
+          "output_sha256": "893efb5a89e7e961102f06a7b02b4a19b962c7e5d4f198b21ecceaa9f9538787",
+          "output_written_at": "2026-11-26T04:37:53.449603+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "mission-planning:en",
+      "image": "docs/images/architecture/2026-11-26/mission-planning.en.png",
+      "image_sha256": "5c422756169f4ab34c1d39ebfdddbb67b00ac8f0005c606abad1ae4405a36c7d",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Request lifecycle and Controller Mission separated; clarify return, conditional bounded repair, read-only preflight, exact draft grant binding and independent admission.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.en.reference-v2.txt",
+          "prompt_sha256": "bff822f6eed80f941c052a75e844c73dfbf4e8310340d6f16d80aa642f2bf037",
+          "inputs": [
+            {
+              "sha256": "893efb5a89e7e961102f06a7b02b4a19b962c7e5d4f198b21ecceaa9f9538787",
+              "path": "docs/images/architecture/2026-11-26/mission-planning.zh.png"
+            }
+          ],
+          "output_sha256": "5c422756169f4ab34c1d39ebfdddbb67b00ac8f0005c606abad1ae4405a36c7d",
+          "output_written_at": "2026-11-26T05:22:23.195496+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "dispatch:zh",
+      "image": "docs/images/architecture/2026-11-26/dispatch.zh.png",
+      "image_sha256": "23eb605d31f1189817fab921a53b5aa40aad3dda7e13ee6b3c54cb241e33d01b",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Proposal does not reserve; Commit/Bind and persistence inside writer transaction; Execute afterward; Journal before local effects; receipt and execution facts return through the journal.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.zh.reference-v2.txt",
+          "prompt_sha256": "881a5e2ce2c84555afc30e47a7dcf612526c6d7928c682f3aa655b74712cfdd5",
+          "inputs": [
+            {
+              "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3",
+              "path": "docs/images/roboguide-v2-overall-architecture.png"
+            }
+          ],
+          "output_sha256": "fe65c7b403050f0e64e50f50314274f10373a0b98048d3b80492cf2dba147e74",
+          "output_written_at": "2026-11-26T03:15:11.360279+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.zh.reference-v2.fix-01.txt",
+          "prompt_sha256": "fc8374f3e4418dfd3986be1c0cd69bfe03c6dcbfd4c9529fdcc705a35ef19adc",
+          "inputs": [
+            {
+              "sha256": "fe65c7b403050f0e64e50f50314274f10373a0b98048d3b80492cf2dba147e74"
+            }
+          ],
+          "output_sha256": "d2f426fce560de5474a88d2e6c88a07b6d99b6e71b824bca5b0176fc6217a2af",
+          "output_written_at": "2026-11-26T04:07:42.205759+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.zh.reference-v2.fix-02.txt",
+          "prompt_sha256": "5c35bcce2dcb5c9e5da75e3a5e00390e11c4783c42a6152d46bfbb08baa4296f",
+          "inputs": [
+            {
+              "sha256": "d2f426fce560de5474a88d2e6c88a07b6d99b6e71b824bca5b0176fc6217a2af"
+            }
+          ],
+          "output_sha256": "23eb605d31f1189817fab921a53b5aa40aad3dda7e13ee6b3c54cb241e33d01b",
+          "output_written_at": "2026-11-26T09:37:06.438835+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "dispatch:en",
+      "image": "docs/images/architecture/2026-11-26/dispatch.en.png",
+      "image_sha256": "11abd0592b84cf8d91bc1f40470896bc6e9aaedabe75e2641d4b40771ccb9bbe",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Proposal does not reserve; Commit/Bind and persistence inside writer transaction; Execute afterward; Journal before local effects; receipt and execution facts return through the journal.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.en.reference-v2.txt",
+          "prompt_sha256": "655d9d1a7674c2b36a6f787736d745e2b9dbec7328aa540c36880649e907607a",
+          "inputs": [
+            {
+              "sha256": "d2f426fce560de5474a88d2e6c88a07b6d99b6e71b824bca5b0176fc6217a2af"
+            }
+          ],
+          "output_sha256": "3e6f92f0c8c118f482a758cb1f2437c8cab5d6319ae60f40b7c50784b0e3a170",
+          "output_written_at": "2026-11-26T04:48:50.269169+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.en.reference-v2.fix-01.txt",
+          "prompt_sha256": "06268411e70ddf3a6cb24e5412d84494700d23a5b805d2910673fcb0443df70c",
+          "inputs": [
+            {
+              "sha256": "3e6f92f0c8c118f482a758cb1f2437c8cab5d6319ae60f40b7c50784b0e3a170"
+            }
+          ],
+          "output_sha256": "54a8688239df74279c303d1998562255f42117aca3703e970c302b949ec22cb9",
+          "output_written_at": "2026-11-26T07:44:34.357962+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.en.reference-v2.fix-02.txt",
+          "prompt_sha256": "5c507f5c0183c5b1c8f2600fc64355975c5ef414cdde0aacddd4eace717a6d0a",
+          "inputs": [
+            {
+              "sha256": "54a8688239df74279c303d1998562255f42117aca3703e970c302b949ec22cb9"
+            }
+          ],
+          "output_sha256": "11abd0592b84cf8d91bc1f40470896bc6e9aaedabe75e2641d4b40771ccb9bbe",
+          "output_written_at": "2026-11-26T09:39:58.880732+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "completion:zh",
+      "image": "docs/images/architecture/2026-11-26/completion.zh.png",
+      "image_sha256": "b30d03bada22d016caf4fa34497d19f4083dfc69686ac1eafadbf83dfd142e66",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Plan-declared alternatives, applicable Memory revoke gate, TaskSatisfied before release and successors, separate original-goal/group closure.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/completion.zh.reference-v2.txt",
+          "prompt_sha256": "638451644d2b697fac0ac37a59740de1cae7dcbf5818187dc1d02e86273e99dc",
+          "inputs": [
+            {
+              "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3",
+              "path": "docs/images/roboguide-v2-overall-architecture.png"
+            }
+          ],
+          "output_sha256": "83585f457a583ca25c18c9cc8b42f73a13eef363975d91c5d25d0f5f429b6875",
+          "output_written_at": "2026-11-26T03:33:26.166479+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/completion.zh.reference-v2.fix-01.txt",
+          "prompt_sha256": "357cc443d46decf5faad5c9757f3ed4c712f3172e88e8cc00f926862168b3611",
+          "inputs": [
+            {
+              "sha256": "83585f457a583ca25c18c9cc8b42f73a13eef363975d91c5d25d0f5f429b6875"
+            }
+          ],
+          "output_sha256": "b30d03bada22d016caf4fa34497d19f4083dfc69686ac1eafadbf83dfd142e66",
+          "output_written_at": "2026-11-26T04:04:57.581703+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "completion:en",
+      "image": "docs/images/architecture/2026-11-26/completion.en.png",
+      "image_sha256": "d46cb4bab1882532f7ca68dcc93acf7db60c49ceb59681a50a7d1fea98108754",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Plan-declared alternatives, applicable Memory revoke gate, TaskSatisfied before release and successors, separate original-goal/group closure.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/completion.en.reference-v2.txt",
+          "prompt_sha256": "6018f06949a0755dca1e74b36c590a339128cad8596fa10dafda2021d85e3adf",
+          "inputs": [
+            {
+              "sha256": "b30d03bada22d016caf4fa34497d19f4083dfc69686ac1eafadbf83dfd142e66",
+              "path": "docs/images/architecture/2026-11-26/completion.zh.png"
+            }
+          ],
+          "output_sha256": "e70a8002f11674618fe02ef0b9677e72d049feb8e6b8e259485d76dda213b9b5",
+          "output_written_at": "2026-11-26T04:46:26.528677+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/completion.en.reference-v2.fix-01.txt",
+          "prompt_sha256": "1dae8268a557166a916aa74d3c79e97d19b9614363ed23ea31e78e7134ddad44",
+          "inputs": [
+            {
+              "sha256": "e70a8002f11674618fe02ef0b9677e72d049feb8e6b8e259485d76dda213b9b5"
+            }
+          ],
+          "output_sha256": "d46cb4bab1882532f7ca68dcc93acf7db60c49ceb59681a50a7d1fea98108754",
+          "output_written_at": "2026-11-26T07:44:44.179168+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "state-memory:zh",
+      "image": "docs/images/architecture/2026-11-26/state-memory.zh.png",
+      "image_sha256": "9825964ccf0de9dc16cf0fad9a06bbe2a5044c23d1a783a3777010364c3f494e",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Evidence and content lanes separate; original freshness preserved; Catalog metadata versus immutable bytes; new spatial revision; import and current use/revoke distinguished.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.zh.reference-v2.txt",
+          "prompt_sha256": "6001b1b32fb3b4b04692a8cb05934d7fe36837dd044131ebfdf24e0ebaf64dee",
+          "inputs": [
+            {
+              "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3",
+              "path": "docs/images/roboguide-v2-overall-architecture.png"
+            }
+          ],
+          "output_sha256": "14bf843f05793a26ddb95ba5b04c71218c34c0ee3b978255b5218bcd91867237",
+          "output_written_at": "2026-11-26T03:33:49.173008+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.zh.reference-v2.fix-01.txt",
+          "prompt_sha256": "f013a776dd37194fa55f6283225a94105252c49055a6314ad3853ac517f86ade",
+          "inputs": [
+            {
+              "sha256": "14bf843f05793a26ddb95ba5b04c71218c34c0ee3b978255b5218bcd91867237"
+            }
+          ],
+          "output_sha256": "9825964ccf0de9dc16cf0fad9a06bbe2a5044c23d1a783a3777010364c3f494e",
+          "output_written_at": "2026-11-26T04:22:06.650296+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "state-memory:en",
+      "image": "docs/images/architecture/2026-11-26/state-memory.en.png",
+      "image_sha256": "cc734c0b4d770d12380f317f070e1c32d3c1e2efb1c2fe6fcdd0803f3bec7ecf",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Evidence and content lanes separate; original freshness preserved; Catalog metadata versus immutable bytes; new spatial revision; import and current use/revoke distinguished.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.en.reference-v2.txt",
+          "prompt_sha256": "09df73fd11db467531de16d44b810cc38ed83f1db35f25157120cb998cc172ac",
+          "inputs": [
+            {
+              "sha256": "9825964ccf0de9dc16cf0fad9a06bbe2a5044c23d1a783a3777010364c3f494e",
+              "path": "docs/images/architecture/2026-11-26/state-memory.zh.png"
+            }
+          ],
+          "output_sha256": "fc40bce1cdd1ec870559831aadcf1823e9487495380c1b93b3a74a04670bd207",
+          "output_written_at": "2026-11-26T05:23:00.522479+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.en.reference-v2.fix-01.txt",
+          "prompt_sha256": "b64fa3e78f97ca0ca327d6963a41353b14af2037472deac93b62921e7c0ff7cd",
+          "inputs": [
+            {
+              "sha256": "fc40bce1cdd1ec870559831aadcf1823e9487495380c1b93b3a74a04670bd207"
+            }
+          ],
+          "output_sha256": "cc734c0b4d770d12380f317f070e1c32d3c1e2efb1c2fe6fcdd0803f3bec7ecf",
+          "output_written_at": "2026-11-26T08:18:14.617213+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "recovery:zh",
+      "image": "docs/images/architecture/2026-11-26/recovery.zh.png",
+      "image_sha256": "14e47cc77c77bf6aa749a42f44098496fcf5c70f5ca9f5071e83f0d4ddf53651",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Ambiguous effects retain ownership and block new dispatch; original stop/revoke; distinct evidence; gated role/plan recovery versus manual escalation; original budgets retained.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/recovery.zh.reference-v2.txt",
+          "prompt_sha256": "b2b52280ecd2a61657d66a13baaf6b56c674368446073deb2e60db9196cee507",
+          "inputs": [
+            {
+              "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3",
+              "path": "docs/images/roboguide-v2-overall-architecture.png"
+            }
+          ],
+          "output_sha256": "27aea4d841f76ef7cb9711257d200583be2ff3250ae20700bdd30866f0f62781",
+          "output_written_at": "2026-11-26T03:33:35.984776+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/recovery.zh.reference-v2.fix-01.txt",
+          "prompt_sha256": "457de81c36e7139d97fea30ee87d488c682db685c77ee573e9f0136799d87786",
+          "inputs": [
+            {
+              "sha256": "27aea4d841f76ef7cb9711257d200583be2ff3250ae20700bdd30866f0f62781"
+            }
+          ],
+          "output_sha256": "93b9c598496fa55a9e0f08036b3ced8631eb0dc5375b0971f9d3a561dca761d2",
+          "output_written_at": "2026-11-26T04:20:52.691395+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/recovery.zh.reference-v2.fix-02.txt",
+          "prompt_sha256": "ebe0e9b6b94ee1d6a6ce438a9794f64a7ff6659712d60bf3ce3d755bcb2751e3",
+          "inputs": [
+            {
+              "sha256": "93b9c598496fa55a9e0f08036b3ced8631eb0dc5375b0971f9d3a561dca761d2"
+            }
+          ],
+          "output_sha256": "4e97c81d02eb931aa2d202115613d09164454384ad017e527438222c47f033d8",
+          "output_written_at": "2026-11-26T05:20:50.578048+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/recovery.zh.reference-v2.fix-03.txt",
+          "prompt_sha256": "ca12f4adbd36ffa873d2a1b765fa69e9645bf24a314ea2b11170773e11fb7236",
+          "inputs": [
+            {
+              "sha256": "4e97c81d02eb931aa2d202115613d09164454384ad017e527438222c47f033d8"
+            }
+          ],
+          "output_sha256": "14e47cc77c77bf6aa749a42f44098496fcf5c70f5ca9f5071e83f0d4ddf53651",
+          "output_written_at": "2026-11-26T09:37:15.251976+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "recovery:en",
+      "image": "docs/images/architecture/2026-11-26/recovery.en.png",
+      "image_sha256": "d7d3f5e948778b41d85806e5f67ae3a0438793a0b1704c1aa40972544c187a39",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Ambiguous effects retain ownership and block new dispatch; original stop/revoke; distinct evidence; gated role/plan recovery versus manual escalation; original budgets retained.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/recovery.en.reference-v2.txt",
+          "prompt_sha256": "3b2c9c13ec4a0a97b4977a9fb24d883bf8f60c4a34708a2220090f677f5dd0a3",
+          "inputs": [
+            {
+              "sha256": "4e97c81d02eb931aa2d202115613d09164454384ad017e527438222c47f033d8"
+            }
+          ],
+          "output_sha256": "39a5c4d0634d0d587a882a814fad156577396699d677fb119cba0869dc3117d5",
+          "output_written_at": "2026-11-26T08:17:33.982487+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/recovery.en.reference-v2.fix-01.txt",
+          "prompt_sha256": "b5202afffc2fbaa106be3069d1238d6468e49142efc0bce6d29ab86ce67169cf",
+          "inputs": [
+            {
+              "sha256": "39a5c4d0634d0d587a882a814fad156577396699d677fb119cba0869dc3117d5"
+            }
+          ],
+          "output_sha256": "d7d3f5e948778b41d85806e5f67ae3a0438793a0b1704c1aa40972544c187a39",
+          "output_written_at": "2026-11-26T10:09:34.616086+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "cooperation:zh",
+      "image": "docs/images/architecture/2026-11-26/cooperation.zh.png",
+      "image_sha256": "71d3ae9df6f499edf6d311fd777430dd2df5c7d9843f7143fd9ccc780e4a8b4c",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Four explicit modes; sequential handoff; relation fences; high-rate UDP stays local; independent UTC playback and same-Mission failure boundary distinguished.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/cooperation.zh.reference-v2.txt",
+          "prompt_sha256": "d32cbc596f97e5c419438eb115191a67356ba090342a5df41e33127060fd1260",
+          "inputs": [
+            {
+              "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3",
+              "path": "docs/images/roboguide-v2-overall-architecture.png"
+            }
+          ],
+          "output_sha256": "257ed5649b1ae53a820c1cb85cc8c797270dcae4281a2d0a636eefd9f516aae5",
+          "output_written_at": "2026-11-26T03:50:28.939834+00:00"
+        },
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/cooperation.zh.reference-v2.fix-01.txt",
+          "prompt_sha256": "36b7b9d274edfc62dbd657f4e82c6e6befbe66d91cf19f65476244195842e651",
+          "inputs": [
+            {
+              "sha256": "257ed5649b1ae53a820c1cb85cc8c797270dcae4281a2d0a636eefd9f516aae5"
+            }
+          ],
+          "output_sha256": "71d3ae9df6f499edf6d311fd777430dd2df5c7d9843f7143fd9ccc780e4a8b4c",
+          "output_written_at": "2026-11-26T04:20:25.634277+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "cooperation:en",
+      "image": "docs/images/architecture/2026-11-26/cooperation.en.png",
+      "image_sha256": "dd44fe9af6d52e0933432cca0f77352fd3c870109d4c22a483949164a8454666",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Four explicit modes; sequential handoff; relation fences; high-rate UDP stays local; independent UTC playback and same-Mission failure boundary distinguished.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/cooperation.en.reference-v2.txt",
+          "prompt_sha256": "cc55c7c70bf0dcbc9d334e25b30c07f44c60ab9f6b889ef6e1144d7943b92c7f",
+          "inputs": [
+            {
+              "sha256": "71d3ae9df6f499edf6d311fd777430dd2df5c7d9843f7143fd9ccc780e4a8b4c",
+              "path": "docs/images/architecture/2026-11-26/cooperation.zh.png"
+            }
+          ],
+          "output_sha256": "dd44fe9af6d52e0933432cca0f77352fd3c870109d4c22a483949164a8454666",
+          "output_written_at": "2026-11-26T07:46:53.287076+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "deployment:zh",
+      "image": "docs/images/architecture/2026-11-26/deployment.zh.png",
+      "image_sha256": "52355db7c50651ad516b79eaa5be29bd5ec68d5a81fc02a32012f84eeca57f6b",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Separate Mission/Controller/Node processes and storage; Local EAIOS external; optional Replica/Federation and quiescent recovery without device authority.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/deployment.zh.reference-v2.txt",
+          "prompt_sha256": "593fc826155db78912d5877ddfbab89b3385fea33cb88156890b66127e74aba3",
+          "inputs": [
+            {
+              "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3",
+              "path": "docs/images/roboguide-v2-overall-architecture.png"
+            }
+          ],
+          "output_sha256": "52355db7c50651ad516b79eaa5be29bd5ec68d5a81fc02a32012f84eeca57f6b",
+          "output_written_at": "2026-11-26T03:50:11.266496+00:00"
+        }
+      ]
+    },
+    {
+      "figure": "deployment:en",
+      "image": "docs/images/architecture/2026-11-26/deployment.en.png",
+      "image_sha256": "990d82ccf8914eaf3248c1b61cde7b247a678fd5a95b2ded1981812a398754cd",
+      "requested_model": "gpt-image-2.6-sunburst",
+      "width": 1536,
+      "height": 1024,
+      "visual_review": "Separate Mission/Controller/Node processes and storage; Local EAIOS external; optional Replica/Federation and quiescent recovery without device authority.",
+      "steps": [
+        {
+          "endpoint": "/v1/images/edits",
+          "prompt": "docs/images/architecture/2026-11-26/prompts/deployment.en.reference-v2.txt",
+          "prompt_sha256": "0af5ee1d9ad9ac02890659299d0e68501cb5a36750fefdc7f06b7ed1c52f178c",
+          "inputs": [
+            {
+              "sha256": "52355db7c50651ad516b79eaa5be29bd5ec68d5a81fc02a32012f84eeca57f6b",
+              "path": "docs/images/architecture/2026-11-26/deployment.zh.png"
+            }
+          ],
+          "output_sha256": "990d82ccf8914eaf3248c1b61cde7b247a678fd5a95b2ded1981812a398754cd",
+          "output_written_at": "2026-11-26T04:47:12.804310+00:00"
+        }
+      ]
+    }
+  ],
+  "selected_interface": "/v1/images/edits",
+  "selection_note": "After the original gateway rejection, a separately configured user-authorized image gateway generated the initial drafts successfully. The user requested the old V2 architectural illustration style. The final set uses actual V2/V1.1 reference-based edits and subsequent targeted corrections. Intermediate API output digests are preserved here; working variants are not published. The CLI reports successful image writes but does not expose a returned model identity."
+}

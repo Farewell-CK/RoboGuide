@@ -1,13 +1,10 @@
-# RoboGuide documentation site
+# RoboGuide documentation publication
 
-The site is a bilingual MkDocs Material publication of the repository's architecture and evidence.
-It does not define a second runtime contract. The reader handbook and accepted ADRs remain linked
-from the V2 source of truth. Maintained guides are paired Chinese/English; historical ADRs, audits
-and acceptance files retain their original language, with bilingual topic summaries and indexes.
+The repository’s current bilingual guides are canonical. `website/pages/` contains route wrappers;
+`source-pages.json` maps each established public route to one source under `docs/`. Edit the source
+in both languages. The site mirrors it and retains the previous routes and anchors.
 
 ## Build and inspect
-
-From the repository root:
 
 ```bash
 python website/sync_docs.py
@@ -16,73 +13,63 @@ python website/check_site.py
 PYTHONPATH=website python -m unittest discover -s website/tests
 ```
 
-For local preview, serve the generated `website/site/` on a free loopback port. The generated
-`website/docs/`, `website/site/` and optional browser `node_modules` are ignored. Add new mirrored
-source documents to Git before building: only tracked publication inputs are included. Meetings,
-hidden files and temporary document trees are excluded. Private local experiments are never copied.
+Only tracked inputs are published. Stage new sources before building. `website/docs/`, `website/site/`,
+`tmp/` and browser dependencies are local artifacts. Source links bind the checkout commit; the reviewed
+content SHA/date and source-derived contract versions remain in `content-baseline.json`.
 
-## Content and version review
+`doc_inventory.py` verifies complete coverage of the original Git tree, exact preserved Git blobs,
+reading destinations and bilingual route mappings. Historical ADRs, acceptance and audit originals
+retain their original paths and content. Rewritten sources have exact pre-refresh snapshots.
+When the reviewed commit is missing from a checkout, synchronization fetches that exact SHA
+from the public upstream repository before running the same inventory checks.
 
-- Edit `website/pages/` in both languages; missing pairs fail synchronization.
-- Edit architecture source in `docs/architecture/v2/`, preserving authority and accepted ADR semantics.
-- `content-baseline.json` retains the reviewed code SHA/date and source-derived contract identities.
-  If an authoritative version changes, review affected prose/compatibility and update that manifest.
-- `sync_docs.py` builds navigation, ADR catalogs and reference pages. It rewrites repository links,
-  including old absolute workspace line links, to the exact build commit.
-- `build-info.json` records source SHA, content-review SHA/date, actual dirty state and UTC build time.
-  A dirty local preview is not a reproducible published commit. Publish only from a clean commit.
-- `legacy-anchors.json` retains previous public anchors. Page routes remain stable; preserve this
-  compatibility map when changing headings. New navigation labels were explicitly approved.
+## API-generated architecture figures
 
-Do not modify historical results to match newer implementations. Distinguish accepted design,
-implemented code, software validation and physical evidence. Use `status.md` for current boundaries,
-not a handwritten ADR count or a copied protocol-version table.
+The current atlas has one framework and seven flow topics in Chinese and English. `diagram-assets.json`
+binds each PNG to its prompt, requested model, reviewed code, dimensions and digest. The imagegen skill
+CLI uses `/v1/images/generations` and `/v1/images/edits` with the explicitly selected model; the final
+set uses reference-based edits in the original repository V2 illustration style. The generation records
+bind actual prompts, retained reference images and intermediate output digests. The installed CLI is not
+copied or modified. Resolve credentials in the calling process only; never put them in publication inputs.
 
-## Browser verification
+Generation briefs, prompts and actual outcomes live beside the PNGs under the dated architecture
+asset directory. Check labels, every required edge and authority boundary visually before marking
+an asset reviewed. Store a returned model identity only if the API actually supplies one.
 
-Optional Node dependencies serve browser validation only; site building and hosting remain Python/static.
-
-```bash
-npm ci --ignore-scripts --prefix website/browser-tests
-cd website/browser-tests
-npx playwright install chromium
-```
-
-Serve `website/site/` separately, then run `npm test` in `website/browser-tests/`. `DOCS_URL` selects
-its loopback address (default `http://127.0.0.1:39801`); `DOCS_SCREENSHOTS` selects a fresh output folder.
-The check blocks third-party network requests and validates diagrams, mobile/tablet/desktop widths,
-light/dark themes, search, language switching, keyboard focus and the mobile drawer.
-
-Mermaid 11.12.2 is vendored with its MIT license to avoid runtime CDN failures. Its exact upstream
-artifact is `https://unpkg.com/mermaid@11.12.2/dist/mermaid.min.js`; no external font or diagram requests
-are required. Keep the version, license and template path together when upgrading.
-
-Maintained architecture diagrams are also committed as SVGs and displayed directly in the article,
-with a full-size link and expandable/downloadable Mermaid source. They remain visible with JavaScript
-disabled. After changing a registered Mermaid fence, regenerate its assets:
+Normal synchronization refuses pending, changed or unreviewed images. When API permissions block
+images, an explicit local prose preview is available:
 
 ```bash
-node website/browser-tests/render-diagrams.cjs
+python website/sync_docs.py --text-preview
+uvx --from mkdocs --with-requirements website/requirements.txt mkdocs build --strict -f website/mkdocs.yml
+python website/check_site.py --text-preview
 ```
 
-`diagram-assets.json` binds each SVG and downloadable source to the original fenced source and vendored
-renderer. Synchronization refuses changed source or asset bytes until regeneration. Ordinary unregistered
-Mermaid diagrams continue to use Material's local renderer. Do not edit generated SVGs by hand.
+This preview has `publication_ready=false`, displays only reviewed images or pending notices and cannot pass normal
+publication checks. A model-list entry is not a successful image generation. Historical Mermaid
+sources remain original evidence and are displayed as literal source text; the site uses no diagram
+renderer. Current figures remain visible and open at full size with JavaScript disabled.
 
-## CI and publication
+## Browser and packaged-resource checks
 
-`.github/workflows/docs.yml` runs type/style/function-documentation checks, publication regressions,
-strict bilingual build, rendered link validation and browser checks. It uploads the static preview
-and screenshots as artifacts. The existing Cloudflare Workers configuration continues serving
-`website/site/`; keep build root and sync/build commands consistent with this guide.
+Install the locked browser dependencies with `npm ci --ignore-scripts --prefix website/browser-tests`,
+then install Chromium using Playwright. Serve `website/site/` on loopback and run `npm test` from
+`website/browser-tests/`. `DOCS_URL` selects the loopback origin and `DOCS_SCREENSHOTS` selects an output
+folder. Only explicit local prose validation uses `DOCS_TEXT_PREVIEW=1`.
+`DOCS_BROWSER_EXECUTABLE` optionally selects an installed Chromium-family browser for local checks;
+CI uses Playwright's locked Chromium installation.
 
-Before merging a documentation branch, fetch the current target and review changes since the
-content baseline. Resolve in the isolated worktree and rerun affected checks. Do not reset, stash,
-clean, switch or consume uncommitted files in another session's checkout.
+Checks cover Chinese/English navigation, compatibility routes and anchors, search, mobile/tablet/
+desktop widths, light/dark themes, generated-image loading/enlargement and no-JavaScript reading.
+Packaged runbooks retain their installed filenames; `pyproject.toml` points to the relocated full
+sources. Run affected workbench runbook tests and inspect wheel resource contents after moves.
 
-After publication, read `/build-info.json`, both homepages, architecture pages and search/assets.
-Compare the deployed source SHA with the intended commit. A successful upload alone does not prove
-that the deployment uses the expected source. Keep the preceding verified commit for rollback.
+## Delivery
+
+Run the repository’s Ruff, strict mypy and function-documentation checks for changed website code,
+publication regressions, strict bilingual build and rendered-link checks. Runtime and physical
+acceptance remain independent. Deliver a reviewed documentation branch/PR; publication must use
+a clean approved source commit and verified actual build metadata.
 
 ## Production branch isolation
 
@@ -90,7 +77,9 @@ The production Worker must build `main` only. In Cloudflare Workers & Pages → 
 Settings → Builds → Branch control, set the production branch to `main`. Keep preview builds disabled
 until the preview deploy command has been checked to avoid promotion to the production Worker.
 Branch controls are a Cloudflare account setting; `wrangler.jsonc` does not select the production Git
-branch. A repository change alone cannot fix an older branch's deploy command.
+branch. With non-production builds enabled, set their Version command to
+`cd website && npx wrangler deploy --dry-run` for build verification without publishing.
+Reserve `cd website && npx wrangler deploy` for the production Deploy command.
 
 On 2026-10-22, the production build metadata changed from main's `495a6d2` to development commit
 `6c5a099`, and both new atlas routes returned 404. This was verified from actual `build-info.json` and

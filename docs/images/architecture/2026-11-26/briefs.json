@@ -1,0 +1,624 @@
+{
+  "code_commit": "3c7136d67e7638d09bde54d32dac55ec87f94c3c",
+  "reviewed_at": "2026-11-26",
+  "model": "gpt-image-2.6-sunburst",
+  "diagrams": [
+    {
+      "name": "overview",
+      "locale": "zh",
+      "title": "RoboGuide 总体框架",
+      "nodes": [
+        "Mission Intelligence",
+        "Grounding",
+        "Planner",
+        "Reviewer & Repair",
+        "Request",
+        "Controller",
+        "Orchestration",
+        "Control",
+        "Match",
+        "Joint Scheduler",
+        "Commit & Bind",
+        "Group Manager",
+        "Execution Group",
+        "Runtime",
+        "Integration",
+        "State & Memory",
+        "State",
+        "Memory Catalog",
+        "Artifact CAS",
+        "Preparation & Use",
+        "Node Service",
+        "Local EAIOS",
+        "Interaction device",
+        "Edge Compute",
+        "Providers",
+        "Physical World"
+      ],
+      "topology": "Reference-style framework: all internal Controller responsibilities enclosed; Execution Group inside Control; Node/Local EAIOS outside; source-bound State/Memory, explicit optional deployment, local safety.",
+      "evidence": [
+        "mission/src/mission/request_engine.py",
+        "mission/src/roboguide_workbench/task_tools.py",
+        "apps/integration-server/src/main.rs",
+        "core/orchestration/src/lib.rs",
+        "core/control/src/lib.rs",
+        "core/runtime/src/lib.rs",
+        "core/integration/src/lib.rs",
+        "core/state/src/state_record.rs",
+        "core/domain/src/memory.rs",
+        "core/node-service/src/service/mod.rs",
+        "core/controller-replication/src/lib.rs",
+        "integrations/sync-provider/roboguide_sync/sync_engine.py"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/framework.zh.reference-v2.fix-01.txt",
+      "prompt_sha256": "0aa65d4769bd44f54204e5c73f0e0b4fbecff8fafa75aa703ebcf86fe7e59eee",
+      "image": "docs/images/architecture/2026-11-26/overview.zh.png",
+      "kind": "framework",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        },
+        {
+          "path": "docs/images/distributed-embodied-ai-os-architecture-v1.1.png",
+          "sha256": "269a33daccb79f336b43ec346e97f078a5b3e9a1d2d2d8f7a1b9f2f7d5cac960"
+        }
+      ],
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/framework.zh.reference-v2.txt"
+    },
+    {
+      "name": "overview",
+      "locale": "en",
+      "title": "RoboGuide system framework",
+      "nodes": [
+        "Mission Intelligence",
+        "Grounding",
+        "Planner",
+        "Reviewer & Repair",
+        "Request",
+        "Controller",
+        "Orchestration",
+        "Control",
+        "Match",
+        "Joint Scheduler",
+        "Commit & Bind",
+        "Group Manager",
+        "Execution Group",
+        "Runtime",
+        "Integration",
+        "State & Memory",
+        "State",
+        "Memory Catalog",
+        "Artifact CAS",
+        "Preparation & Use",
+        "Node Service",
+        "Local EAIOS",
+        "Interaction device",
+        "Edge Compute",
+        "Providers",
+        "Physical World"
+      ],
+      "topology": "Reference-style framework: all internal Controller responsibilities enclosed; Execution Group inside Control; Node/Local EAIOS outside; source-bound State/Memory, explicit optional deployment, local safety.",
+      "evidence": [
+        "mission/src/mission/request_engine.py",
+        "mission/src/roboguide_workbench/task_tools.py",
+        "apps/integration-server/src/main.rs",
+        "core/orchestration/src/lib.rs",
+        "core/control/src/lib.rs",
+        "core/runtime/src/lib.rs",
+        "core/integration/src/lib.rs",
+        "core/state/src/state_record.rs",
+        "core/domain/src/memory.rs",
+        "core/node-service/src/service/mod.rs",
+        "core/controller-replication/src/lib.rs",
+        "integrations/sync-provider/roboguide_sync/sync_engine.py"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/framework.en.reference-v2.txt",
+      "prompt_sha256": "12320562bb6b6dc6fd6f876bf5a7c025ff74385e10565a06fa77ecdfc4b64cd0",
+      "image": "docs/images/architecture/2026-11-26/overview.en.png",
+      "kind": "framework",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/architecture/2026-11-26/overview.zh.png",
+          "sha256": "a69f2765452d9e939758c4bae8c20188852962975c99444c8cde19e26e2f909e"
+        }
+      ],
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/framework.en.reference-v2.txt"
+    },
+    {
+      "name": "mission-planning",
+      "locale": "zh",
+      "title": "从对话到经过审查的计划",
+      "nodes": [
+        "Chat / 用户目标",
+        "Mission Request",
+        "Grounding 快照",
+        "Interpreter / 澄清",
+        "Planner",
+        "Reviewer",
+        "有界 Repair",
+        "只读前检",
+        "执行授权 / 风险审批",
+        "Controller 准入"
+      ],
+      "topology": "Request lifecycle and Controller Mission separated; clarify return, conditional bounded repair, read-only preflight, exact draft grant binding and independent admission.",
+      "evidence": [
+        "mission/src/mission/request_engine.py",
+        "mission/src/roboguide_workbench/task_tools.py",
+        "apps/integration-server/src/application/plan_validation.rs"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.zh.reference-v2.fix-02.txt",
+      "prompt_sha256": "a8af1b366d067ffc8df124aff69db6e6dfb74b9ea91ba82b93a61131f3c59801",
+      "image": "docs/images/architecture/2026-11-26/mission-planning.zh.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
+    },
+    {
+      "name": "mission-planning",
+      "locale": "en",
+      "title": "From conversation to a reviewed plan",
+      "nodes": [
+        "Chat / User goal",
+        "Mission Request",
+        "Grounding snapshot",
+        "Interpreter / Clarify",
+        "Planner",
+        "Reviewer",
+        "Bounded Repair",
+        "Read-only preflight",
+        "Execute grant / Risk approval",
+        "Controller admission"
+      ],
+      "topology": "Request lifecycle and Controller Mission separated; clarify return, conditional bounded repair, read-only preflight, exact draft grant binding and independent admission.",
+      "evidence": [
+        "mission/src/mission/request_engine.py",
+        "mission/src/roboguide_workbench/task_tools.py",
+        "apps/integration-server/src/application/plan_validation.rs"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.en.reference-v2.txt",
+      "prompt_sha256": "bff822f6eed80f941c052a75e844c73dfbf4e8310340d6f16d80aa642f2bf037",
+      "image": "docs/images/architecture/2026-11-26/mission-planning.en.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/mission-planning.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/architecture/2026-11-26/mission-planning.zh.png",
+          "sha256": "893efb5a89e7e961102f06a7b02b4a19b962c7e5d4f198b21ecceaa9f9538787"
+        }
+      ]
+    },
+    {
+      "name": "dispatch",
+      "locale": "zh",
+      "title": "从候选到可靠执行",
+      "nodes": [
+        "Ready Task",
+        "Match / CandidateSet",
+        "Bounded Scheduler",
+        "Proposal",
+        "Control Commit / Bind",
+        "SQL · Checkpoint + Outbox",
+        "发送 Execute",
+        "Node Journal",
+        "Local Workflow",
+        "持久 ACK / 执行事实"
+      ],
+      "topology": "Proposal does not reserve; Commit/Bind and persistence inside writer transaction; Execute afterward; Journal before local effects; receipt and execution facts return through the journal.",
+      "evidence": [
+        "core/orchestration/src/mission/scheduling.rs",
+        "core/control/src/coordination.rs",
+        "apps/integration-server/src/application/write_gate.rs",
+        "core/node-service/src/engine/admission.rs"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.zh.reference-v2.fix-02.txt",
+      "prompt_sha256": "5c35bcce2dcb5c9e5da75e3a5e00390e11c4783c42a6152d46bfbb08baa4296f",
+      "image": "docs/images/architecture/2026-11-26/dispatch.zh.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
+    },
+    {
+      "name": "dispatch",
+      "locale": "en",
+      "title": "From candidates to durable execution",
+      "nodes": [
+        "Ready Task",
+        "Match / CandidateSet",
+        "Bounded Scheduler",
+        "Proposal",
+        "Control Commit / Bind",
+        "SQL · Checkpoint + Outbox",
+        "Send Execute",
+        "Node Journal",
+        "Local Workflow",
+        "Durable ACK / Execution facts"
+      ],
+      "topology": "Proposal does not reserve; Commit/Bind and persistence inside writer transaction; Execute afterward; Journal before local effects; receipt and execution facts return through the journal.",
+      "evidence": [
+        "core/orchestration/src/mission/scheduling.rs",
+        "core/control/src/coordination.rs",
+        "apps/integration-server/src/application/write_gate.rs",
+        "core/node-service/src/engine/admission.rs"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.en.reference-v2.fix-02.txt",
+      "prompt_sha256": "5c507f5c0183c5b1c8f2600fc64355975c5ef414cdde0aacddd4eace717a6d0a",
+      "image": "docs/images/architecture/2026-11-26/dispatch.en.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/dispatch.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": []
+    },
+    {
+      "name": "completion",
+      "locale": "zh",
+      "title": "完成判定与资源释放",
+      "nodes": [
+        "本地 Completed",
+        "AwaitingSatisfaction",
+        "计划声明的 Basis",
+        "execution-report",
+        "独立 verifier evidence",
+        "Memory revoke 门禁",
+        "TaskSatisfied",
+        "Control 释放 Task 资源",
+        "推进后继 Task",
+        "Mission 原目标 / 整组收尾"
+      ],
+      "topology": "Plan-declared alternatives, applicable Memory revoke gate, TaskSatisfied before release and successors, separate original-goal/group closure.",
+      "evidence": [
+        "core/orchestration/src/mission/lifecycle.rs",
+        "apps/integration-server/src/application/outcomes.rs",
+        "apps/integration-server/src/application/memory_use.rs"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/completion.zh.reference-v2.fix-01.txt",
+      "prompt_sha256": "357cc443d46decf5faad5c9757f3ed4c712f3172e88e8cc00f926862168b3611",
+      "image": "docs/images/architecture/2026-11-26/completion.zh.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/completion.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
+    },
+    {
+      "name": "completion",
+      "locale": "en",
+      "title": "Satisfaction and resource release",
+      "nodes": [
+        "Local Completed",
+        "AwaitingSatisfaction",
+        "Plan-declared Basis",
+        "execution-report",
+        "Independent verifier evidence",
+        "Memory revoke gate",
+        "TaskSatisfied",
+        "Control releases Task resources",
+        "Advance successor Task",
+        "Original Mission goal / Group closure"
+      ],
+      "topology": "Plan-declared alternatives, applicable Memory revoke gate, TaskSatisfied before release and successors, separate original-goal/group closure.",
+      "evidence": [
+        "core/orchestration/src/mission/lifecycle.rs",
+        "apps/integration-server/src/application/outcomes.rs",
+        "apps/integration-server/src/application/memory_use.rs"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/completion.en.reference-v2.fix-01.txt",
+      "prompt_sha256": "1dae8268a557166a916aa74d3c79e97d19b9614363ed23ea31e78e7134ddad44",
+      "image": "docs/images/architecture/2026-11-26/completion.en.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/completion.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/architecture/2026-11-26/completion.zh.png",
+          "sha256": "b30d03bada22d016caf4fa34497d19f4083dfc69686ac1eafadbf83dfd142e66"
+        }
+      ]
+    },
+    {
+      "name": "state-memory",
+      "locale": "zh",
+      "title": "State、Memory 与空间内容",
+      "nodes": [
+        "Node 观测",
+        "State · Source / TTL",
+        "实时视图 / 受保护证据",
+        "Memory Catalog",
+        "Scope / Visibility / Placement",
+        "Artifact CAS",
+        "空间融合 Provider",
+        "目标 Node / Provider",
+        "Prepare / Import",
+        "当前 Use / Revoke"
+      ],
+      "topology": "Evidence and content lanes separate; original freshness preserved; Catalog metadata versus immutable bytes; new spatial revision; import and current use/revoke distinguished.",
+      "evidence": [
+        "core/state/src/state_record.rs",
+        "core/domain/src/memory.rs",
+        "apps/integration-server/src/application/memory_preparation.rs",
+        "integrations/spatial-provider/roboguide_spatial_provider/shared_map_job.py"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.zh.reference-v2.fix-01.txt",
+      "prompt_sha256": "f013a776dd37194fa55f6283225a94105252c49055a6314ad3853ac517f86ade",
+      "image": "docs/images/architecture/2026-11-26/state-memory.zh.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
+    },
+    {
+      "name": "state-memory",
+      "locale": "en",
+      "title": "State, Memory and spatial content",
+      "nodes": [
+        "Node observations",
+        "State · Source / TTL",
+        "Live view / Protected evidence",
+        "Memory Catalog",
+        "Scope / Visibility / Placement",
+        "Artifact CAS",
+        "Spatial fusion Provider",
+        "Consumer Node / Provider",
+        "Prepare / Import",
+        "Current Use / Revoke"
+      ],
+      "topology": "Evidence and content lanes separate; original freshness preserved; Catalog metadata versus immutable bytes; new spatial revision; import and current use/revoke distinguished.",
+      "evidence": [
+        "core/state/src/state_record.rs",
+        "core/domain/src/memory.rs",
+        "apps/integration-server/src/application/memory_preparation.rs",
+        "integrations/spatial-provider/roboguide_spatial_provider/shared_map_job.py"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.en.reference-v2.fix-01.txt",
+      "prompt_sha256": "b64fa3e78f97ca0ca327d6963a41353b14af2037472deac93b62921e7c0ff7cd",
+      "image": "docs/images/architecture/2026-11-26/state-memory.en.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/state-memory.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/architecture/2026-11-26/state-memory.zh.png",
+          "sha256": "9825964ccf0de9dc16cf0fad9a06bbe2a5044c23d1a783a3777010364c3f494e"
+        }
+      ]
+    },
+    {
+      "name": "recovery",
+      "locale": "zh",
+      "title": "未知、停止与分级恢复",
+      "nodes": [
+        "断线 / 执行失败",
+        "Unknown / Hold",
+        "保留原所有权",
+        "原 Cancel / Revoke 意图",
+        "停止证据 + 原终态",
+        "门禁核对",
+        "Role Recovery",
+        "Match / Commit / Rebind",
+        "经 Review 的 Plan Revision",
+        "新 Group / 正常准入",
+        "Manual Escalation"
+      ],
+      "topology": "Ambiguous effects retain ownership and block new dispatch; original stop/revoke; distinct evidence; gated role/plan recovery versus manual escalation; original budgets retained.",
+      "evidence": [
+        "apps/integration-server/src/application/safety_stop.rs",
+        "apps/integration-server/src/application/recovery.rs",
+        "apps/integration-server/src/application/plan_revision/switching.rs"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/recovery.zh.reference-v2.fix-03.txt",
+      "prompt_sha256": "ca12f4adbd36ffa873d2a1b765fa69e9645bf24a314ea2b11170773e11fb7236",
+      "image": "docs/images/architecture/2026-11-26/recovery.zh.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/recovery.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
+    },
+    {
+      "name": "recovery",
+      "locale": "en",
+      "title": "Unknown, stopping and recovery",
+      "nodes": [
+        "Disconnect / Failure",
+        "Unknown / Hold",
+        "Retain original ownership",
+        "Original Cancel / Revoke intent",
+        "Stop evidence + Original terminal",
+        "Gate checks",
+        "Role Recovery",
+        "Match / Commit / Rebind",
+        "Reviewed Plan Revision",
+        "New Group / Normal admission",
+        "Manual Escalation"
+      ],
+      "topology": "Ambiguous effects retain ownership and block new dispatch; original stop/revoke; distinct evidence; gated role/plan recovery versus manual escalation; original budgets retained.",
+      "evidence": [
+        "apps/integration-server/src/application/safety_stop.rs",
+        "apps/integration-server/src/application/recovery.rs",
+        "apps/integration-server/src/application/plan_revision/switching.rs"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/recovery.en.reference-v2.fix-01.txt",
+      "prompt_sha256": "b5202afffc2fbaa106be3069d1238d6468e49142efc0bce6d29ab86ce67169cf",
+      "image": "docs/images/architecture/2026-11-26/recovery.en.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/recovery.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": []
+    },
+    {
+      "name": "cooperation",
+      "locale": "zh",
+      "title": "四种协作模式",
+      "nodes": [
+        "1 · Independent",
+        "独立任务 / 标准 DAG",
+        "2 · SequentialHandoff",
+        "TaskSatisfied + Memory 交接",
+        "3 · ConcurrentCooperation",
+        "共享视图 / 关系围栏",
+        "4 · TightlyCoupledCooperation",
+        "PeerChannel 就绪门禁",
+        "边缘 UDP 同步控制",
+        "共同 UTC 编排 · 独立 Mission"
+      ],
+      "topology": "Four explicit modes; sequential handoff; relation fences; high-rate UDP stays local; independent UTC playback and same-Mission failure boundary distinguished.",
+      "evidence": [
+        "core/runtime/src/relation/manager.rs",
+        "apps/integration-server/src/controller_http/server.rs",
+        "integrations/sync-provider/roboguide_sync/sync_engine.py",
+        "integrations/sync-provider/roboguide_sync/choreography_engine.py"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/cooperation.zh.reference-v2.fix-01.txt",
+      "prompt_sha256": "36b7b9d274edfc62dbd657f4e82c6e6befbe66d91cf19f65476244195842e651",
+      "image": "docs/images/architecture/2026-11-26/cooperation.zh.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/cooperation.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
+    },
+    {
+      "name": "cooperation",
+      "locale": "en",
+      "title": "Four cooperation modes",
+      "nodes": [
+        "1 · Independent",
+        "Independent tasks / Normal DAG",
+        "2 · SequentialHandoff",
+        "TaskSatisfied + Memory handoff",
+        "3 · ConcurrentCooperation",
+        "Shared view / Relation fences",
+        "4 · TightlyCoupledCooperation",
+        "PeerChannel readiness gate",
+        "Edge UDP sync control",
+        "Shared UTC playback · Separate Missions"
+      ],
+      "topology": "Four explicit modes; sequential handoff; relation fences; high-rate UDP stays local; independent UTC playback and same-Mission failure boundary distinguished.",
+      "evidence": [
+        "core/runtime/src/relation/manager.rs",
+        "apps/integration-server/src/controller_http/server.rs",
+        "integrations/sync-provider/roboguide_sync/sync_engine.py",
+        "integrations/sync-provider/roboguide_sync/choreography_engine.py"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/cooperation.en.reference-v2.txt",
+      "prompt_sha256": "cc55c7c70bf0dcbc9d334e25b30c07f44c60ab9f6b889ef6e1144d7943b92c7f",
+      "image": "docs/images/architecture/2026-11-26/cooperation.en.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/cooperation.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/architecture/2026-11-26/cooperation.zh.png",
+          "sha256": "71d3ae9df6f499edf6d311fd777430dd2df5c7d9843f7143fd9ccc780e4a8b4c"
+        }
+      ]
+    },
+    {
+      "name": "deployment",
+      "locale": "zh",
+      "title": "进程、存储与故障域",
+      "nodes": [
+        "Mission Service",
+        "Request SQL",
+        "Controller",
+        "Controller SQL / Checkpoint",
+        "Artifact CAS",
+        "Node Service",
+        "Node Journal",
+        "Local EAIOS / Providers",
+        "可选 Replica Quorum",
+        "可选其他 Controller 域",
+        "静止 Recovery Tool"
+      ],
+      "topology": "Separate Mission/Controller/Node processes and storage; Local EAIOS external; optional Replica/Federation and quiescent recovery without device authority.",
+      "evidence": [
+        "apps/integration-server/src/main.rs",
+        "core/controller-replication/src/lib.rs",
+        "apps/controller-replica/src/main.rs",
+        "apps/recovery-tool/roboguide_recovery/__main__.py"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/deployment.zh.reference-v2.txt",
+      "prompt_sha256": "593fc826155db78912d5877ddfbab89b3385fea33cb88156890b66127e74aba3",
+      "image": "docs/images/architecture/2026-11-26/deployment.zh.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/deployment.zh.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/roboguide-v2-overall-architecture.png",
+          "sha256": "de498c16b3731f74af44faeaabec28257a8e61323e9a96d7a97c13a9bafa7bd3"
+        }
+      ]
+    },
+    {
+      "name": "deployment",
+      "locale": "en",
+      "title": "Processes, storage and failure domains",
+      "nodes": [
+        "Mission Service",
+        "Request SQL",
+        "Controller",
+        "Controller SQL / Checkpoint",
+        "Artifact CAS",
+        "Node Service",
+        "Node Journal",
+        "Local EAIOS / Providers",
+        "Optional Replica Quorum",
+        "Optional other Controller domain",
+        "Quiescent Recovery Tool"
+      ],
+      "topology": "Separate Mission/Controller/Node processes and storage; Local EAIOS external; optional Replica/Federation and quiescent recovery without device authority.",
+      "evidence": [
+        "apps/integration-server/src/main.rs",
+        "core/controller-replication/src/lib.rs",
+        "apps/controller-replica/src/main.rs",
+        "apps/recovery-tool/roboguide_recovery/__main__.py"
+      ],
+      "prompt": "docs/images/architecture/2026-11-26/prompts/deployment.en.reference-v2.txt",
+      "prompt_sha256": "0af5ee1d9ad9ac02890659299d0e68501cb5a36750fefdc7f06b7ed1c52f178c",
+      "image": "docs/images/architecture/2026-11-26/deployment.en.png",
+      "spec_prompt": "docs/images/architecture/2026-11-26/prompts/deployment.en.reference-v2.txt",
+      "kind": "flow",
+      "generation_operation": "edit",
+      "reference_images": [
+        {
+          "path": "docs/images/architecture/2026-11-26/deployment.zh.png",
+          "sha256": "52355db7c50651ad516b79eaa5be29bd5ec68d5a81fc02a32012f84eeca57f6b"
+        }
+      ]
+    }
+  ],
+  "style": "Original RoboGuide V2 architecture illustration; supporting bilingual V1.1 reference."
+}

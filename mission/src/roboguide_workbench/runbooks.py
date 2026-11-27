@@ -49,6 +49,7 @@ REFERENCES = {
                 ("失联", "node route or lease"),
                 ("执行回执", "receipt"),
             ),
+            "docs/operations/reference",
         ),
         Reference(
             "conversation-workbench-v0.4",
@@ -59,6 +60,7 @@ REFERENCES = {
                 ("执行前检查", "/check"),
                 ("计划检查", "/check"),
             ),
+            "docs/guides/workbench/reference",
         ),
         Reference(
             "hot-node-enrollment-acceptance-20261109",
@@ -69,6 +71,7 @@ REFERENCES = {
             "operator-network-bounds-v0.1",
             "运维访问与网络范围",
             (("证书", "mtls"), ("403", "权限"), ("越权", "权限")),
+            "docs/operations/reference",
         ),
         Reference(
             "2026-11-09-posture-goal-and-offline",

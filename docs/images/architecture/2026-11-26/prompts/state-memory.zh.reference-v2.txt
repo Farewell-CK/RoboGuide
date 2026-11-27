@@ -1,0 +1,23 @@
+Use the supplied original RoboGuide V2 repository architecture diagram as a STYLE REFERENCE ONLY. Redraw the topic specified below in the same detailed engineering-publication style: white canvas, thin rounded blue/violet/green plane outlines, pale color washes, small meaningful engineering pictograms, compact labels, close alignment and concise technical annotation panels. This is a topic-specific diagram, not a copy of the reference content. Output 1536x1024 PNG. Fill the canvas coherently without large unused zones. Title around 38px; module headings around 25px; body around 20px. Use two or three tightly fitted responsibility lanes and a compact invariant/exception sidebar where appropriate. Use line icons, exact labels and short factual notes to balance density. Do not make a dashboard, giant empty rectangles or a huge title. The meaning and direction of every arrow and all process boundaries must follow the requirements. Do not copy old unsupported facts or device examples from the reference.
+
+Title (exact): State、Memory 与空间内容
+Language: Simplified Chinese, retaining technical identifiers.
+Exact module labels:
+1. Node 观测
+2. State · Source / TTL
+3. 实时视图 / 受保护证据
+4. Memory Catalog
+5. Scope / Visibility / Placement
+6. Artifact CAS
+7. 空间融合 Provider
+8. 目标 Node / Provider
+9. Prepare / Import
+10. 当前 Use / Revoke
+
+Required topology:
+Use two clearly separated lanes. Evidence lane: Node observations -> State Source/TTL -> Live view/Protected evidence. Content lane: Memory Catalog references Scope/Visibility/Placement metadata and Artifact CAS opaque bytes. Artifact CAS -> Spatial fusion Provider -> Artifact CAS produces a NEW immutable revision; distinguish input and output arrows. Artifact CAS -> Consumer Node/Provider -> Prepare/Import -> Current Use/Revoke. Memory Catalog supplies selection metadata to Prepare/Import. Do not draw a raw bytes path through Runtime or put bytes inside State. Include short note: Reference != Import != Current use. Catalog metadata never grants content authorization.
+
+Critical boundaries and exceptions:
+State contains source-bound observations/evidence, never Artifact opaque bytes. Show input CAS -> Spatial fusion Provider -> NEW immutable revision in CAS separately. Catalog is metadata only and never grants current use permission.
+
+No new services, credentials, deployment addresses, actual-device acceptance claims or invented model output.

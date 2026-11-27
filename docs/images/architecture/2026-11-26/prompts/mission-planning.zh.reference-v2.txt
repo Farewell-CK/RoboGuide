@@ -1,0 +1,23 @@
+Use the supplied original RoboGuide V2 repository architecture diagram as a STYLE REFERENCE ONLY. Redraw the topic specified below in the same detailed engineering-publication style: white canvas, thin rounded blue/violet/green plane outlines, pale color washes, small meaningful engineering pictograms, compact labels, close alignment and concise technical annotation panels. This is a topic-specific diagram, not a copy of the reference content. Output 1536x1024 PNG. Fill the canvas coherently without large unused zones. Title around 38px; module headings around 25px; body around 20px. Use two or three tightly fitted responsibility lanes and a compact invariant/exception sidebar where appropriate. Use line icons, exact labels and short factual notes to balance density. Do not make a dashboard, giant empty rectangles or a huge title. The meaning and direction of every arrow and all process boundaries must follow the requirements. Do not copy old unsupported facts or device examples from the reference.
+
+Title (exact): 从对话到经过审查的计划
+Language: Simplified Chinese, retaining technical identifiers.
+Exact module labels:
+1. Chat / 用户目标
+2. Mission Request
+3. Grounding 快照
+4. Interpreter / 澄清
+5. Planner
+6. Reviewer
+7. 有界 Repair
+8. 只读前检
+9. 执行授权 / 风险审批
+10. Controller 准入
+
+Required topology:
+Number the main path 1 to 8: Chat -> Mission Request -> Grounding -> Interpreter -> Planner -> Reviewer -> Read-only preflight -> Execute grant/Risk approval -> Controller admission. Reviewer -> Bounded Repair -> Reviewer is an explicit bounded loop. Interpreter clarification returns to Chat. Label preflight as read-only; it reserves no resources. Exact displayed plan revision/digest binds authorization. Show Request and Controller Mission as distinct boundaries, not one identity. No direct model-to-device arrow.
+
+Critical boundaries and exceptions:
+Request, Grounding, Interpreter, Planner, Reviewer, Repair, preflight, Execute grant and risk approval all belong to the MI/Workbench Request lifecycle. ONLY Controller admission belongs to the separate Controller Mission boundary. Clarification points from Interpreter back to Chat; no extra arrowhead points back into Interpreter on that return line.
+
+No new services, credentials, deployment addresses, actual-device acceptance claims or invented model output.

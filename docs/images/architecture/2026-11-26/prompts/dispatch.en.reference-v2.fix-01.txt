@@ -1,0 +1,5 @@
+Edit only the right Exceptions panel. Preserve every other word, box, icon, boundary and arrow. Replace the whole panel body with exactly these three bullets:
+Response lost: reconcile the ORIGINAL invocation and journal. Preserve uncertainty. A timeout does not release bindings.
+Duplicate command: replay the original journal; create no new attempt or duplicate local effect.
+Execution failure: apply current stop/revoke/policy gates. Failure does not by itself prove the device has stopped.
+Do not mention reissuing, re-requesting, automatic restart or automatic compensation. Output 1536x1024 PNG.

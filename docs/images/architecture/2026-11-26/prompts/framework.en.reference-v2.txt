@@ -1,0 +1,70 @@
+Use case: text-localization / infographic-diagram.
+Create the ENGLISH edition of the supplied current RoboGuide framework plate. Preserve its compact original-repository V2 style, colored architectural planes, hierarchy, pictograms, device illustrations, all box boundaries, ownership and positions. Translate Chinese text into precise English. Adjust line wrapping and font size modestly to fit. Output 1536x1024 PNG, no cropping. Do not turn it into dashboard cards or a procedural flowchart.
+
+Exact English labels and translations:
+Title: RoboGuide System Architecture
+Subtitle: Joint task and resource coordination across Capability · Compute · Space · Time
+Mission Intelligence / Mission intelligence
+Grounding / Intent and evidence
+Planner / Complete plan
+Reviewer & Repair / Review and repair
+Request / Draft, approval, submit
+MissionPlan
+Orchestration / Task organization
+Mission admission
+Task DAG
+Satisfaction
+Mission lifecycle
+Controller / Modular monolith
+Control / Decisions and resource coordination
+Match / Candidate matching
+Capability · Eligibility
+Joint Scheduler / Joint scheduling
+Capability × Compute × Space × Time
+Commit & Bind / Resource commitment
+Reservation · Quota · Binding
+Group Manager / Execution Group management
+Members · Roles · Lifecycle
+Execution Group / Long-lived execution context
+Actor · ContextRole · TaskRole · Resource Bindings
+Proposal reserves no resources; Commit establishes ownership
+Runtime / Execution runtime
+Logical Slot
+Attempt
+Durable Intent
+Relation Fences
+Integration / Protocol and integration boundary
+Node Protocol
+Session
+Fact admission
+API Facade
+State & Memory / State and memory
+State / Source-bound facts
+Source · Epoch · Sequence · TTL
+Memory Catalog / Metadata
+Scope · Visibility · Placement
+Artifact CAS / Content storage
+Opaque Bytes · Immutable Revision
+Preparation & Use / Use permission
+Import · Use · Revoke
+Reference, import and current use permission are checked separately
+mTLS · Tenant · Policy · Persistence · Recovery · Observability
+Node Service / Local admission and execution
+Identity and admission
+Execution Journal
+Workflow
+Reliable fact reporting
+Robot / Local EAIOS
+Interaction device / Phone & Glasses
+Compute node / Edge Compute
+Providers / Memory · Spatial · Sync
+Local EAIOS retains Local How, local autonomy and immediate safety
+Physical World
+Space · Objects · People · Environment
+Architecture principles
+Global task and resource coordination
+Local execution and immediate safety
+Unknown retains original ownership
+Replica / Federation require explicit deployment
+
+Semantic invariants: Orchestration, Control, Runtime, Integration, State and Memory must all be enclosed by the outer Controller boundary. Node Service stays outside. Execution Group and Group Manager belong inside Control. The Providers illustration remains a software-service icon cluster, not a drone. Do not change any connector topology while translating. All device pictures are illustrative categories, not acceptance claims.

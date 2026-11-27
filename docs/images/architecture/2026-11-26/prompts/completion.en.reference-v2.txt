@@ -1,0 +1,15 @@
+Create the ENGLISH edition of the supplied finalized Chinese topic diagram. Translate every Chinese label, paragraph, invariant, exception and legend accurately into natural technical English. Preserve all geometry, every arrow direction and endpoint, scope boundaries, icons, colors, node numbers and conditional gates. Keep the dense original-repository V2 engineering illustration style. Do not add new claims, capabilities, loops or steps. Keep text legible by modestly adjusting wrapping and font size. Output 1536x1024 PNG without cropping.
+Exact English topic title: Satisfaction and resource release
+Required technical identifiers / module labels:
+Local Completed
+AwaitingSatisfaction
+Plan-declared Basis
+execution-report
+Independent verifier evidence
+Memory revoke gate
+TaskSatisfied
+Control releases Task resources
+Advance successor Task
+Original Mission goal / Group closure
+Semantic reference (do not add text not present in the source):
+A clear branching and joining flow: Local Completed -> AwaitingSatisfaction -> Plan-declared Basis; branch to execution-report OR independent verifier evidence (only the declared basis is accepted). Both branches lead toward TaskSatisfied but a separate Memory revoke gate is a mandatory conditional gate when Memory is used, drawn joining before TaskSatisfied. TaskSatisfied -> Control releases Task resources -> Advance successor Task -> Original Mission goal/Group closure. A concise bottom note: missing or negative evidence retains ownership. Do not claim local Completed alone proves the goal. Mission closure also needs all tasks and any configured original-goal gate.

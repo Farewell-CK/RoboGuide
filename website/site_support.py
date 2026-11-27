@@ -18,7 +18,9 @@ BASELINE = ROOT / "website" / "content-baseline.json"
 @lru_cache(maxsize=1)
 def source_revision() -> str:
     """Return the actual checkout commit rather than an untrusted deployment environment value."""
-    value = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    value = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, encoding="utf-8"
+    ).strip()
     if not re.fullmatch(r"[0-9a-f]{40}", value):
         raise SystemExit("documentation requires a complete Git commit identity")
     return value
@@ -26,7 +28,11 @@ def source_revision() -> str:
 
 def tracked_paths() -> set[str]:
     """Return only tracked publication inputs, excluding local meetings and experiments."""
-    return set(subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT, text=True).split("\0"))
+    return set(
+        subprocess.check_output(
+            ["git", "ls-files", "-z"], cwd=ROOT, text=True, encoding="utf-8"
+        ).split("\0")
+    )
 
 
 def read_constant(path: str, name: str) -> str:
@@ -149,7 +155,10 @@ def write_reference(destination: Path) -> None:
         )
     dirty = bool(
         subprocess.check_output(
-            ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, text=True
+            ["git", "status", "--porcelain", "--untracked-files=normal"],
+            cwd=ROOT,
+            text=True,
+            encoding="utf-8",
         ).strip()
     )
     metadata = {
@@ -162,7 +171,7 @@ def write_reference(destination: Path) -> None:
         "versions": versions,
     }
     (destination / "build-info.json").write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n"
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     for en in (False, True):
         heading = "Versions and build provenance" if en else "版本与构建来源"
@@ -222,7 +231,9 @@ def write_reference(destination: Path) -> None:
             "· [Archives](archives.md)",
             "",
         ]
-        (destination / ("reference.en.md" if en else "reference.md")).write_text("\n".join(lines))
+        (destination / ("reference.en.md" if en else "reference.md")).write_text(
+            "\n".join(lines), encoding="utf-8"
+        )
 
 
 def legacy_anchors(page: str) -> str:

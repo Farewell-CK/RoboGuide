@@ -24,6 +24,8 @@ already broken in the repository are reported as warnings and left untouched.
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import posixpath
 import re
@@ -33,6 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from diagram_assets import diagram_registry, render_figures
+from doc_inventory import validate_inventory
 from site_support import (
     legacy_anchors,
     pin_links,
@@ -56,7 +59,7 @@ LOCAL_PAGES_DIR = WEBSITE_DIR / "pages"
 
 #: File suffixes that are copied into the site docs tree; everything else is ignored.
 COPY_SUFFIXES: frozenset[str] = frozenset(
-    {".md", ".mmd", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".docx"}
+    {".md", ".mmd", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".docx", ".txt", ".json"}
 )
 
 #: Curated sync plan as ``(repository path, site path)`` pairs. Directories are
@@ -70,6 +73,10 @@ COPY_PLAN: tuple[tuple[str, str], ...] = (
     ("tools/deployment/README.md", "tools/deployment/index.md"),
     ("integrations/habitat-local-eaios/README.md", "integrations/habitat-local-eaios/index.md"),
     ("integrations/robonix-map-service/README.md", "integrations/robonix-map-service/index.md"),
+    ("integrations/robonix-task/README.md", "integrations/robonix-task/index.md"),
+    ("integrations/memory-provider/README.md", "integrations/memory-provider/index.md"),
+    ("integrations/spatial-provider/README.md", "integrations/spatial-provider/index.md"),
+    ("integrations/sync-provider/README.md", "integrations/sync-provider/index.md"),
 )
 
 #: Title of the automatically generated ADR navigation group; the group's
@@ -93,6 +100,7 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
             ("执行生命周期", "lifecycle.md"),
             ("State 与 Memory", "state-memory.md"),
             ("V2 架构手册", "docs/architecture/v2/architecture-handbook.md"),
+            ("核心流程", "docs/architecture/v2/system-dataflows.md"),
         ),
     ),
     (
@@ -110,6 +118,7 @@ NAV_GROUPS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
         ),
     ),
     ("部署与运维", "operations.md", ()),
+    ("对话工作台", "docs/guides/workbench/index.md", ()),
     (
         "状态与参考",
         "status.md",
@@ -280,6 +289,17 @@ def rewrite_target(
     if repo_target in ("", ".") or repo_target.startswith(".."):
         return None
     suffix = f"#{anchor}" if anchor_separator else ""
+    if repo_source_dir == "website/pages" or repo_source_dir.startswith("website/pages/"):
+        old_site_dir = repo_source_dir.removeprefix("website/pages").lstrip("/")
+        old_target = posixpath.normpath(
+            posixpath.join(old_site_dir, urllib.parse.unquote(relative))
+        )
+        if (
+            old_target in mapping.values()
+            or old_target in {"reference.md", "docs/decisions/index.md"}
+            or (LOCAL_PAGES_DIR / old_target).is_file()
+        ):
+            return posixpath.relpath(old_target, site_source_dir or ".") + suffix
     decoded_target = posixpath.normpath(posixpath.join(base, urllib.parse.unquote(relative)))
     for candidate in dict.fromkeys((repo_target, decoded_target)):
         new_relative = resolve_site_relative(candidate, site_source_dir, mapping)
@@ -341,7 +361,7 @@ def rewrite_markdown_file(
         site_file.write_text(rewritten_text, encoding="utf-8", newline="\n")
 
 
-def copy_local_pages() -> list[str]:
+def copy_local_pages(mapping: dict[str, str], broken_by_file: dict[Path, set[str]]) -> list[str]:
     """Copy site-authored content pages into the site docs root.
 
     Returns:
@@ -357,10 +377,22 @@ def copy_local_pages() -> list[str]:
         relative = file_path.relative_to(LOCAL_PAGES_DIR)
         destination = SITE_DOCS_DIR / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
+        text = file_path.read_text(encoding="utf-8")
+        source = re.fullmatch(r"<!-- docs-source: (docs/[^\n]+\.md) -->\s*", text)
+        if source is not None:
+            repo_path = source.group(1)
+            original = (REPO_ROOT / repo_path).resolve()
+            if not original.is_relative_to((REPO_ROOT / "docs").resolve()):
+                raise SystemExit(f"guide source escapes docs: {repo_path}")
+            if repo_path not in mapping or not original.is_file():
+                raise SystemExit(f"guide source is not a tracked publication input: {repo_path}")
+            destination.write_text(original.read_text(encoding="utf-8"), encoding="utf-8")
+            rewrite_markdown_file(
+                destination, repo_path, relative.as_posix(), mapping, broken_by_file
+            )
+            text = destination.read_text(encoding="utf-8")
         destination.write_text(
-            legacy_anchors(relative.as_posix())
-            + "\n\n"
-            + pin_links(file_path.read_text(encoding="utf-8")),
+            legacy_anchors(relative.as_posix()) + "\n\n" + pin_links(text),
             encoding="utf-8",
         )
         copied.append(relative.as_posix())
@@ -519,20 +551,32 @@ def main() -> int:
         Process exit code: 0 on success, 1 when generated link targets are
         missing after rewriting.
     """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--text-preview",
+        action="store_true",
+        help="Local-only preview without completed API images",
+    )
+    args = parser.parse_args()
+    origins = validate_inventory()
     validate_pairs(LOCAL_PAGES_DIR)
+    registry = diagram_registry(allow_pending=args.text_preview)
     mapping = build_file_mapping()
     copy_sources(mapping)
-    local_pages = copy_local_pages()
     broken_by_file: dict[Path, set[str]] = {}
+    local_pages = copy_local_pages(mapping, broken_by_file)
     rewritten_pages = 0
     for repo_posix, site_posix in sorted(mapping.items()):
         if not site_posix.endswith(".md"):
             continue
         rewrite_markdown_file(
-            SITE_DOCS_DIR / site_posix, repo_posix, site_posix, mapping, broken_by_file
+            SITE_DOCS_DIR / site_posix,
+            origins.get(repo_posix, repo_posix),
+            site_posix,
+            mapping,
+            broken_by_file,
         )
         rewritten_pages += 1
-    registry = diagram_registry()
     for path in SITE_DOCS_DIR.rglob("*.md"):
         text = path.read_text(encoding="utf-8")
         rendered = render_figures(text, registry)
@@ -541,6 +585,12 @@ def main() -> int:
     summaries = parse_adr_summaries(mapping)
     write_adr_overview(summaries)
     write_reference(SITE_DOCS_DIR)
+    metadata_path = SITE_DOCS_DIR / "build-info.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["publication_ready"] = not args.text_preview
+    metadata_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     write_summary(summaries)
     for site_file, targets in sorted(broken_by_file.items()):
         for target in sorted(targets):
