@@ -4,9 +4,14 @@ import android.Manifest
 import android.content.*
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.*
 import android.text.InputType
+import android.text.Editable
+import android.text.TextWatcher
+import android.text.TextUtils
 import android.view.*
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +39,11 @@ open class NativeIndoorActivity: AppCompatActivity() {
     internal val gate = SessionGate()
     internal lateinit var body: LinearLayout
     internal lateinit var status: TextView
+    internal lateinit var toolbarTitle: TextView
+    private lateinit var toolbarActions: LinearLayout
+    private var cameraHost: FrameLayout? = null
+    internal var cameraOverlay: FrameLayout? = null
+    internal var routeProgress: ProgressBar? = null
     internal var profile: Profile? = null
     internal var selectedMap: IndoorMap? = null
     internal var nodes = emptyList<MapNode>()
@@ -120,41 +130,77 @@ open class NativeIndoorActivity: AppCompatActivity() {
         mapBitmap?.recycle(); mapBitmap = null
         super.onDestroy()
     }
-    internal fun screen(title: String, back: (() -> Unit)? = null) {
+    internal fun screen(title: String, colour: Int = NaviStyle.BLACK, immersive: Boolean = false, back: (() -> Unit)? = null) {
         gate.invalidate(); handler.removeCallbacksAndMessages(null); api.cancel(); camera.close(); speech.stop()
         navigation = null; recording = false; resumeLive = null
         busy = false; frameBusy = false; obstacleEpoch++; obstacleConfirmation.clear(); obstacleLastAt = 0
         obstacleText = null; headingText = null; guidanceText = null; progressText = null; debugText = null; arrowText = null
+        routeProgress = null; cameraHost = null; cameraOverlay = null
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFFF8FAFC.toInt()) }
-        val toolbar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(8), dp(6), dp(12), dp(6)) }
-        if (back != null) toolbar.addView(Button(this).apply { text = "返回"; setOnClickListener { back() } }, LinearLayout.LayoutParams(dp(76), dp(48)))
-        toolbar.addView(TextView(this).apply { text = title; textSize = 23f; setTextColor(0xFF0F172A.toInt()); setPadding(dp(8), 0, 0, 0) })
-        root.addView(toolbar)
-        status = TextView(this).apply { textSize = 14f; setTextColor(0xFF475569.toInt()); setPadding(dp(16), dp(6), dp(16), dp(6)); accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
-        root.addView(status)
-        body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(4), dp(16), dp(24)) }
-        root.addView(ScrollView(this).apply { isFillViewport = true; addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        window.statusBarColor = if (immersive) Color.BLACK else colour
+        window.navigationBarColor = if (immersive) Color.BLACK else Color.WHITE
+        window.decorView.systemUiVisibility = if (immersive) 0 else View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        val root = FrameLayout(this).apply { setBackgroundColor(if (immersive) Color.BLACK else Color.WHITE) }
+        val toolbar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(if (immersive) 0x99000000.toInt() else colour); minimumHeight = dp(56) }
+        if (back != null) toolbar.addView(ImageButton(this).apply {
+            setImageResource(R.drawable.ic_navi_back); contentDescription = "返回"; tooltipText = "返回"; setBackgroundColor(Color.TRANSPARENT); safeClick(back)
+        }, LinearLayout.LayoutParams(dp(48), dp(56))) else toolbar.addView(View(this), LinearLayout.LayoutParams(dp(48), dp(56)))
+        toolbarTitle = TextView(this).apply { text = title; textSize = 21f; setTextColor(Color.WHITE); setTypeface(typeface, Typeface.BOLD); gravity = Gravity.CENTER; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        toolbar.addView(toolbarTitle, LinearLayout.LayoutParams(0, -2, 1f))
+        toolbarActions = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; minimumWidth = dp(48) }
+        toolbar.addView(toolbarActions, LinearLayout.LayoutParams(-2, dp(56)))
+        val statusRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE; setPadding(dp(16), dp(8), dp(16), dp(8)); setBackgroundColor(if (immersive) 0xDD000000.toInt() else 0xFFF5F5F5.toInt()) }
+        status = TextView(this).apply { textSize = 14f; setTextColor(if (immersive) Color.WHITE else 0xFF424242.toInt()); accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        statusRow.addView(status, LinearLayout.LayoutParams(-1, -2))
+        status.addTextChangedListener(object: TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { statusRow.visibility = if (s.isNullOrBlank()) View.GONE else View.VISIBLE }
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+        body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(if (immersive) 16 else 24), dp(if (immersive) 12 else 20), dp(if (immersive) 16 else 24), dp(24))
+            if (immersive) { tag = NaviStyle.DARK_PANEL; background = NaviStyle.shape(this@NativeIndoorActivity, 0xED000000.toInt(), 20) }
+        }
+        if (immersive) {
+            cameraHost = FrameLayout(this).also { layer ->
+                layer.addView(TextView(this).apply { text = "正在准备相机…"; textSize = 18f; setTextColor(Color.WHITE); gravity = Gravity.CENTER }, FrameLayout.LayoutParams(-1, -1))
+                root.addView(layer, FrameLayout.LayoutParams(-1, -1))
+            }
+            cameraOverlay = FrameLayout(this).also { root.addView(it, FrameLayout.LayoutParams(-1, -1)) }
+            root.addView(toolbar, FrameLayout.LayoutParams(-1, dp(56), Gravity.TOP))
+            root.addView(statusRow, FrameLayout.LayoutParams(-1, -2, Gravity.TOP).apply { topMargin = dp(56) })
+            root.addView(NaviPanelScroll(this).apply { addView(body); isFillViewport = false }, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+        } else {
+            val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            column.addView(toolbar, LinearLayout.LayoutParams(-1, dp(56)))
+            column.addView(statusRow, LinearLayout.LayoutParams(-1, -2))
+            column.addView(ScrollView(this).apply { isFillViewport = true; addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
+            root.addView(column, FrameLayout.LayoutParams(-1, -1))
+        }
         setContentView(root)
         backCallback?.remove()
         backCallback = object: androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { if (back == null) finish() else back() }
         }.also { onBackPressedDispatcher.addCallback(this, it) }
     }
-    internal fun <T> work(label: String, action: () -> T, complete: (T) -> Unit) {
+    internal fun <T> work(label: String, action: () -> T, failed: ((Throwable) -> Unit)? = null, complete: (T) -> Unit) {
         if (busy) return
         busy = true; status.text = label
         val token = gate.generation
+        val started = SystemClock.elapsedRealtime()
         io.execute {
             if (!gate.accepts(token)) return@execute
             val result = runCatching(action)
             runOnUiThread {
                 if (!gate.accepts(token) || isDestroyed) return@runOnUiThread
                 busy = false
+                diagnostic("page_load", mapOf("stage" to label, "elapsed_ms" to SystemClock.elapsedRealtime() - started, "success" to result.isSuccess))
                 result.fold({ status.text = ""; complete(it) }, { error ->
                     val text = errorText(error)
                     status.text = text
-                    diagnostic("request_error", mapOf("message" to text))
+                    diagnostic("request_error", mapOf("stage" to label, "message" to text))
+                    failed?.invoke(error)
                     speech.speak(text)
                 })
             }
@@ -166,6 +212,11 @@ open class NativeIndoorActivity: AppCompatActivity() {
         else -> error.message?.take(240) ?: "操作未完成，请重试并查看诊断记录。"
     }
     internal fun message(text: String) { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
+    internal fun toolbarAction(title: String, icon: Int, action: () -> Unit) {
+        toolbarActions.addView(ImageButton(this).apply {
+            setImageResource(icon); contentDescription = title; tooltipText = title; setBackgroundColor(Color.TRANSPARENT); safeClick(action)
+        }, LinearLayout.LayoutParams(dp(48), dp(56)))
+    }
     internal fun diagnostic(type: String, detail: Map<String, Any?>) {
         diagnostics.addLast(mapOf("type" to type, "time" to java.time.Instant.now().toString()) + detail)
         while (diagnostics.size > 120) diagnostics.removeFirst()
@@ -194,8 +245,10 @@ open class NativeIndoorActivity: AppCompatActivity() {
         dialog.show()
     }
     internal fun preview(onReady: () -> Unit): PreviewView {
-        val view = PreviewView(this).apply { scaleType = PreviewView.ScaleType.FIT_CENTER; implementationMode = PreviewView.ImplementationMode.COMPATIBLE; contentDescription = "手机后置摄像头实时画面" }
-        body.addView(view, LinearLayout.LayoutParams(-1, dp(230)))
+        val view = PreviewView(this).apply { scaleType = if (cameraHost == null) PreviewView.ScaleType.FIT_CENTER else PreviewView.ScaleType.FILL_CENTER; implementationMode = PreviewView.ImplementationMode.COMPATIBLE; contentDescription = "手机后置摄像头实时画面" }
+        val host = cameraHost
+        if (host == null) body.addView(view, LinearLayout.LayoutParams(-1, dp(260)))
+        else { host.removeAllViews(); host.addView(view, FrameLayout.LayoutParams(-1, -1)) }
         val token = gate.generation
         val bind = { if (gate.accepts(token)) camera.bind(view, onReady) { status.text = "相机启动失败：" + errorText(it) } }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) bind()
@@ -216,7 +269,7 @@ open class NativeIndoorActivity: AppCompatActivity() {
     }
     internal fun showSettings() {
         screen("NAVI 连接设置") { if (runCatching { prefs.connection.validate() }.isSuccess) showHome() else finish() }
-        body.label("原生 Android 版沿用现有视觉服务和 Supabase 数据。")
+        body.label("配置导航视觉服务与账号数据服务。")
         val saved = prefs.connection
         val vision = body.field("DINOv2／避障服务地址", saved.vision, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
         val database = body.field("Supabase 项目或代理地址", saved.database, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
@@ -266,35 +319,13 @@ open class NativeIndoorActivity: AppCompatActivity() {
     internal fun showHome() {
         if (runCatching { prefs.connection.validate() }.isFailure) { showSettings(); return }
         if (prefs.session == null) { showLogin(); return }
-        screen("NAVI 室内导航") { finish() }
+        screen("NAVI") { finish() }
+        toolbarAction("连接设置", R.drawable.ic_navi_settings) { showSettings() }
         work("读取账号权限…", { api.profile() }) { user ->
             profile = user
-            body.label(user.email + if (user.admin) " · 管理员" else " · 用户")
-            body.label("选择地图后定位，再选择目的地。", 20f)
-            body.button("地图与导航") { showMaps() }
-            body.button("本地路线草稿") { showDrafts() }
-            if (user.admin) body.button("用户与组织管理") { showUserManagement() }
-            body.addView(CheckBox(this).apply { text = "中文语音提示（字幕始终显示）"; isChecked = prefs.voice
-                setOnCheckedChangeListener { _, checked -> prefs.voice = checked; speech.enabled = checked; if (!checked) speech.stop() } })
-            body.button("连接设置") { showSettings() }
-            body.button("复制诊断记录") { copyDiagnostics() }
-            body.button("退出账号") { work("正在退出…", { api.signOut() }) { profile = null; currentNode = null; showLogin() } }
+            renderHome(user)
         }
-        body.button("连接设置／重试") { showSettings() }
     }
     internal fun dp(value: Int) = (resources.displayMetrics.density * value).toInt()
     internal val draftRoot get() = File(filesDir, "navi-native-drafts").apply { mkdirs() }
-}
-
-internal fun LinearLayout.label(value: String, size: Float = 17f): TextView = TextView(context).apply {
-    text = value; textSize = size; setTextColor(0xFF0F172A.toInt()); setPadding(0, 12, 0, 12)
-    setTextIsSelectable(true)
-}.also { addView(it, LinearLayout.LayoutParams(-1, -2)) }
-internal fun LinearLayout.button(value: String, click: () -> Unit): Button = Button(context).apply {
-    text = value; isAllCaps = false; minHeight = (52 * resources.displayMetrics.density).toInt()
-    setOnClickListener { runCatching(click).onFailure { Toast.makeText(context, it.message ?: "操作未完成", Toast.LENGTH_LONG).show() } }
-}.also { addView(it, LinearLayout.LayoutParams(-1, -2)) }
-internal fun LinearLayout.field(title: String, value: String = "", inputType: Int = InputType.TYPE_CLASS_TEXT): EditText {
-    label(title, 15f)
-    return EditText(context).apply { hint = title; setText(value); this.inputType = inputType; setSingleLine(); contentDescription = title }.also { addView(it, LinearLayout.LayoutParams(-1, -2)) }
 }

@@ -1,10 +1,12 @@
 <resources>
     <style name="NaviNativeTheme" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:statusBarColor">#F8FAFC</item>
-        <item name="android:navigationBarColor">#F8FAFC</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:windowLightNavigationBar">true</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="colorAccent">#2563EB</item>
+        <item name="colorAccent">#1E88E5</item>
+        <item name="android:windowBackground">#FFFFFF</item>
     </style>
 </resources>

@@ -38,8 +38,8 @@ android {
         targetSdkVersion 34
         // Existing RGB-D/VINS native libraries are ARM64.
         ndk { abiFilters 'arm64-v8a' }
-        versionCode naviIntegrationTest ? 20 : (swinlFast ? 17 : 8)
-        versionName naviIntegrationTest ? "1.4-navi-native-1" : (swinlFast ? "1.4-swinl-npu-384-v17" : "1.4-swinl-npu-640-v8")
+        versionCode naviIntegrationTest ? 21 : (swinlFast ? 17 : 8)
+        versionName naviIntegrationTest ? "1.4-navi-native-2-ui" : (swinlFast ? "1.4-swinl-npu-384-v17" : "1.4-swinl-npu-640-v8")
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
