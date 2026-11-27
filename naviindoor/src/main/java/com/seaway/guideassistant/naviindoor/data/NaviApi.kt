@@ -218,10 +218,31 @@ class NaviApi(val connection: Connection, private val store: SessionStore,
         if (url.startsWith("data:image/")) return java.util.Base64.getDecoder().decode(url.substringAfter(','))
         val original = url.toHttpUrlOrNull() ?: error("图片地址无效")
         val storageIndex = original.encodedPath.indexOf("/storage/v1/")
-        val actual = if (storageIndex >= 0) connection.database.trimEnd('/') + original.encodedPath.substring(storageIndex) else url
-        return execute(Request.Builder().url(actual).build(), 24 * 1024 * 1024L)
+        val maxBytes = 24 * 1024 * 1024L
+        if (storageIndex < 0) return execute(Request.Builder().url(original).build(), maxBytes)
+        val path = original.encodedPath.substring(storageIndex)
+        val objectPrefix = "/storage/v1/object/"
+        val publicPrefix = objectPrefix + "public/"
+        val authenticatedPrefix = objectPrefix + "authenticated/"
+        val actual = (connection.database.trimEnd('/') + path).toHttpUrlOrNull()!!.newBuilder()
+            .encodedQuery(original.encodedQuery).build()
+        if (path.startsWith(publicPrefix)) {
+            // Historical map records may contain public URLs even after the bucket becomes private.
+            try {
+                return execute(dbRequest(authenticatedPrefix + path.removePrefix(publicPrefix)).build(), maxBytes)
+            } catch (error: ApiFailure) {
+                if (error.status !in listOf(400, 403, 404)) throw error
+                // Retain compatibility with truly public legacy images.
+                return try { execute(Request.Builder().url(actual).build(), maxBytes) }
+                catch (_: ApiFailure) { throw error }
+            }
+        }
+        if (path.startsWith(authenticatedPrefix)) return execute(dbRequest(path).build(), maxBytes)
+        return execute(Request.Builder().url(actual).build(), maxBytes)
     }
-    fun referenceImage(id: String) = image(connection.database.trimEnd('/') + "/storage/v1/object/public/reference-images/" + id + "_reference.jpg")
+    fun referenceImage(id: String): ByteArray = execute(
+        dbRequest("/storage/v1/object/authenticated/reference-images/" + id + "_reference.jpg").build(),
+        24 * 1024 * 1024L)
     fun uploadReference(id: String, bytes: ByteArray) {
         parsed(dbRequest("/storage/v1/object/reference-images/" + id + "_reference.jpg").header("x-upsert", "true")
             .post(bytes.toRequestBody("image/jpeg".toMediaType())).build())

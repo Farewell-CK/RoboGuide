@@ -301,6 +301,20 @@ open class NativeIndoorActivity: AppCompatActivity() {
                 if (loggedIn) showHome() else status.text = "注册请求已提交。若项目开启邮箱验证，请完成验证后登录；管理员权限由已有管理员授权。"
             }
         }
+        body.button("管理员注册（需授权）") {
+            val mail = email.text.toString().trim(); val pass = password.text.toString()
+            require(mail.contains('@') && pass.length >= 6) { "请填写邮箱和至少6位密码" }
+            AlertDialog.Builder(this).setTitle("管理员注册")
+                .setMessage("先创建账号，再由项目管理员核验并授权。账号在授权之前仅拥有普通用户权限。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("创建账号") { _, _ ->
+                    work("正在创建账号…", { api.signUp(mail, pass) }) { loggedIn ->
+                        val notice = if (loggedIn) "账号已创建，请联系项目管理员授权。" else
+                            "注册请求已提交。请按邮箱提示完成注册，再联系项目管理员授权。"
+                        if (loggedIn) { showHome(); message(notice) } else status.text = notice
+                    }
+                }.show()
+        }
         body.button("忘记密码") {
             val mail = email.text.toString().trim(); require(mail.contains('@')) { "请先填写邮箱" }
             work("正在发送恢复邮件…", { api.recover(mail) }) { status.text = "恢复请求已提交，请查看邮箱并在本机打开恢复链接。" }

@@ -59,7 +59,42 @@ class NaviApiTest {
     @Test fun noProfileDefaultsToOrdinaryUser() { enqueue("[]"); assertFalse(api.profile().admin) }
     @Test fun publicStorageImagesFollowConfiguredProxy() {
         enqueue("image"); api.image("https://old-project.supabase.co/storage/v1/object/public/reference-images/a.jpg")
-        assertEquals(server.hostName,server.takeRequest().requestUrl!!.host)
+        val request = server.takeRequest()
+        assertEquals(server.hostName,request.requestUrl!!.host)
+        assertEquals("/storage/v1/object/authenticated/reference-images/a.jpg", request.path)
+        assertEquals("Bearer access", request.getHeader("Authorization"))
+        assertEquals("public-test", request.getHeader("apikey"))
+    }
+    @Test fun privateReferenceImagesUseAuthenticatedDownload() {
+        enqueue("reference"); assertArrayEquals("reference".toByteArray(), api.referenceImage("ref-id"))
+        val request = server.takeRequest()
+        assertEquals("/storage/v1/object/authenticated/reference-images/ref-id_reference.jpg", request.path)
+        assertEquals("Bearer access", request.getHeader("Authorization"))
+        assertEquals("public-test", request.getHeader("apikey"))
+    }
+    @Test fun privateMapImagesUseAuthenticatedDownload() {
+        enqueue("map"); assertArrayEquals("map".toByteArray(), api.image("https://old-project.supabase.co/storage/v1/object/public/maps/a%20map.jpg"))
+        val request = server.takeRequest()
+        assertEquals("/storage/v1/object/authenticated/maps/a%20map.jpg", request.path)
+        assertEquals("Bearer access", request.getHeader("Authorization"))
+    }
+    @Test fun genuinelyPublicMapImagesStillWork() {
+        enqueue("{}", 403); enqueue("map")
+        assertArrayEquals("map".toByteArray(), api.image("https://old-project.supabase.co/storage/v1/object/public/maps/a.jpg"))
+        assertEquals("Bearer access", server.takeRequest().getHeader("Authorization"))
+        val request = server.takeRequest()
+        assertEquals("/storage/v1/object/public/maps/a.jpg", request.path)
+        assertNull(request.getHeader("Authorization"))
+    }
+    @Test fun nonStorageImagesDoNotReceiveDatabaseCredentials() {
+        enqueue("image"); api.image(server.url("/outside.jpg").toString())
+        val request = server.takeRequest()
+        assertNull(request.getHeader("Authorization")); assertNull(request.getHeader("apikey"))
+    }
+    @Test fun signedStorageImageRetainsQuery() {
+        enqueue("image"); api.image("https://old-project.supabase.co/storage/v1/object/sign/maps/a.jpg?token=test-signed")
+        val request = server.takeRequest()
+        assertEquals("test-signed", request.requestUrl!!.queryParameter("token")); assertNull(request.getHeader("Authorization"))
     }
     @Test fun embeddedMapImageDoesNotNeedNetwork() { assertArrayEquals("map".toByteArray(),api.image("data:image/jpeg;base64,bWFw")); assertEquals(0,server.requestCount) }
     @Test fun obstacleResponseMustCorrespondToCurrentFrame() {

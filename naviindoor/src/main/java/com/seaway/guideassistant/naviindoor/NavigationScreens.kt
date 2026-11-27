@@ -76,7 +76,12 @@ private fun NativeIndoorActivity.showLocalized(candidates: List<LocationCandidat
     body.button("当前位置正确，选择目的地", NaviStyle.GREEN) { accept(winner) }
     body.button("查看参考图片", NaviStyle.BLUE, outlined = true) {
         work("读取录制参考图片…", {
-            runCatching { api.referenceImage(winner.reference.id) }.getOrElse { api.referenceImage(winner.reference.nodeId) }
+            runCatching { api.referenceImage(winner.reference.id) }.getOrElse { error ->
+                val missingObject = error is ApiFailure && (error.status == 404 ||
+                    (error.status == 400 && error.message.orEmpty().contains("Object not found", ignoreCase = true)))
+                if (!missingObject) throw error
+                api.referenceImage(winner.reference.nodeId)
+            }
         }) { bytes ->
             val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             val image = ImageView(this).apply { setImageBitmap(bitmap); adjustViewBounds = true; contentDescription = "定位点参考照片" }
