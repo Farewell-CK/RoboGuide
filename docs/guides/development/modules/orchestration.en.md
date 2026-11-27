@@ -10,6 +10,8 @@ MissionOrchestrator, MissionExecution and IntegrationRuntimeBridge; the bridge i
 
 Submit creates the Group/all Tasks → advance Ready → call Control/Runtime → await satisfaction after local completion → release gates → DAG. Revisions preserve original goals and facts.
 
+Due reservations receive the first dispatch opportunities. Among Ready Tasks at the same effective priority without a due reservation, the earliest completion deadline goes first. Each deadline is measured from its Mission's acceptance, and Tasks with no deadline follow those with a deadline. Waiting age and per-Mission rounds still apply.
+
 ## Code entrypoints
 
 - [Primary entry](https://github.com/Farewell-CK/RoboGuide/blob/main/core/orchestration/src/lib.rs): `core/orchestration/src/lib.rs`.

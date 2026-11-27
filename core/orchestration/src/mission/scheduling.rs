@@ -31,18 +31,6 @@ impl MissionOrchestrator {
         mission_id: &MissionId,
         control: &ControlPlane,
     ) -> Vec<TaskRef> {
-        self.dispatchable_tasks_with(mission_id, control, |task| {
-            task.requirement().task_ref().clone()
-        })
-    }
-
-    /// Projects the original plan data for dispatchable Tasks in planner order.
-    pub(super) fn dispatchable_tasks_with<T>(
-        &self,
-        mission_id: &MissionId,
-        control: &ControlPlane,
-        mut project: impl FnMut(&domain::PlannedTask) -> T,
-    ) -> Vec<T> {
         let Some(execution) = self.executions.get(mission_id) else {
             return Vec::new();
         };
@@ -79,7 +67,7 @@ impl MissionOrchestrator {
                                 .get(task_ref.task_id())
                                 .is_none_or(|reason| reason.allows_retry())
                     })
-                    .map(|_| project(task))
+                    .map(|_| task_ref.clone())
             })
             .collect()
     }

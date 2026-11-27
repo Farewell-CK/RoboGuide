@@ -208,29 +208,25 @@ impl MissionOrchestrator {
             })
             .collect::<BTreeMap<_, _>>();
         for mission in self.mission_ids() {
-            let ready = self.dispatchable_tasks_with(&mission, control, |task| {
-                let requirement = task.requirement();
-                (
-                    requirement.task_ref().clone(),
-                    requirement.timing().completion_deadline_offset_ms(),
-                )
-            });
+            let ready_ids = self
+                .dispatchable_tasks(&mission, control)
+                .into_iter()
+                .map(|task| task.task_id().clone())
+                .collect::<BTreeSet<_>>();
             let execution = self.executions.get_mut(&mission).expect("known Mission");
             let accepted_at = execution.accepted_at();
             let policy = &mut execution.dispatch_policy;
-            let ready_ids = ready
-                .iter()
-                .map(|(task, _)| task.task_id().clone())
-                .collect::<BTreeSet<_>>();
             policy.waiting.retain(|task, _| ready_ids.contains(task));
-            for (task, _) in &ready {
-                policy
-                    .waiting
-                    .entry(task.task_id().clone())
-                    .or_insert(ordinal);
+            if ready_ids.is_empty() {
+                continue;
             }
-            for (plan_order, (task, deadline_offset)) in ready.into_iter().enumerate() {
-                if attempted.contains(&task) {
+            for task_id in &ready_ids {
+                policy.waiting.entry(task_id.clone()).or_insert(ordinal);
+            }
+            for (plan_order, planned) in execution.plan.task_graph().tasks().iter().enumerate() {
+                let requirement = planned.requirement();
+                let task = requirement.task_ref();
+                if !ready_ids.contains(task.task_id()) || attempted.contains(task) {
                     continue;
                 }
                 let queued = policy.waiting[task.task_id()];
@@ -239,14 +235,16 @@ impl MissionOrchestrator {
                 })?;
                 let priority =
                     u64::from(policy.priority) + (age / AGING_QUANTUM).min(MAX_AGE_PRIORITY);
-                let due = due_tasks.get(&task).copied();
+                let due = due_tasks.get(task).copied();
                 if served_round.contains(&mission) && due.is_none() {
                     continue;
                 }
                 // Preserve due reservation ordering. EDF applies to tasks without a due interval.
-                let deadline = deadline_offset
+                let deadline = requirement
+                    .timing()
+                    .completion_deadline_offset_ms()
                     .filter(|_| due.is_none())
-                    .map(|offset| checked_plan_timestamp(accepted_at, offset, &task))
+                    .map(|offset| checked_plan_timestamp(accepted_at, offset, task))
                     .transpose()?;
                 let rank = (
                     (due.is_none(), due),
@@ -257,7 +255,7 @@ impl MissionOrchestrator {
                     mission.clone(),
                     plan_order,
                 );
-                candidates.push((rank, task));
+                candidates.push((rank, task.clone()));
             }
         }
         Ok(candidates
