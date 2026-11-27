@@ -704,7 +704,10 @@ class _ResponsesClient:
             or self._asset_digests.get(path) != hashlib.sha256(raw).hexdigest()
         ):
             raise MissionProviderError(
-                "Mission Prompt/schema changed since startup", configuration_failure=True
+                "Mission Prompt/schema changed since startup: "
+                + path.name
+                + " —— 该文件在服务启动后被修改过，请重启 mission-service 重新冻结资产",
+                configuration_failure=True,
             )
         return raw.decode("utf-8")
 
