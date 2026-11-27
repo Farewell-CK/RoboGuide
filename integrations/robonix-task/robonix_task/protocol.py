@@ -94,35 +94,6 @@ def canonical_operation(intent: dict[str, Any]) -> str:
     raise ValueError("canonical operation required")
 
 
-def has_delegation_authority(task_message: Any) -> bool:
-    """Return True only when trusted API task context carries Controller delegation authority."""
-    if getattr(task_message, "source", None) != 2:
-        return False
-    raw_context = getattr(task_message, "context_json", "")
-    if not isinstance(raw_context, str) or not raw_context.strip():
-        return False
-    try:
-        context = json.loads(raw_context)
-    except ValueError:
-        return False
-    if not isinstance(context, dict):
-        return False
-    if (
-        context.get("modality") != "api"
-        or context.get("interaction_mode") != "task"
-        or context.get("abort_turn")
-    ):
-        return False
-    dispatch = context.get("rg_dispatch")
-    if not isinstance(dispatch, dict):
-        return False
-    return (
-        dispatch.get("operation") == DELEGATION_OPERATION
-        and dispatch.get("authority") == DELEGATION_AUTHORITY
-        and dispatch.get("local_motion_permit_required") is False
-    )
-
-
 def task(
     record: dict[str, Any],
     user_id: str,

@@ -122,7 +122,7 @@ class Adapter:
             return self.status(row["handle"])
 
     def is_admitted_delegation(self, record: dict[str, Any]) -> bool:
-        """Return True only for records admitted on the enabled task.delegate@v1 profile path."""
+        """Return True only for records validated on the enabled task.delegate@v1 profile path."""
         if not (
             self.enabled
             and self.task_results
@@ -130,17 +130,15 @@ class Adapter:
             and DELEGATION_OPERATION in self.allowed
         ):
             return False
-        intent = execution_intent(record["request"])
+        request = record.get("request")
+        if not isinstance(request, dict):
+            return False
         try:
-            operation = canonical_operation(intent)
+            self.validate(request)
+            operation = canonical_operation(execution_intent(request))
         except ValueError:
             return False
-        parameters = intent.get("parameters")
-        return (
-            operation == DELEGATION_OPERATION
-            and isinstance(parameters, dict)
-            and parameters.get("profile") == self.task_profile
-        )
+        return operation == DELEGATION_OPERATION
 
     def run(self, handle: str, deadline: float) -> None:
         """Cross the durable send boundary once and retain every native event until detach."""
