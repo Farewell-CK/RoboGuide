@@ -1,213 +1,75 @@
-# RoboGuide 核心系统架构与五类核心数据流图解
+# 核心系统流程与边界
 
-> **System Architecture & Five Core Protocol Dataflows (Baseline: `origin/main@e4c03a55`)**
->
-> 本文档依据 `e4c03a55` 主线真实源码整理，与 [V2 现行架构](README.md)、[当前代码架构图册](current-architecture.md) 使用相同术语。权威语义见 V2 架构与正式契约，下图用于导读和定位实现。
+代码核对：2026-11-26 · `main@3c7136d6`。图文描述代码职责与协议边界；实际设备结果须另查原验收证据。
 
-## 0. 默认端口、协议与代码边界总览
+图形集中在[架构图册](current-architecture.md)，本页按读写顺序说明每条流程及拒绝条件。
 
-| 通信面 / 组件 | 默认端口与协议 | 核心职责与源码锚点 |
-| --- | --- | --- |
-| **Mission Service** | `127.0.0.1:8070` HTTP（现场可配置如 `:8073`） | 自然语言 Request、Grounding、`Plan / Review / Repair` 与审批提交；[`config/mission-service.toml`](../../../config/mission-service.toml) · [`mission/src/mission/`](../../../mission/src/mission/) |
-| **Controller HTTP** | `127.0.0.1:8080` HTTP / mTLS | Mission 准入前检、调度与状态联邦、共享视图、安全停机核验与恢复控制；[`apps/integration-server/src/controller_http/server.rs`](../../../apps/integration-server/src/controller_http/server.rs) |
-| **Artifact HTTP & CAS** | `127.0.0.1:8090` HTTP / mTLS | 不可变字节上传与 SHA-256 校验（CAS）、`/v1/maps` 与 `/v1/memories` 目录与副本凭证；[`apps/integration-server/src/artifact_http/server.rs`](../../../apps/integration-server/src/artifact_http/server.rs) |
-| **Node Protocol v0.4** | `127.0.0.1:50051` gRPC 双向流（监听地址可配，支持 mTLS） | 节点注册、心跳租约、`Execute / Cancel`、`ExecutionSnapshot`、`StateObservationBatch`、`PeerChannelReadiness` 与 `Ack`；[`contracts/node/v0.17/roboguide-node.proto`](../../../contracts/node/v0.17/roboguide-node.proto) |
-| **Mission Console** | `127.0.0.1:8095` HTTP 同源代理 | 提供演示回放和实时查看，向配置的 Controller / Mission 上游转发 GET 与 POST；实时模式可提交和取消 Mission；[`console/serve.py`](../../../console/serve.py) |
-| **Local EAIOS / Provider** | 本地 HTTP / gRPC / MCP / Unix Socket | 承载本地导航、底盘即时安全、点云/栅格建图与融合，完全独立于 RoboGuide Core；[`integrations/`](../../../integrations/) |
+## 从对话到经过审查的计划
 
----
+用户对话先成为持久 Mission Request。Grounding 记录本轮受控取得的事实、来源、时效及缺口；解释器可以要求澄清。Planner 输出经契约和 Catalog 校验的草案，再由独立 Reviewer 审查；结构错误与可修复语义问题分别消费有界再生或 Repair 预算。基础设施错误不自动当成草案错误重试。
 
-## 图 1：跨进程 / 跨主机部署与通信拓扑图
+1. 只规划意图保持为 draft-only；参数补充不能撤销用户的执行限制。
+2. 执行与审批绑定当前完整展示草案的 revision 和 digest；风险审批还由服务端授权独立判断。
+3. 只读前检核对契约、依赖时间窗和可选部署声明，不预订资源。
+4. 发送前保存实际提交字节的身份；回包丢失保留歧义，通过原请求查询对账。
+5. Request Accepted 说明 Controller 已接纳，不表示设备已完成任务。
 
-展示用户端（`roboguide chat`、`Mission Console`、外部/移动端操作端）、`Mission Service`、中心 `Controller`（`integration-server` 与可选 `controller-replica`）以及边缘节点（`roboguide-node` + Local EAIOS + Spatial/Memory Provider）之间的进程与网络边界。
+## 从候选到可靠执行
 
-```mermaid
-flowchart TB
-  subgraph USERS["客户端与运维接入层"]
-    CHAT["roboguide chat (roboguide_workbench)"]
-    CONS["Mission Console :8095 (静态前端 + 同源代理)"]
-    OP["外部 Operator / Mobile 客户端"]
-  end
+Ready Task 从当前合法候选中进行有界联合调度。Scheduler 给出 Node、资源和时间建议；Proposal 本身不占有资源。Control 在当前 writer 事务里重新检查 State、租户、配额、资源冲突和物理绑定约束，通过 Commit 后才能 Bind。未来时间预订在激活时仍须重新准入。
 
-  subgraph MI_HOST["规划服务进程 (Python)"]
-    MS["Mission Service :8070 (可配如 :8073)"]
-    MW["可选运行期 MI Worker (mission-runtime-replanner)"]
-  end
+1. 应用先持久化权威状态、checkpoint 和 outbox，事务成功后才发送 Execute。
+2. Node journal 绑定 invocation、workflow digest、资源与代次，重复命令只回放原记录。
+3. 本地锁与容量门禁先于工作流；Local EAIOS 负责实际操作。
+4. Node 的 CommandPersisted 回执证明命令已入日志；执行事实仍独立回传。
+5. Controller 持久接纳事实后才 ACK；旧会话及过期依据不得授权新动作。
 
-  subgraph CTRL_HOST["Controller 控制域 (Rust · integration-server)"]
-    CHTTP["Control & Operator HTTP :8080 (TLS / mTLS 可选)"]
-    GRPC["Node Protocol v0.4 gRPC :50051"]
-    AHTTP["Artifact HTTP & CAS :8090"]
-    DB["SQLite Event Log (Storage v3) + Checkpoint v60 + CAS"]
-    REP["可选 controller-replica (OpenRaft 三成员共识)"]
-    CHTTP --- DB
-    GRPC --- DB
-    AHTTP --- DB
-    DB -.->|"可选元数据复制"| REP
-  end
+## 完成判定与资源释放
 
-  subgraph EDGE_A["边缘主机 / 节点 A"]
-    NA["roboguide-node A (Local Integration Engine + WAL)"]
-    LA["Local EAIOS A (导航 / 运控 / 即时安全)"]
-    MPA["Local Memory Provider A"]
-    NA <-->|"本地 HTTP / gRPC / MCP"| LA
-    NA <-->|"本地 Memory Workflow"| MPA
-  end
+Runtime 归约当前各 Role 的执行事实，但不拥有 TaskSatisfied 权威。本地 Completed 进入 AwaitingSatisfaction；Orchestration 只能消费接受计划声明的 basis。execution-report 是可选声明，不等同于独立目标验证。verifier-evidence 则需要匹配原计划、谓词、当前 attempt、来源与时效。
 
-  subgraph EDGE_B["边缘主机 / 节点 B & 计算服务"]
-    NB["roboguide-node B (Local Integration Engine + WAL)"]
-    LB["Local EAIOS B (导航 / 运控 / 即时安全)"]
-    SP["Spatial Provider (roboguide_spatial_provider)"]
-    NB <-->|"本地 HTTP / gRPC / MCP"| LB
-    NB <-->|"本地 Unix Socket / HTTP"| SP
-  end
+1. 本地完成不直接释放绑定，也不直接推进后继任务。
+2. 使用 Memory 时，适用的 preparation/use 撤权证明必须先通过。
+3. 满足成立后由 Control 释放该 Task 的资源；Context 级资源保留原作用域。
+4. DAG 后继随后变为 Ready；活跃兄弟任务保留各自所有权。
+5. Mission 完成还要满足所有任务、已配置的原目标门禁和整组收尾。
 
-  CHAT -->|"POST /v1/mission-requests"| MS
-  CHAT -.->|"GET /v1/state/records, /safety-stop"| CHTTP
-  CONS -->|"GET 状态与事件 / POST 提交或取消 Mission"| CHTTP
-  CONS -.->|"可转发 GET / POST 到配置的 Mission 上游"| MS
-  OP -->|"mTLS Operator / Verifier API"| CHTTP
-  MS -->|"POST /v1/missions/validate-plan, /v1/missions"| CHTTP
-  MS -.->|"GET /v1/state/records (Grounding State 只读)"| CHTTP
-  MS -.->|"GET /v1/maps, /v1/memories (Grounding Memory 元数据)"| AHTTP
-  MW <-->|"GET /v1/runtime-plan-work, POST /v1/missions/{id}/plan-revisions"| CHTTP
+## State、Memory 与空间内容
 
-  NA <-->|"gRPC :50051 双向流 (mTLS 可选)"| GRPC
-  NB <-->|"gRPC :50051 双向流 (mTLS 可选)"| GRPC
-  NA <-->|"mTLS 上传 / 下载不可变 CAS 字节 :8090"| AHTTP
-  NB <-->|"mTLS 上传 / 下载不可变 CAS 字节 :8090"| AHTTP
-  LA <-->|"Mode 4 端到端直连数据面 (零经由 Controller)"| LB
-```
+State 以对象、语义、来源和通道为键保存独立事实，保留 source time、receive time、epoch、sequence 和 TTL。Reported、Observed、Derived、Belief 不会自动合成全局真值。普通遥测可合并或按变更/间隔落盘，但受保护的决策与安全依据保持原持久接纳边界。
 
----
+1. Memory Catalog 管理元数据与可重建来源；CAS 保存不可变 opaque bytes。
+2. Scope 限制语义消费，Visibility 限制发现/交换，Placement 记录 provider 本地副本，三者独立。
+3. 引用或哈希不证明接收端已导入；导入历史不授予当前使用许可。
+4. Prepare/Import、当前 availability/use、revoke 分别保留原 attempt、provider 和预算。
+5. 空间融合 Provider 验证输入字节及坐标身份，产生新 revision；地图存在不证明定位或到达成功。
 
-## 图 2：任务全生命周期控制流（Mission & Execution Data Flow）
+## 未知、停止与分级恢复
 
-从自然语言意图输入、Grounding 与规划审查，到只读前检（`validate-plan` + `?timing=v0.1` + Node 私有前检）、Control 原子承诺、SQLite 持久化、gRPC 下发执行、独立满足证据核对与资源释放的完整闭环。
+Unknown 表示原执行是否产生副作用仍不明确。原所有权、停止围栏与预算继续保留，不能换一个 ID 重新执行。Cancel 回执、本地终态、独立安全状态和 Memory 撤权是不同的证明；进程退出只能证明原进程退出，不能自动证明设备停止。
 
-```mermaid
-flowchart TB
-  REQ["用户输入 / POST /v1/mission-requests"] --> GRD["Grounding Snapshot (只读 State + Global Memory 元数据)"]
-  GRD --> DELIB["Interpreter -> Planner -> Reviewer -> Bounded Repair (Mission Service)"]
-  DELIB -->|"NeedsClarification"| REQ
-  DELIB -->|"MissionPlan 草案"| PRE1["只读前检: POST /v1/missions/validate-plan"]
-  PRE1 --> PRE2["可选参数 ?timing=v0.1 / history-v0.1 (ADR-0259 依赖时间窗诊断)"]
-  PRE2 --> PRE3["可选 Node 私有前检 ROBOGUIDE_NODE_PREFLIGHT_CONFIGS (ADR-0255/0256)"]
-  PRE3 -->|"草案冲突返回有界修复"| DELIB
-  PRE3 -->|"通过审批"| ADMIT["POST /v1/missions 正式准入"]
+1. 即时安全由 Local EAIOS 承担；Controller 记录原停止目的和原 attempt。
+2. 安全证据核对当前来源/会话、代次、原声明、接收时间和截止期限。
+3. Role 恢复在取得明确释放授权后重新 Match/Commit/Rebind，保留其他绑定。
+4. 计划修订冻结原目标和完整旧 attempt 集，经过 stop/revoke 与独立 Review 后创建新 Group，走正常准入。
+5. 证据、权限或原预算不足则保留 ManualEscalation；新观察不重置原期限。
 
-  ADMIT --> ORCH["Orchestration 创建 Group 与 TaskExecutions (DAG Ready)"]
-  ORCH --> CTRL["Control: Match -> BoundedJointScheduler -> Propose -> Coordinate -> Commit -> Bind"]
-  CTRL --> PERSIST["原子事务持久化: SQLite Event Log + Controller Checkpoint v60 + Durable Outbox"]
-  PERSIST -->|"gRPC :50051 Execute (含 command_id, execution_id, resources)"| NODE["roboguide-node: SQLite WAL 落盘 -> Local EAIOS 执行"]
+## 四种协作模式
 
-  NODE -->|"gRPC CommandReceipt / ExecutionEvent / ExecutionSnapshot"| INGRESS["IntegrationRuntimeBridge 事实归约 (先持久化后 Ack)"]
-  INGRESS -->|"本地 Completed"| AWAIT["Task 进入 AwaitingSatisfaction (保留绑定与资源)"]
-  AWAIT --> VERIFY["按声明 basis 核验: execution-report 或 POST /v1/verifier-evidence"]
-  VERIFY -->|"正证据 + Memory revoke 完成"| SAT["TaskSatisfied -> 释放 Task 资源 -> 推进后继 DAG"]
-  VERIFY -->|"负最终证据"| REJ["TaskSatisfactionRejected -> 按策略隔离或失败"]
-  SAT -->|"全部 Task 满足 + 可选 /v1/mission-goal-evidence"| DONE["Mission Completed -> Whole-Group Release"]
-```
+协作模式是接受计划的显式语义。Independent 使用普通 DAG；SequentialHandoff 在前序满足和数据交接门禁后推进；ConcurrentCooperation 保留共享视图与关系围栏；TightlyCoupledCooperation 由双端 PeerChannel 就绪证据约束派发。Controller 不承载高频相对运动控制。
 
----
+1. RequiresActive 的 source 若先于 target 结束，会导致关系违例；不能用本地成功掩盖围栏。
+2. sync-provider 的 mobility.sync-follow@v1 在边缘通过 UDP 交换进度、屏障和 ESTOP，Controller 只接入生命周期与就绪事实。
+3. choreography.play@v1 校验时钟偏差，以共同 UTC 起点播放本地轨迹。
+4. 跨表演者故障隔离使用独立 Mission；同一 Mission 内仍保留整组失败停止语义。
+5. 模拟器、HTTP 底盘及 Robonix Lite3 是适配器路径；代码和模拟测试不证明实际急停时延或底盘停稳。
 
-## 图 3：高频遥测事件瘦身与空间记忆 CAS 数据流
+## 进程、存储与故障域
 
-系统将高频遥测状态与大体积空间地图字节彻底隔离在两条不同管线上：左/上分支通过节点合并、进程内租约续期与变更/间隔落盘抑制 SQLite WAL 膨胀；右/下分支通过 `:8090` CAS 内容寻址、多机占用栅格融合与受信拉取保证地图字节一致性。
+Mission Service、Controller、Node Service 与部署侧 Provider 是不同进程职责，Node 也不等同于一台物理主机。Controller 默认组合现有模块与独立 SQL/CAS；Node 保留自己的执行 journal。可选 Replica 与跨域 Federation 是显式部署能力，不由架构图自动启用。
 
-```mermaid
-flowchart TB
-  subgraph STREAM_A["数据流 A: 高频遥测事件瘦身与投影分流 (PR #19/#20/#21)"]
-    E1["Local EAIOS / Host 周期采样 (姿态 / 电量 / 相机 / 状态)"] --> OUTBOX["roboguide-node CoalescedStateOutbox (按 export_id 合并防拥塞堆积)"]
-    OUTBOX -->|"gRPC Heartbeat / StateObservationBatch (最大 64 条 / 512 KiB)"| BATCH["Controller fact_batch 准入"]
-    BATCH --> LIVE["更新内存态实时投影 (GET /v1/state/records 始终可读最新样本)"]
-    BATCH -->|"ADR-0257 进程内 Liveness 续期"| LIVENESS{"是否首次会话或健康状态跳变?"}
-    LIVENESS -->|"是"| SQL_EVENT["写入 Storage v3 controller_v3_events + Checkpoint"]
-    LIVENESS -->|"否 (稳态心跳)"| MEM_ONLY1["仅推进内存态租约与时间戳 (跳过 SQL 提交)"]
-    BATCH -->|"ADR-0258 ROBOGUIDE_TELEMETRY_PERSISTENCE_POLICY"| TELEM{"受保护语义 / 内容变更 / 超 max_persist_interval_ms?"}
-    TELEM -->|"是 (Decision / World / SafeState 始终命中)"| SQL_DEDUP["Storage v3 正文去重持久化 + 恢复投影"]
-    TELEM -->|"否 (仅时钟字段抖动)"| MEM_ONLY2["跳过冗余历史行 (保留稳态可审计间隔)"]
-  end
-
-  subgraph STREAM_B["数据流 B: 多机建图与空间记忆 CAS 融合流 (PR #18/#25)"]
-    MAP_A["机器狗 A / B 本地轻量建图包"] -->|"mTLS POST /v1/artifact-uploads + /finalize"| CAS_IN["Artifact CAS :8090 (计算并绑定 SHA-256 + 字节大小)"]
-    CAS_IN -->|"POST /v1/maps/{id}/revisions/{rev}"| MAP_CAT["Map Catalog 不可变元数据登记 (Scope / Visibility)"]
-    MAP_CAT --> FUSE["Spatial Provider 多机占用栅格融合 (PR #25: CORRELATIVE_ICP / opencv-akaze)"]
-    FUSE -->|"上传融合后新图包并发布新 Revision"| CAS_OUT["Artifact CAS :8090 融合地图不可变字节"]
-    CAS_OUT -->|"目标节点拉取 GET /v1/artifacts/{sha256} + 本地 SHA-256 校验"| NODE_IMP["目标 roboguide-node 校验并导入 Local EAIOS"]
-    NODE_IMP -->|"POST /v1/maps/{id}/replicas 与 /v1/maps/{id}/revisions/{rev}/localization-evidence"| REPLICA["记录受信 (MapSelector, NodeId, Session) 副本与重定位强证据"]
-  end
-```
-
----
-
-## 图 4：四种协作耦合模式的控制面 / 数据面分流图（ADR-0026 / ADR-0027 / PR #40）
-
-清晰区分 `MissionPlan` 中四种 `ExecutionCouplingMode` 的协调路径。**核心边界**：Control/Runtime 仅处理状态投影、关系围栏（`relation_fences`）与双端通道就绪度确认；**Mode 4 的相对控制和本地安全由部署侧 Local EAIOS 负责**。对等数据面绕过 Controller，实机控制及断链表现需要部署验收。
-
-```mermaid
-flowchart TB
-  PLAN["MissionPlan CoordinationContext.coupling_mode"] --> M1["Mode 1: Independent"]
-  PLAN --> M2["Mode 2: SequentialHandoff"]
-  PLAN --> M3["Mode 3: ConcurrentCooperation"]
-  PLAN --> M4["Mode 4: TightlyCoupledCooperation"]
-
-  M1 -->|"标准 DAG"| D1["各 Task 独立 Match / Commit / Execute"]
-  M2 -->|"TaskSatisfied + Memory Revoke 门禁"| D2["经 Artifact CAS + import / use 完成跨任务交接"]
-
-  subgraph MODE3["Mode 3 并发协同: 运行时关系与共享视图 (PR #40)"]
-    M3 --> REL["Runtime 归约 RequiresActive / SharedSpatialReference"]
-    REL --> VIEW["只读共享视图: GET /v1/missions/{id}/shared-view?context_id=... (Fresh / Stale / Unknown)"]
-    REL -->|"证据缺失 / 违例 / 重启"| FENCE3["触发 relation_fences 阻断目标 Task 完成"]
-    FENCE3 -->|"条件满足后人工或策略对账"| REC3["POST /v1/missions/{id}/relations/{relation_id}/reconcile"]
-  end
-
-  subgraph MODE4["Mode 4 紧耦合协同: 控制面通道就绪与边缘直连数据面"]
-    M4 --> OBS["Node 采样 Local EAIOS PeerChannelReadiness (gRPC :50051)"]
-    OBS --> PC["Runtime 管理 PeerChannel 生命周期: Planned -> Ready -> Fenced -> Closed"]
-    PC -->|"双端确认且未过期才下发 Execute"| P2P["Local EAIOS A ↔ Local EAIOS B: 部署侧对等数据与本地安全"]
-    PC -.->|"Controller 数据面流量 = 0 B (超时/断链即 Fence)"| P2P
-  end
-```
-
----
-
-## 图 5：故障检测、显式 Unknown 隔离与分级恢复数据流（L0–L4 & Safety-Stop）
-
-展示断链、节点崩溃、进程重启或自然设备故障发生后，系统如何避免“未知副作用下盲目重派”，并通过独立安全停机证据核验分支进入 Control 角色恢复（L2/L3）、同 Mission 运行期动态接管（L4 `plan_revision`）或受控人工结案（`reconcile_manual`）。
-
-```mermaid
-flowchart TB
-  FAULT["异常触发: Wi-Fi 漫游断链 / 进程崩溃 / 租约过期 / 自然设备故障"] --> L0{"L0 Local Autonomy 可局部自愈?"}
-  L0 -->|"是 (局部避障 / 本地重规划)"| LOCAL_OK["Local EAIOS 自治完成 (不升级全局恢复)"]
-  L0 -->|"否 (跨节点 / 断联 / 故障)"| L1["L1 Integration & Node Service: 重连 / 合并 Outbox / 隔离被覆盖旧注册 (PR #19/#27/#39)"]
-
-  L1 --> AMBIG{"本地 WAL / Runtime 能否确认未产生副作用?"}
-  AMBIG -->|"在途未确认 / Controller 重启"| UNK["保守进入 Unknown / Stopping (冻结 Slot 所有权, 严禁盲目重放)"]
-  AMBIG -->|"明确 Cancelled / 自然 Failed / 已局部 Completed"| STOP_WAIT["登记 SafetyStop 目的并保留原终态"]
-
-  UNK --> SAFE_OBS["核验独立安全证据: GET /v1/executions/{id}/safety-stop (PR #22/#32/#33)"]
-  STOP_WAIT --> SAFE_OBS
-
-  SAFE_OBS -->|"独立 safe-state 确认安全停机 / 进程真实退出"| BRANCH{"恢复与结案决策分支"}
-  SAFE_OBS -.->|"缺安全证明或超时"| HOLD["保持 ManualEscalation / Mission Hold (拒绝重派与自动续跑)"]
-
-  BRANCH -->|"L2/L3 同计划角色替换"| RECOVER["POST /v1/executions/{id}/recover -> Control Match / Commit / Rebind 新 Attempt"]
-  BRANCH -->|"L4 运行期动态重规划接管 (PR #33)"| REV["GET /v1/runtime-plan-work -> MI Worker Claim + Review -> POST /v1/missions/{id}/plan-revisions -> 新 Group 接管"]
-  HOLD -->|"取消中 + 当前同代终态 + 管理员核验"| SETTLE["POST /v1/executions/{id}/safety-stop/reconcile (仅取消结案，保留原停止记录)"]
-```
-
----
-
-## 6. 关键机制源码映射表
-
-| 图示环节 | 代码实现位置 | 关键版本 / 约束 |
-| --- | --- | --- |
-| **Controller HTTP 路由与权限** | [`apps/integration-server/src/controller_http/server.rs`](../../../apps/integration-server/src/controller_http/server.rs) | 含 `/validate-plan`、`?timing=`、`/shared-view`、`/relations/{id}/reconcile`、`/plan-revisions`、`/safety-stop/reconcile` |
-| **Artifact CAS 与地图目录** | [`apps/integration-server/src/artifact_http/server.rs`](../../../apps/integration-server/src/artifact_http/server.rs) | `:8090` mTLS、`/v1/artifact-uploads`、`/v1/maps`、`/replicas`、`/localization-evidence` |
-| **Node Outbox 与漫游重连** | [`core/node-service/src/service/mod.rs`](../../../core/node-service/src/service/mod.rs) | `CoalescedStateOutbox`、`ExecutionSnapshot`、HTTP/2 Keepalive（PR #19/#27） |
-| **Liveness 与遥测落盘瘦身** | [`core/state/src/node.rs`](../../../core/state/src/node.rs) · [`core/orchestration/src/integration_bridge/telemetry_persistence.rs`](../../../core/orchestration/src/integration_bridge/telemetry_persistence.rs) | ADR-0257 稳态跳过 SQL、ADR-0258 `ROBOGUIDE_TELEMETRY_PERSISTENCE_POLICY` |
-| **Storage v3 去重存储** | [`core/state/src/event_log.rs`](../../../core/state/src/event_log.rs) · [`core/state/src/archive_prepared.rs`](../../../core/state/src/archive_prepared.rs) | `controller_v3_events` 表与事务性正文引用去重（ADR-0244） |
-| **多机占用栅格融合** | [`integrations/spatial-provider/roboguide_spatial_provider/shared_map_job.py`](../../../integrations/spatial-provider/roboguide_spatial_provider/shared_map_job.py) | PR #25：`correlative-icp` / `opencv-akaze` 配准与不可变融合发布 |
-| **安全停机与人工取消结案** | [`apps/integration-server/src/application/safety_stop.rs`](../../../apps/integration-server/src/application/safety_stop.rs) · [`settlement.rs`](../../../apps/integration-server/src/application/safety_stop/settlement.rs) | PR #22/#32/#33/#40：`SafeStateObservation` 与 `reconcile_manual` |
-| **Node 私有计划前检与时间窗** | [`core/node-service/src/preflight.rs`](../../../core/node-service/src/preflight.rs) · [`core/orchestration/src/mission/timing_preview.rs`](../../../core/orchestration/src/mission/timing_preview.rs) | ADR-0255/0256 `complete-sources/v0.1`、ADR-0259 `?timing=v0.1` |
+1. Mission Request SQL、Controller SQL/CAS 与 Node journal 分属不同权威，恢复时不能互相替代。
+2. Replica 负责当前 Controller 权威的元数据与声明内容持久性，不另行匹配或执行机器人任务。
+3. Federation 保留原域、全体 Commit 回执、writer epoch、时钟与预算，实际执行仍过本域门禁。
+4. Storage v3 的 standalone 配置与复制 profile 分别协商，不能从图推断默认组合支持。
+5. Recovery Tool 对静止的显式存储/内容进行备份、校验与恢复；软件恢复不等于跨主机或物理连续性。

@@ -1,0 +1,15 @@
+Create the ENGLISH edition of the supplied finalized Chinese topic diagram. Translate every Chinese label, paragraph, invariant, exception and legend accurately into natural technical English. Preserve all geometry, every arrow direction and endpoint, scope boundaries, icons, colors, node numbers and conditional gates. Keep the dense original-repository V2 engineering illustration style. Do not add new claims, capabilities, loops or steps. Keep text legible by modestly adjusting wrapping and font size. Output 1536x1024 PNG without cropping.
+Exact English topic title: State, Memory and spatial content
+Required technical identifiers / module labels:
+Node observations
+State · Source / TTL
+Live view / Protected evidence
+Memory Catalog
+Scope / Visibility / Placement
+Artifact CAS
+Spatial fusion Provider
+Consumer Node / Provider
+Prepare / Import
+Current Use / Revoke
+Semantic reference (do not add text not present in the source):
+Use two clearly separated lanes. Evidence lane: Node observations -> State Source/TTL -> Live view/Protected evidence. Content lane: Memory Catalog references Scope/Visibility/Placement metadata and Artifact CAS opaque bytes. Artifact CAS -> Spatial fusion Provider -> Artifact CAS produces a NEW immutable revision; distinguish input and output arrows. Artifact CAS -> Consumer Node/Provider -> Prepare/Import -> Current Use/Revoke. Memory Catalog supplies selection metadata to Prepare/Import. Do not draw a raw bytes path through Runtime or put bytes inside State. Include short note: Reference != Import != Current use. Catalog metadata never grants content authorization.

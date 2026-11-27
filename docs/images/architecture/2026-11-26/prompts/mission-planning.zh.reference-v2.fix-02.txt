@@ -1,0 +1,4 @@
+Edit this diagram with these TWO exact changes only. Preserve all other details and the reference style.
+FIRST: the successful path must bypass Repair. Move box 7. 有界 Repair slightly below boxes 6 and 8. REMOVE the existing straight navy 6 -> 7 -> 8 main-chain arrows. Draw a direct navy arrow from 6. Reviewer to 8. 只读前检. Draw two separate violet arrows between 6 and the lower 7: 6 -> 7 labelled 需修复, and 7 -> 6 labelled 重新审查. A passed review goes directly from 6 to 8; Repair is conditional, not mandatory.
+SECOND: in the upper-right Invariants panel DELETE the bullet Controller 仅在二者一致时准入. Replace that one bullet with Controller 独立检查计划、身份与资源准入. The MI draft revision/digest grant binding is a Workbench responsibility, not a claim that Controller knows the MI draft revision.
+Keep all other wording unchanged. Output 1536x1024 PNG.

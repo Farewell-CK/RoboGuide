@@ -1,0 +1,90 @@
+Use case: infographic-diagram / style-transfer.
+
+Create a NEW RoboGuide SYSTEM FRAMEWORK architecture plate, using the TWO supplied repository diagrams as visual references. Image 1 (the original RoboGuide V2 architecture) is the PRIMARY style reference. Image 2 (the original bilingual V1.1 architecture) is a SUPPORTING reference for information density, pictograms and Chinese/English typography. These are visual references only: replace outdated structure and text with the CURRENT responsibilities specified below.
+
+STYLE MUST FOLLOW THE REFERENCES
+Preserve their academic systems-architecture language: white background; thin blue, violet and green rounded plane outlines; very pale color washes; compact dark-blue typography; small recognizable engineering pictograms; layered system composition; illustrated heterogeneous devices at the bottom; concise architectural side notes. Match the references' dense, integrated architecture drawing. Do not use a dashboard, bento grid, SaaS cards, dark hero panel, giant headline, thick black boxes, or a step-by-step data-flow poster. Many small structured visual elements should fill the canvas coherently; avoid large unused white zones. Headline about 38px, plane headings 22-25px, internal labels about 17-20px. Final size 1536x1024, crisp raster PNG. All content should fit with a narrow outer margin.
+
+TITLE, exact:
+RoboGuide 总体框架
+Subtitle: Capability · Compute · Space · Time 的联合任务与资源协调
+
+OVERALL COMPOSITION
+Follow the reference silhouette: Mission Intelligence across the upper center, a large central Controller region, a tall green State & Memory plane on its right, layered Runtime/Integration below Control, and a strip of Node/local execution plus illustrated device examples at the bottom. Include a small principles inset in the upper-right corner. Use icons as in the references to make component roles recognizable. Main system connectors may show architecture interfaces, but do not draw Execute/ACK timelines, SQL transaction steps or many procedural arrows.
+
+TOP PURPLE PLANE, heading exact: Mission Intelligence / 任务智能
+Four compact icon-led elements:
+1. Grounding / 意图与依据
+2. Planner / 完整计划
+3. Reviewer & Repair / 审查与修复
+4. Request / 草案、审批、提交
+One interface down to the Controller Orchestration panel, labelled MissionPlan. Do not point this interface directly into Control.
+
+CONTROLLER BOUNDARY
+Enclose all current server-side logical responsibilities in ONE fine-outline Controller boundary. Its exact header is Controller / 模块化单体. The State & Memory plane on the right is INSIDE this Controller boundary. Node Service and Local EAIOS must be BELOW and OUTSIDE it. Do not imply the internal modules are separate microservices.
+
+BLUE ORCHESTRATION PLANE, separate from and ABOVE Control:
+Heading exact: Orchestration / 任务组织
+Compact icon-led items: Mission 准入 · Task DAG · 满足判定 · Mission 生命周期
+This is a peer responsibility to Control; never nest Orchestration inside the Control plane.
+
+CONTROL PLANE, heading exact: Control / 决策与资源协调
+Four compact illustrated modules, styled like the four Control modules in reference Image 1:
+1. Match / 候选匹配
+   Capability · Eligibility
+2. Joint Scheduler / 联合调度
+   Capability × Compute × Space × Time
+3. Commit & Bind / 资源承诺
+   Reservation · Quota · Binding
+4. Group Manager / 执行组管理
+   Members · Roles · Lifecycle
+An integrated violet band INSIDE Control, exact label:
+Execution Group / 长期执行上下文
+Small contents: Actor · ContextRole · TaskRole · Resource Bindings
+Control owns BOTH the Group Manager and the Execution Group. Do not move them into Runtime.
+Small control annotation: Proposal 不占有资源；Commit 形成承诺
+
+BOTTOM OF CONTROLLER - two peer capability bands, with small matching icons:
+Runtime / 执行运行时
+Items: Logical Slot · Attempt · Durable Intent · Relation Fences
+Integration / 协议与接入边界
+Items: Node Protocol · Session · 事实接纳 · API Facade
+These belong inside Controller but outside the Control subplane. Runtime is not the Execution Group owner.
+
+GREEN RIGHT PLANE INSIDE CONTROLLER, heading exact: State & Memory / 状态与记忆
+Four compact stacked compartments, with provenance, catalog, database and key icons:
+1. State / 有来源的事实
+   Source · Epoch · Sequence · TTL
+2. Memory Catalog / 元数据
+   Scope · Visibility · Placement
+3. Artifact CAS / 内容存储
+   Opaque Bytes · Immutable Revision
+4. Preparation & Use / 使用许可
+   Import · Use · Revoke
+Small green note: 引用、导入与当前使用许可分别核对
+Connect this plane to the Controller as a shared evidence/content capability, without suggesting State is omniscient ground truth.
+
+NODE BAND BELOW AND OUTSIDE CONTROLLER:
+Node Service / 本地接入与执行
+Icon-led capabilities: 身份与准入 · 执行 Journal · Workflow · 可靠事实回传
+
+HETEROGENEOUS LOCAL EXECUTION / DEVICE STRIP
+Use small illustrated devices and exact labels, like the original repository diagrams:
+- 机器人 / Local EAIOS
+- 交互终端 / Phone & Glasses
+- 计算节点 / Edge Compute
+- Providers / Memory · Spatial · Sync
+These are illustrative capability categories, not claims that particular field devices have passed acceptance. Put them in compact adjacent panels, with a shared caption:
+Local EAIOS 保留 Local How、本地自治与即时安全
+Under them, a very slim light-gray physical-environment strip with simple pictograms: 空间 · 物体 · 人 · 环境
+
+SMALL PRINCIPLES INSET, compact:
+框架原则
+- 全局任务与资源协调
+- 本地执行与即时安全
+- Unknown 保留原所有权
+- Replica / Federation 按部署显式启用
+Small cross-cutting footer inside the Controller: mTLS · Tenant · Policy · 持久化 · 恢复 · 观测
+
+FINAL CHECK
+The result must visibly resemble the old repository's detailed, colored, icon-rich systems framework drawing, with current correct ownership and component boundaries. Keep all old images untouched. No new invented services, universal localization claims, physical safety proofs, deployment IPs, credentials, dates or commit identifiers inside the picture.

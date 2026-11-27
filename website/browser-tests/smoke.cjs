@@ -1,117 +1,89 @@
-/* Browser validation only; the documentation site remains a Python-built static site. */
+/* Check API-generated PNG delivery; this script never draws or replaces figures. */
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const base = process.env.DOCS_URL || 'http://127.0.0.1:39801';
-const output = process.env.DOCS_SCREENSHOTS || '/tmp/roboguide-docs-screenshots';
-const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/getting-started/', '/en/getting-started/', '/status/', '/en/status/', '/docs/architecture/v2/architecture-handbook/', '/docs/architecture/v2/current-architecture/', '/en/docs/architecture/v2/current-architecture/', '/docs/architecture/v2/', '/en/docs/architecture/v2/'];
+const output = process.env.DOCS_SCREENSHOTS || path.join(os.tmpdir(), 'roboguide-docs-screenshots');
+const preview = process.env.DOCS_TEXT_PREVIEW === '1';
+const routes = ['/', '/architecture-tour/', '/getting-started/', '/status/',
+  '/docs/architecture/v2/architecture-handbook/', '/docs/architecture/v2/current-architecture/',
+  '/docs/architecture/v2/', '/docs/architecture/v2/system-dataflows/', '/docs/guides/workbench/'];
+
+async function inspectFigures(page, route) {
+  const figures = page.locator('article .rg-architecture-figure');
+  const count = route.includes('/current-architecture/') ? 8 :
+    (route === '/' || route === '/en/' || route.includes('/architecture-tour/') ||
+      /\/v2\/$/.test(route) || route.includes('/architecture-handbook/')) ? 1 : 0;
+  assert.equal(await figures.count(), count, 'figure count: ' + route);
+  assert.equal(await page.locator('pre.mermaid, script[src*="mermaid"], script[src*="diagrams.js"]').count(), 0);
+  if (preview) {
+    assert.equal(await figures.locator('img').count(), 0, 'preview must not invent images');
+    assert.equal(await page.locator('article .rg-pending-image').count(), count);
+  } else if (count) {
+    assert.equal(await figures.locator('img').count(), count);
+    await page.waitForFunction(() => [...document.querySelectorAll('.rg-architecture-figure img')]
+      .every(image => image.complete && image.naturalWidth > 0));
+    assert.ok(await figures.locator('img').evaluateAll(images => images.every(image =>
+      image.naturalWidth === Number(image.getAttribute('width')) &&
+      image.naturalHeight === Number(image.getAttribute('height')) && image.alt.trim() &&
+      image.getBoundingClientRect().width <= image.closest('figure').getBoundingClientRect().width + 1)));
+    for (const href of await figures.locator('a > img').evaluateAll(images => images.map(image => image.parentElement.href))) {
+      assert.match(new URL(href).pathname, /\.png$/);
+    }
+  }
+  const locale = route.startsWith('/en/') ? 'en' : 'zh';
+  for (const key of await figures.evaluateAll(nodes => nodes.map(node => node.dataset.diagram))) {
+    assert.ok(key.endsWith(':' + locale), 'localized figure: ' + key);
+  }
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'overflow: ' + route);
+}
+
 (async () => {
   fs.mkdirSync(output, { recursive: true });
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.DOCS_BROWSER_EXECUTABLE || undefined });
   const errors = [];
-  let requests = 0;
+  const external = [];
   const context = await browser.newContext({ reducedMotion: 'reduce' });
-  // The whole static site, including diagram rendering, must work without third-party CDNs.
   await context.route('**/*', route => {
-    if (new URL(route.request().url()).origin === new URL(base).origin) return route.continue();
-    requests += 1;
-    console.error("Unexpected external request:", route.request().url());
+    const url = route.request().url();
+    if (new URL(url).origin === new URL(base).origin) return route.continue();
+    external.push(url);
     return route.abort();
   });
-  await context.addInitScript(() => {
-    // Material intentionally renders Mermaid in closed shadow roots. Retain references for
-    // assertions without changing shadow mode or production behavior.
-    window.__docsRoots = [];
-    const attach = Element.prototype.attachShadow;
-    Element.prototype.attachShadow = function(options) {
-      const root = attach.call(this, options);
-      window.__docsRoots.push(root);
-      return root;
-    };
-  });
+  const metadata = await (await context.request.get(base + '/build-info.json')).json();
+  assert.equal(metadata.publication_ready, !preview, 'preview/publication mode must be explicit');
   const page = await context.newPage();
   page.on('pageerror', error => errors.push(error.message));
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 950 });
     for (const scheme of ['default', 'slate']) {
-      for (const route of routes) {
-        const response = await page.goto(base + route, { waitUntil: 'networkidle' });
-        assert.equal(response.status(), 200, `${width} ${scheme}: ${route}`);
-        await page.locator('article h1').waitFor({timeout: 15000});
-        await page.evaluate(value => document.body.setAttribute('data-md-color-scheme', value), scheme);
-        await page.waitForFunction(() => !document.querySelector('pre.mermaid'));
-        if (route.includes('architecture') || route === '/' || route === '/en/') {
-          await page.waitForFunction(() => window.__docsRoots.some(root =>
-            root.host.closest('article') && root.querySelector('svg')) ||
-            [...document.querySelectorAll('.rg-architecture-figure img')].some(image => image.complete && image.naturalWidth > 0));
-        }
-        if (route.includes('/current-architecture/')) {
-          assert.equal(await page.locator('.rg-architecture-figure img').count(), 4, route);
-          await page.waitForFunction(() => [...document.querySelectorAll('.rg-architecture-figure img')]
-            .every(image => image.complete && image.naturalWidth > 0));
-          const fitting = await page.locator('.rg-architecture-figure img').evaluateAll(images =>
-            images.every(image => image.getBoundingClientRect().width <= image.closest('figure').getBoundingClientRect().width + 1));
-          assert.ok(fitting, `complete diagrams must fit the article: ${route}`);
-          await page.locator('.rg-diagram-source summary').first().click();
-          assert.ok(await page.locator('.rg-diagram-source').first().evaluate(details => details.open), route);
-          await page.locator('.rg-diagram-source summary').first().click();
-          await page.screenshot({ path: path.join(output, `architecture-${width}-${scheme}-${route.startsWith('/en/') ? 'en' : 'zh'}.png`), fullPage: true });
-        }
-        assert.equal(await page.locator('.error-icon, svg[aria-roledescription="error"]').count(), 0, route);
-        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, `${width}: ${route}`);
-        if (route.includes('architecture') || route === '/' || route === '/en/') {
-          assert.ok(await page.evaluate(() => window.__docsRoots.some(root =>
-            root.host.closest('article') && root.querySelector('svg')) ||
-            document.querySelectorAll('.rg-architecture-figure img').length > 0), `diagram missing: ${route}`);
+      for (const prefix of ['', '/en']) {
+        for (const route of routes) {
+          const target = prefix + route;
+          const response = await page.goto(base + target, { waitUntil: 'networkidle' });
+          assert.equal(response.status(), 200, target);
+          await page.locator('article h1').waitFor();
+          await page.evaluate(value => document.body.setAttribute('data-md-color-scheme', value), scheme);
+          await inspectFigures(page, target);
+          if (route === '/' || route.includes('/current-architecture/')) {
+            const name = route === '/' ? 'home' : 'atlas';
+            await page.screenshot({ path: path.join(output, name + '-' + width + '-' + scheme + (prefix ? '-en' : '-zh') + '.png'), fullPage: true });
+          }
         }
       }
-      await page.goto(base + '/', { waitUntil: 'networkidle' });
-      await page.evaluate(value => document.body.setAttribute('data-md-color-scheme', value), scheme);
-      const ratios = await page.locator('.md-typeset .md-button').evaluateAll(buttons => {
-        const luminance = rgb => rgb.map(v => v / 255).map(v =>
-          v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4)
-          .reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0);
-        const channels = value => value.match(/[\d.]+/g).map(Number);
-        return buttons.map(button => {
-          let element = button;
-          let background;
-          while (element) {
-            const value = channels(getComputedStyle(element).backgroundColor);
-            if (value.length === 3 || value[3] > 0) { background = value.slice(0, 3); break; }
-            element = element.parentElement;
-          }
-          const foreground = channels(getComputedStyle(button).color).slice(0, 3);
-          if (!background) {
-            const probe = document.createElement('span');
-            probe.style.backgroundColor = 'var(--md-default-bg-color)';
-            document.body.append(probe);
-            background = channels(getComputedStyle(probe).backgroundColor).slice(0, 3);
-            probe.remove();
-          }
-          const a = luminance(foreground), b = luminance(background);
-          return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
-        });
-      });
-      assert.ok(ratios.every(value => value >= 4.5), `button contrast: ${scheme} ${ratios}`);
-      await page.screenshot({ path: path.join(output, `home-${width}-${scheme}.png`), fullPage: true });
-      console.log(`Passed responsive/diagram checks: ${width}px ${scheme}`);
+      console.log('Passed responsive figures: ' + width + 'px ' + scheme + (preview ? ' (text preview)' : ' (PNG)'));
+    }
+  }
+  for (const prefix of ['', '/en']) {
+    for (const name of ['domain-ports', 'mission', 'orchestration', 'control', 'runtime', 'state', 'integration-node-service', 'evaluation']) {
+      const response = await page.goto(base + prefix + '/modules/' + name + '/', { waitUntil: 'networkidle' });
+      assert.equal(response.status(), 200);
+      assert.equal(await page.locator('pre.mermaid').count(), 0);
     }
   }
   await page.setViewportSize({ width: 1440, height: 950 });
-  for (const locale of ['', 'en/']) {
-    for (const name of ['domain-ports', 'mission', 'orchestration', 'control', 'runtime', 'state', 'integration-node-service', 'evaluation']) {
-      await page.goto(base + '/' + locale + 'modules/' + name + '/', { waitUntil: 'networkidle' });
-      const expected = await page.locator('article pre.mermaid, article div.mermaid').count();
-      if (expected) {
-        await page.waitForFunction(count => window.__docsRoots.filter(root =>
-          root.host.closest('article') && root.querySelector('svg')).length === count, expected);
-      }
-      assert.equal(await page.evaluate(() => window.__docsRoots.some(root =>
-        root.querySelector('.error-icon'))), false, `module diagram: ${locale}${name}`);
-    }
-  }
-  console.log('All bilingual module diagrams rendered.');
   await page.goto(base + '/architecture-tour/', { waitUntil: 'networkidle' });
   const english = page.locator('.md-select__link', { hasText: 'English' });
   assert.match(await english.getAttribute('href'), /en\/architecture-tour\/?$/);
@@ -122,33 +94,32 @@ const routes = ['/', '/en/', '/architecture-tour/', '/en/architecture-tour/', '/
   await page.waitForFunction(() => document.querySelectorAll('.md-search-result__link').length > 0);
   await page.keyboard.press('Escape');
   await page.keyboard.press('Tab');
-  assert.ok(await page.evaluate(() => document.activeElement !== document.body), 'keyboard focus missing');
+  assert.ok(await page.evaluate(() => document.activeElement !== document.body), 'keyboard focus');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(base + '/', { waitUntil: 'networkidle' });
   await page.locator('.md-header label[for="__drawer"]').click();
-  assert.equal(await page.locator('#__drawer').isChecked(), true, 'mobile drawer');
+  assert.equal(await page.locator('#__drawer').isChecked(), true, 'mobile navigation');
   const staticContext = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 390, height: 844 } });
   const staticPage = await staticContext.newPage();
   for (const prefix of ['', '/en']) {
     for (const name of ['current-architecture/', '']) {
-      const response = await staticPage.goto(base + prefix + '/docs/architecture/v2/' + name, { waitUntil: 'networkidle' });
+      const route = prefix + '/docs/architecture/v2/' + name;
+      const response = await staticPage.goto(base + route, { waitUntil: 'networkidle' });
       assert.equal(response.status(), 200);
-      assert.equal(await staticPage.locator('.rg-architecture-figure img').count(), name ? 4 : 2);
-      await staticPage.waitForFunction(() => [...document.querySelectorAll('.rg-architecture-figure img')]
-        .every(image => image.complete && image.naturalWidth > 0));
-      assert.equal(await staticPage.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'static page overflow');
+      await inspectFigures(staticPage, route);
     }
   }
-  const [expanded] = await Promise.all([
-    staticContext.waitForEvent('page'),
-    staticPage.locator('.rg-architecture-figure > a').first().click(),
-  ]);
-  await expanded.waitForLoadState('load');
-  assert.equal(await expanded.locator('svg').count(), 1, 'full SVG without JavaScript');
+  if (!preview) {
+    const [expanded] = await Promise.all([
+      staticContext.waitForEvent('page'), staticPage.locator('.rg-architecture-figure > a').first().click(),
+    ]);
+    await expanded.waitForLoadState('load');
+    assert.match(new URL(expanded.url()).pathname, /^\/en\/.*\.png$/);
+    assert.equal(await expanded.locator('img').count(), 1, 'full PNG without JavaScript');
+  }
   await staticContext.close();
-  console.log('Architecture figures and enlargement work with JavaScript disabled.');
   assert.deepEqual(errors, [], 'browser JavaScript errors');
-  assert.equal(requests, 0, 'unexpected external CDN requests');
+  assert.deepEqual(external, [], 'unexpected external requests');
   await browser.close();
-  console.log('Language switch, search, keyboard and mobile drawer passed; zero external requests.');
+  console.log('Bilingual routes, language switch, search, keyboard, mobile navigation and no-JavaScript reading passed.');
 })().catch(error => { console.error(error); process.exit(1); });

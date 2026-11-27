@@ -81,7 +81,7 @@
   background: #103b6b;
   border-color: #103b6b;
 }
-/* Architecture figures are pre-rendered from verified Mermaid and remain visible without JS. */
+/* Reviewed API-generated architecture images remain visible without JavaScript. */
 .rg-architecture-figure { margin: 1.25rem 0; }
 .rg-architecture-figure > a { display: block; background: #fff; border: 1px solid var(--md-default-fg-color--lightest); }
 .rg-architecture-figure img { display: block; width: auto; max-width: 100%; height: auto; margin: 0 auto; }
@@ -91,3 +91,5 @@
 /* Material adds table scroll wrappers with JS; preserve the same reading boundary without it. */
 .no-js .md-typeset table:not([class]) { display: block; max-width: 100%; overflow-x: auto; }
 .no-js .md-header .md-select__inner { left: auto; right: 0; }
+
+.rg-pending-image { padding: 1rem; border: 1px dashed var(--md-default-fg-color--light); }

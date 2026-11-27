@@ -1,0 +1,15 @@
+Create the ENGLISH edition of the supplied finalized Chinese topic diagram. Translate every Chinese label, paragraph, invariant, exception and legend accurately into natural technical English. Preserve all geometry, every arrow direction and endpoint, scope boundaries, icons, colors, node numbers and conditional gates. Keep the dense original-repository V2 engineering illustration style. Do not add new claims, capabilities, loops or steps. Keep text legible by modestly adjusting wrapping and font size. Output 1536x1024 PNG without cropping.
+Exact English topic title: From conversation to a reviewed plan
+Required technical identifiers / module labels:
+Chat / User goal
+Mission Request
+Grounding snapshot
+Interpreter / Clarify
+Planner
+Reviewer
+Bounded Repair
+Read-only preflight
+Execute grant / Risk approval
+Controller admission
+Semantic reference (do not add text not present in the source):
+Number the main path 1 to 8: Chat -> Mission Request -> Grounding -> Interpreter -> Planner -> Reviewer -> Read-only preflight -> Execute grant/Risk approval -> Controller admission. Reviewer -> Bounded Repair -> Reviewer is an explicit bounded loop. Interpreter clarification returns to Chat. Label preflight as read-only; it reserves no resources. Exact displayed plan revision/digest binds authorization. Show Request and Controller Mission as distinct boundaries, not one identity. No direct model-to-device arrow.

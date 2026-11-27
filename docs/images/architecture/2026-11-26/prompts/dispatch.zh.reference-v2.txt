@@ -1,0 +1,23 @@
+Use the supplied original RoboGuide V2 repository architecture diagram as a STYLE REFERENCE ONLY. Redraw the topic specified below in the same detailed engineering-publication style: white canvas, thin rounded blue/violet/green plane outlines, pale color washes, small meaningful engineering pictograms, compact labels, close alignment and concise technical annotation panels. This is a topic-specific diagram, not a copy of the reference content. Output 1536x1024 PNG. Fill the canvas coherently without large unused zones. Title around 38px; module headings around 25px; body around 20px. Use two or three tightly fitted responsibility lanes and a compact invariant/exception sidebar where appropriate. Use line icons, exact labels and short factual notes to balance density. Do not make a dashboard, giant empty rectangles or a huge title. The meaning and direction of every arrow and all process boundaries must follow the requirements. Do not copy old unsupported facts or device examples from the reference.
+
+Title (exact): 从候选到可靠执行
+Language: Simplified Chinese, retaining technical identifiers.
+Exact module labels:
+1. Ready Task
+2. Match / CandidateSet
+3. Bounded Scheduler
+4. Proposal
+5. Control Commit / Bind
+6. SQL · Checkpoint + Outbox
+7. 发送 Execute
+8. Node Journal
+9. Local Workflow
+10. 持久 ACK / 执行事实
+
+Required topology:
+Left-to-right numbered main chain of all nodes: Ready Task -> Match -> Bounded Scheduler -> Proposal -> Control Commit/Bind -> SQL Checkpoint+Outbox -> Send Execute -> Node Journal -> Local Workflow. Use two rows for readability. Put Commit/Bind and SQL inside a single Controller writer transaction boundary. Send Execute must be outside and after committed SQL. From Node Journal return Durable ACK to Controller; Local Workflow returns execution facts through Node Journal to Controller. Add two concise callouts: Proposal does not reserve; Journal before local effects. Do not conflate ACK and successful physical execution.
+
+Critical boundaries and exceptions:
+There MUST be separate Controller and Node responsibility lanes. Ready Task through Send Execute belong to Controller; Node Journal and Local Workflow belong to Node. The navy command chain is strictly Send Execute -> Node Journal -> Local Workflow, never Execute directly to Workflow. Teal execution facts return Local Workflow -> Node Journal -> Controller; the command persisted receipt also returns from Node Journal. Keep Commit/Bind plus SQL in one Controller writer transaction and Send Execute outside that transaction.
+
+No new services, credentials, deployment addresses, actual-device acceptance claims or invented model output.

@@ -1,0 +1,9 @@
+Preserve the supplied diagram's layout, icons, colors, borders, and arrow endpoints. Correct only these mistranslated technical phrases, using the exact replacement wording below.
+
+- In the State card: replace the last two bullets with "Retain original Source / Epoch / Sequence / TTL" and "Replay never refreshes freshness".
+- In the Spatial fusion Provider card replace "Verify the input identity and signature" with "Verify input bytes and coordinate identity". Do not claim cryptographic signature verification here.
+- In Current Use / Revoke, keep use within the authorized scope; replace its revoke bullet with "Revoke and verify actual cessation separately".
+- Replace the entire Exceptions body with these three bullets: "No current use permission: reject Use. Import history grants no current permission."; "A reference or digest does not prove import at the destination."; "Check revoke and actual cessation separately; insufficient evidence retains ownership."
+- In the legend, replace the violet-arrow label "Opaque bytes flow (selection / configuration / constraint)" with "Metadata flow (selection / scope / placement)". Replace the tag-icon label "Opaque bytes (compile / select)" with "Metadata (catalog / selection)". CAS, not the metadata lane, holds opaque bytes.
+
+Do not change any other text or introduce new claims. Output 1536x1024 PNG.

@@ -46,3 +46,7 @@ Thumbs.db
 /*.sqlite3
 /*.sqlite3-wal
 /*.sqlite3-shm
+
+# Documentation generation scratch data
+/tmp/
+/output/imagegen/

@@ -1,0 +1,47 @@
+# Control Plane
+
+唯一资源承诺、binding、Group 与恢复决定权威；消费当前 State、身份、tenant 和 policy。
+
+## 职责与关键对象
+
+CandidateSet、BoundedJointScheduler、AssignmentProposal、CommittedPlan、ActorBinding、QuotaLedger。
+
+## 主流程
+
+Match 过滤 eligibility → Scheduler 有界选择 → Proposal 校验 → Commit 原子承诺与 quota → Bind。Task/Context/Group/recovery 按 exact scope release。
+
+## 代码入口
+
+- [主入口](https://github.com/Farewell-CK/RoboGuide/blob/main/core/control/src/lib.rs)：`core/control/src/lib.rs`。
+- [协作入口](https://github.com/Farewell-CK/RoboGuide/blob/main/core/control/src/coordination.rs)：`core/control/src/coordination.rs`。
+
+## 实现状态
+
+当前实际调用链与剩余工作统一记录在[实现状态](../../../reference/implementation-status.md)，版本由[参考页](../../../reference/contracts-and-build.md)生成。本模块的存在不代表完整阶段或设备验收完成。
+
+## 验证与排查
+
+先检查原 identity/plan/attempt、当前 policy 与期限，再查上下游事务和 receipt。拒绝、超时、重放与重启必须保留原证据。测试使用显式软件配置，不把 FakeNode 或协议 fixture 当作设备。
+
+## 相关边界
+
+[架构与权威](../../../architecture/v2/architecture-tour.md) · [概念](../../../architecture/v2/concepts.md) · [生命周期](../../../architecture/v2/execution-lifecycle.md) · [接入指南](../../integration/README.md) · [State 与 Memory](../../../architecture/v2/state-memory.md)
+
+## 调用链详解
+
+### 提案、承诺与释放
+
+<!-- diagram:dispatch:zh -->
+![从候选到可靠执行](../../../images/architecture/2026-11-26/dispatch.zh.png)
+
+Commit 在全部检查通过后才同时写 resource reservation、原 Role demand quota 和 evidence；超限拒绝不能留下部分 claim。usage view 同时报告已设限与未设限类别，缺限额或 remaining 为 null。
+
+未来 interval 是日历权威，到期仍重验 Match/Commit/Bind。运行超出预计结束时保留开放占用，不抢占 Local How。只支持精确代次的严格未来、尚未激活/绑定/承诺区间抢占；运行中抢占另有缺口。
+
+恢复 proposal 不占资源；pending recovery Commit 由原 Group/Role 保有，Rebind 消费或显式 Abort 释放。普通 Actor recovery 不获得跨实体 takeover 权限。
+
+调度延迟与超期窗口诊断见 `POST /v1/missions/validate-plan?timing=v0.1`（ADR-0259），实际超期时 Task 详情返回 `scheduling_deferral` 与 `window-missed` 原因；经 `SafeStateObservation` 确认自然设备故障后，Control 保留原停止记录并配合新 Group 重新执行 `Match -> Commit -> Bind`（PR #33）。
+
+### 当前来源成本排序
+
+显式 decision-policy registry v0.2 将原 tenant、Node session、State 来源、schema、TTL 和指标单位接到普通与恢复调度。未知、过期、冲突或缺失指标没有数值成本；GPU 可用量按显式偏好排序。原观测和策略进入持久审计，`/v1/missions/{id}/scheduling-costs` 提供受 Mission 权限保护的只读视图。本地参考 provider 只测实际 host load，其余指标为 null。成本仅决定候选搜索顺序，不能授予资源或绕过 eligibility。

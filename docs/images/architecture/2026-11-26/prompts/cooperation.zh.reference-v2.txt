@@ -1,0 +1,23 @@
+Use the supplied original RoboGuide V2 repository architecture diagram as a STYLE REFERENCE ONLY. Redraw the topic specified below in the same detailed engineering-publication style: white canvas, thin rounded blue/violet/green plane outlines, pale color washes, small meaningful engineering pictograms, compact labels, close alignment and concise technical annotation panels. This is a topic-specific diagram, not a copy of the reference content. Output 1536x1024 PNG. Fill the canvas coherently without large unused zones. Title around 38px; module headings around 25px; body around 20px. Use two or three tightly fitted responsibility lanes and a compact invariant/exception sidebar where appropriate. Use line icons, exact labels and short factual notes to balance density. Do not make a dashboard, giant empty rectangles or a huge title. The meaning and direction of every arrow and all process boundaries must follow the requirements. Do not copy old unsupported facts or device examples from the reference.
+
+Title (exact): 四种协作模式
+Language: Simplified Chinese, retaining technical identifiers.
+Exact module labels:
+1. 1 · Independent
+2. 独立任务 / 标准 DAG
+3. 2 · SequentialHandoff
+4. TaskSatisfied + Memory 交接
+5. 3 · ConcurrentCooperation
+6. 共享视图 / 关系围栏
+7. 4 · TightlyCoupledCooperation
+8. PeerChannel 就绪门禁
+9. 边缘 UDP 同步控制
+10. 共同 UTC 编排 · 独立 Mission
+
+Required topology:
+Four equal numbered panels, each mode heading connects only to its own mechanism. Mode1 -> independent tasks/normal DAG. Mode2 -> TaskSatisfied+Memory handoff. Mode3 -> Shared view/Relation fences. Mode4 -> PeerChannel readiness gate -> Edge UDP sync control. Show Controller and Edge separation inside Mode4: the readiness gate is Control-side, UDP control is Local/provider-side; high-rate motion packets bypass Controller. Separate bottom strip Shared UTC playback/Separate Missions belongs to Independent mode, NOT a fifth mode and not Mode4. Include short note that per-performer Missions provide fleet fault isolation; same-Mission failure retains Mission-wide stop behavior.
+
+Critical boundaries and exceptions:
+The Mode 4 high-rate UDP motion path MUST remain entirely inside the Edge/Local Provider area. Do not draw any high-rate data arrow starting or ending in Controller or PeerChannel readiness. A navy readiness/admission link from the Controller gate to Edge is allowed, but is not the high-rate path. Shared UTC playback / separate Missions belongs only to Mode 1. Preserve same-Mission failure stop behavior.
+
+No new services, credentials, deployment addresses, actual-device acceptance claims or invented model output.

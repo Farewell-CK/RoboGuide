@@ -1,0 +1,24 @@
+Use the supplied original RoboGuide V2 repository architecture diagram as a STYLE REFERENCE ONLY. Redraw the topic specified below in the same detailed engineering-publication style: white canvas, thin rounded blue/violet/green plane outlines, pale color washes, small meaningful engineering pictograms, compact labels, close alignment and concise technical annotation panels. This is a topic-specific diagram, not a copy of the reference content. Output 1536x1024 PNG. Fill the canvas coherently without large unused zones. Title around 38px; module headings around 25px; body around 20px. Use two or three tightly fitted responsibility lanes and a compact invariant/exception sidebar where appropriate. Use line icons, exact labels and short factual notes to balance density. Do not make a dashboard, giant empty rectangles or a huge title. The meaning and direction of every arrow and all process boundaries must follow the requirements. Do not copy old unsupported facts or device examples from the reference.
+
+Title (exact): 进程、存储与故障域
+Language: Simplified Chinese, retaining technical identifiers.
+Exact module labels:
+1. Mission Service
+2. Request SQL
+3. Controller
+4. Controller SQL / Checkpoint
+5. Artifact CAS
+6. Node Service
+7. Node Journal
+8. Local EAIOS / Providers
+9. 可选 Replica Quorum
+10. 可选其他 Controller 域
+11. 静止 Recovery Tool
+
+Required topology:
+Draw software process containers and their OWN distinct storage. Mission Service -> Controller using HTTP; Mission Service attaches Request SQL. Controller attaches Controller SQL/Checkpoint and Artifact CAS. Controller <-> Node Service via gRPC using two directional labeled arrows; Node Service owns Node Journal and connects to Local EAIOS/Providers. Dashed optional area Replica Quorum connects to Controller metadata/content durability, not to robot execution. Another dashed optional Controller domain connects via Federation. Quiescent Recovery Tool reads declared closed storage/content into a separate backup/restore box represented by the label itself, never connects to actuators. Short note: Process != Host != Node != PhysicalEntity. No concrete IPs, credentials, physical failover claims or claim that storage v3 and replication are automatically combined.
+
+Critical boundaries and exceptions:
+Draw Node Service as its own process containing Node Journal. Draw Local EAIOS / Providers as a separate external process/capability outside the Node Service process boundary. Mission, Controller and Node have distinct storage. Recovery only reads declared quiescent storage/content and never connects to actuators. Replica and Federation remain optional.
+
+No new services, credentials, deployment addresses, actual-device acceptance claims or invented model output.

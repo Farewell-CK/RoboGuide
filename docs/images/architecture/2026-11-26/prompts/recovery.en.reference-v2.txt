@@ -1,0 +1,16 @@
+Create the ENGLISH edition of the supplied finalized Chinese topic diagram. Translate every Chinese label, paragraph, invariant, exception and legend accurately into natural technical English. Preserve all geometry, every arrow direction and endpoint, scope boundaries, icons, colors, node numbers and conditional gates. Keep the dense original-repository V2 engineering illustration style. Do not add new claims, capabilities, loops or steps. Keep text legible by modestly adjusting wrapping and font size. Output 1536x1024 PNG without cropping.
+Exact English topic title: Unknown, stopping and recovery
+Required technical identifiers / module labels:
+Disconnect / Failure
+Unknown / Hold
+Retain original ownership
+Original Cancel / Revoke intent
+Stop evidence + Original terminal
+Gate checks
+Role Recovery
+Match / Commit / Rebind
+Reviewed Plan Revision
+New Group / Normal admission
+Manual Escalation
+Semantic reference (do not add text not present in the source):
+Top chain Disconnect/Failure -> Unknown/Hold -> Retain original ownership -> Original Cancel/Revoke intent -> Stop evidence + Original terminal -> Gate checks. After gate checks show TWO distinct authorized paths: Role Recovery -> Match/Commit/Rebind, and Reviewed Plan Revision -> New Group/Normal admission. If evidence, authorization or original budget is unavailable, Gate checks -> Manual Escalation, with ownership retained. No arrow from Unknown straight to Execute. Add a small separate bottom bar: Local EAIOS owns immediate safety. Show command receipt and stop observation as separate evidence, not the same step.
